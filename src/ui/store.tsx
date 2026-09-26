@@ -13,6 +13,7 @@ import {
 } from '../core/model';
 import type { ImportResult } from '../core/formats';
 import { mergeIntoLibrary, type MergeChoices } from '../core/merge';
+import { copySet } from '../core/versions';
 
 const STORAGE_KEY = 'setcraft-project-v1';
 
@@ -26,6 +27,8 @@ export type Action =
   | { type: 'selectSet'; id: string }
   | { type: 'updateSet'; patch: Partial<SetPlan> }
   | { type: 'deleteSet'; id: string }
+  | { type: 'duplicateSet'; id: string }
+  | { type: 'addSetCopy'; set: SetPlan; name: string; tracks: Track[] }
   | { type: 'addEntries'; trackIds: string[]; chapterId?: string }
   | { type: 'updateEntry'; id: string; patch: Partial<SetEntry> }
   | { type: 'removeEntry'; id: string }
@@ -76,6 +79,21 @@ export function reducer(p: Project, a: Action): Project {
       const sets = p.sets.filter((s) => s.id !== a.id);
       if (!sets.length) sets.push(newSet());
       return { ...p, sets, activeSetId: sets[0].id };
+    }
+    case 'duplicateSet': {
+      const idx = p.sets.findIndex((s) => s.id === a.id);
+      if (idx < 0) return p;
+      const copy = copySet(p.sets[idx]);
+      const sets = [...p.sets];
+      sets.splice(idx + 1, 0, copy);
+      return { ...p, sets, activeSetId: copy.id };
+    }
+    case 'addSetCopy': {
+      // A set copied out of a saved version, plus any tracks it needs that were since removed.
+      const copy = copySet(a.set, a.name);
+      const tracks = { ...p.library.tracks };
+      for (const t of a.tracks) if (!tracks[t.id]) tracks[t.id] = t;
+      return { ...p, library: { ...p.library, tracks }, sets: [...p.sets, copy], activeSetId: copy.id };
     }
     case 'addEntries':
       return mapActive(p, (s) => {

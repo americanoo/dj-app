@@ -1131,3 +1131,87 @@ td.origin .src-dot {
 .change-removed input {
   text-decoration: none;
 }
+
+/* ---------- versions ---------- */
+
+.small-text {
+  font-size: 12px;
+}
+kbd {
+  font: inherit;
+  font-size: 11px;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel-2);
+}
+.modal.versions {
+  width: min(820px, 100%);
+}
+.save-version {
+  padding: 0 20px;
+  align-items: center;
+}
+.version-list {
+  overflow: auto;
+  padding: 6px 20px 12px;
+}
+.version-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+.version-main {
+  flex: 1;
+  min-width: 0;
+}
+.version-name {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.version-row select {
+  width: 190px;
+  font-size: 12.5px;
+}
+.modal-foot .grow {
+  align-self: center;
+}
+.history-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+.history-meta {
+  display: flex;
+  flex-direction: column;
+  width: 300px;
+  flex: none;
+}
+.history-row .pad-strip {
+  flex: 1;
+  margin: 0;
+}
+.history-row .pad-strip-label {
+  display: none;
+}
+@media (max-width: 900px) {
+  .version-row,
+  .history-row {
+    flex-wrap: wrap;
+  }
+  .history-meta {
+    width: 100%;
+  }
+}
+.diff-list {
+  margin: 4px 0 0;
+  padding-left: 16px;
+  font-size: 12px;
+  color: var(--warn);
+}

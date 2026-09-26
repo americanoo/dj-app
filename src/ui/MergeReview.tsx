@@ -235,7 +235,7 @@ function TrackMergeRow({
   );
 }
 
-function PadStrip({ label, cues, highlight }: { label: string; cues: Cue[]; highlight?: boolean }) {
+export function PadStrip({ label, cues, highlight }: { label: string; cues: Cue[]; highlight?: boolean }) {
   const pads = SLOT_LETTERS.map((_, i) => cues.find((c) => c.slot === i));
   const memory = cues.filter((c) => c.slot === null);
   return (

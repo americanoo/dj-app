@@ -70,6 +70,13 @@ export function NarrativeView({ onOpenCues, onGoLibrary }: { onOpenCues: (id: st
             </span>
           </div>
           <button
+            className="small"
+            onClick={() => dispatch({ type: 'duplicateSet', id: set.id })}
+            title="Make an editable copy of this set; the original stays as it is"
+          >
+            Duplicate set
+          </button>
+          <button
             className="danger small"
             onClick={() => confirm(`Delete set "${set.name}"?`) && dispatch({ type: 'deleteSet', id: set.id })}
           >

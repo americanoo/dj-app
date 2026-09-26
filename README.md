@@ -71,6 +71,25 @@ affected track:
 Choose *Smart merge*, *Keep mine* or *Take the file*, for the whole import or per track. Imports that only add
 cues go straight through. Re-importing the same file changes nothing.
 
+### Copies & versions
+
+- **Duplicate a set.** Use *Duplicate set* in the Narrative tab, or *⧉ Duplicate* in the set picker. The copy is a
+  separate set you can reorder and re-plan, and the original stays as it was.
+- **Save versions.** Open *Versions* in the top bar, or press **⌘/Ctrl+S** anywhere. A version is a named snapshot
+  of the whole project: library, cues and sets.
+- **Use an old version** in one of three ways:
+  - **Restore all** returns to it completely.
+  - **Copy a set out** adds a set from that version as a new set, without changing anything else. It also brings
+    back any tracks the set needs that have since left your library.
+  - **Earlier versions of these cues**, at the bottom of the cue editor, lists the distinct earlier states of one
+    track's cues. Each one shows what's different from now, pad by pad, and can be restored on its own.
+    Restored cues count as your edits, so imports won't overwrite them.
+- **Automatic safety net.** A version is saved before every import that changes tracks already in your library,
+  and before every restore, so each restore can be undone. The newest 20 automatic versions are kept. Versions
+  you save or rename yourself are kept until you delete them.
+- Versions live in this browser (IndexedDB). Use *Export → Back up whole project* to move a project to another
+  computer.
+
 ### 2. Narrative: planning the set's story
 
 - **The story**: a free-text brief of where you want to take the room.
@@ -128,6 +147,7 @@ src/
   core/                 pure TypeScript, no UI – unit tested
     model.ts            software-neutral Track / Cue / SetPlan / Chapter model
     merge.ts            smart cue merge: offset detection, matching, provenance rules, pad conflicts
+    versions.ts         set copies, version pruning, per-track cue history and diffs
     keys.ts             key parsing (standard, Camelot, Open Key, Traktor ids) + harmonic relations
     time.ts             time formatting, beat grid snapping, bar.beat labels
     setplan.ts          set timeline, transition warnings, run-sheet generation
@@ -141,7 +161,8 @@ src/
   ui/                   React
     store.tsx           project state (reducer) persisted to IndexedDB
     audio.tsx           session-only audio attachments + waveform peak analysis
-    LibraryView, NarrativeView, EnergyArc, CueEditor, Waveform, ExportPanel, MergeReview
+    versions.tsx        version snapshots stored in IndexedDB
+    LibraryView, NarrativeView, EnergyArc, CueEditor, Waveform, ExportPanel, MergeReview, VersionsPanel
 ```
 
 Each importer converts into a single internal model, and each exporter converts out of it. Cue positions are stored

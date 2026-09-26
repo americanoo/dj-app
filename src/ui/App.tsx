@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { importFile, type ImportResult } from '../core/formats';
+import { importFile } from '../core/formats';
 import { planMerge, type MergeChoices, type MergePlan } from '../core/merge';
 import { uid, type Project } from '../core/model';
 import { fileName, guessFromFileName } from '../core/xml';
@@ -8,6 +8,8 @@ import { CueEditor } from './CueEditor';
 import { ExportPanel } from './ExportPanel';
 import { LibraryView } from './LibraryView';
 import { MergeReview } from './MergeReview';
+import { useVersions } from './versions';
+import { defaultVersionName, VersionsPanel } from './VersionsPanel';
 import { NarrativeView } from './NarrativeView';
 import { activeSet, useStore } from './store';
 
@@ -28,6 +30,8 @@ interface Toast {
 export function App() {
   const { project, dispatch } = useStore();
   const { attach } = useAudio();
+  const { save: saveVersion } = useVersions();
+  const [versionsOpen, setVersionsOpen] = useState(false);
   const [tab, setTab] = useState<Tab>('library');
   const [cueTrackId, setCueTrackId] = useState<string | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -60,17 +64,23 @@ export function App() {
           if (/\.json$/i.test(file.name)) {
             const parsed = JSON.parse(new TextDecoder().decode(bytes)) as Project;
             if (parsed?.version !== 1 || !parsed.library) throw new Error('Not a Setcraft project file');
-            if (confirm('Replace the current project with this backup?')) {
+            if (confirm('Replace the current project with this backup? The current state is saved as a version first.')) {
+              await saveVersion(projectRef.current, `Before restoring ${file.name}`, true).catch(() => undefined);
               dispatch({ type: 'load', project: parsed });
               toast(`Restored project "${file.name}"`);
             }
             continue;
           }
           const result = importFile(file.name, bytes);
-          const choices = await reviewMerge(file.name, result);
+          const plan = planMerge(projectRef.current.library, result);
+          const choices = await reviewMerge(file.name, plan);
           if (!choices) {
             toast(`Cancelled import of ${file.name}`);
             continue;
+          }
+          // Safety net: snapshot before an import changes tracks already in the library.
+          if (plan.matches.some((m) => m.changed)) {
+            await saveVersion(projectRef.current, `Before importing ${file.name}`, true).catch(() => undefined);
           }
           dispatch({ type: 'import', result, choices });
           // Let the store update before the next file is planned against it.
@@ -87,8 +97,7 @@ export function App() {
       }
 
       /** Ask the DJ to review cue merges when an import changes cues already in the library. */
-      function reviewMerge(fileName: string, result: ImportResult): Promise<MergeChoices | null> {
-        const plan = planMerge(projectRef.current.library, result);
+      function reviewMerge(fileName: string, plan: MergePlan): Promise<MergeChoices | null> {
         if (!plan.matches.some((m) => m.needsReview)) return Promise.resolve({ strategy: 'smart' });
         return new Promise((resolve) => setPendingMerge({ fileName, plan, resolve }));
       }
@@ -111,8 +120,22 @@ export function App() {
         else toast(`Linked audio for ${match.artist} – ${match.title}`);
       }
     },
-    [attach, dispatch, openCues, toast],
+    [attach, dispatch, openCues, toast, saveVersion],
   );
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        const name = defaultVersionName();
+        saveVersion(projectRef.current, name)
+          .then(() => toast(`Saved "${name}". Open Versions to rename or restore it.`))
+          .catch((err) => toast(`Couldn't save the version: ${(err as Error).message}`, 'error'));
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [saveVersion, toast]);
 
   useEffect(() => {
     const over = (e: DragEvent) => {
@@ -169,7 +192,13 @@ export function App() {
           <select
             aria-label="Active set"
             value={set.id}
-            onChange={(e) => (e.target.value === '__new' ? dispatch({ type: 'addSet' }) : dispatch({ type: 'selectSet', id: e.target.value }))}
+            onChange={(e) =>
+              e.target.value === '__new'
+                ? dispatch({ type: 'addSet' })
+                : e.target.value === '__dup'
+                  ? dispatch({ type: 'duplicateSet', id: set.id })
+                  : dispatch({ type: 'selectSet', id: e.target.value })
+            }
           >
             {project.sets.map((s) => (
               <option key={s.id} value={s.id}>
@@ -177,7 +206,11 @@ export function App() {
               </option>
             ))}
             <option value="__new">+ New set…</option>
+            <option value="__dup">⧉ Duplicate "{set.name}"</option>
           </select>
+          <button onClick={() => setVersionsOpen(true)} title="Save and restore versions (⌘/Ctrl+S saves one)">
+            Versions
+          </button>
           <button className="primary" onClick={() => fileInput.current?.click()}>
             Import
           </button>
@@ -202,6 +235,7 @@ export function App() {
         {tab === 'export' && <ExportPanel toast={toast} />}
       </main>
 
+      {versionsOpen && <VersionsPanel onClose={() => setVersionsOpen(false)} toast={toast} />}
       {pendingMerge && (
         <MergeReview
           fileName={pendingMerge.fileName}
