@@ -1,15 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { importFile } from '../core/formats';
+import { importFile, type ImportResult } from '../core/formats';
+import { planMerge, type MergeChoices, type MergePlan } from '../core/merge';
 import { uid, type Project } from '../core/model';
 import { fileName, guessFromFileName } from '../core/xml';
 import { AUDIO_EXTENSIONS, useAudio } from './audio';
 import { CueEditor } from './CueEditor';
 import { ExportPanel } from './ExportPanel';
 import { LibraryView } from './LibraryView';
+import { MergeReview } from './MergeReview';
 import { NarrativeView } from './NarrativeView';
 import { activeSet, useStore } from './store';
 
 export type Tab = 'library' | 'narrative' | 'cues' | 'export';
+
+interface PendingMerge {
+  fileName: string;
+  plan: MergePlan;
+  resolve: (choices: MergeChoices | null) => void;
+}
 
 interface Toast {
   id: string;
@@ -24,6 +32,7 @@ export function App() {
   const [cueTrackId, setCueTrackId] = useState<string | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [dragging, setDragging] = useState(false);
+  const [pendingMerge, setPendingMerge] = useState<PendingMerge | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const projectRef = useRef(project);
   projectRef.current = project;
@@ -58,7 +67,14 @@ export function App() {
             continue;
           }
           const result = importFile(file.name, bytes);
-          dispatch({ type: 'import', result });
+          const choices = await reviewMerge(file.name, result);
+          if (!choices) {
+            toast(`Cancelled import of ${file.name}`);
+            continue;
+          }
+          dispatch({ type: 'import', result, choices });
+          // Let the store update before the next file is planned against it.
+          await new Promise((r) => setTimeout(r, 0));
           const cues = result.tracks.reduce((n, t) => n + t.cues.length, 0);
           toast(
             `Imported ${result.tracks.length} tracks, ${cues} cues and ${result.playlists.length} playlists from ${file.name} (${result.format}).`,
@@ -68,6 +84,13 @@ export function App() {
         } catch (e) {
           toast(`${file.name}: ${(e as Error).message}`, 'error');
         }
+      }
+
+      /** Ask the DJ to review cue merges when an import changes cues already in the library. */
+      function reviewMerge(fileName: string, result: ImportResult): Promise<MergeChoices | null> {
+        const plan = planMerge(projectRef.current.library, result);
+        if (!plan.matches.some((m) => m.needsReview)) return Promise.resolve({ strategy: 'smart' });
+        return new Promise((resolve) => setPendingMerge({ fileName, plan, resolve }));
       }
 
       async function attachAudio(file: File) {
@@ -179,6 +202,20 @@ export function App() {
         {tab === 'export' && <ExportPanel toast={toast} />}
       </main>
 
+      {pendingMerge && (
+        <MergeReview
+          fileName={pendingMerge.fileName}
+          plan={pendingMerge.plan}
+          onApply={(choices) => {
+            pendingMerge.resolve(choices);
+            setPendingMerge(null);
+          }}
+          onCancel={() => {
+            pendingMerge.resolve(null);
+            setPendingMerge(null);
+          }}
+        />
+      )}
       {dragging && (
         <div className="dropzone">
           <div>

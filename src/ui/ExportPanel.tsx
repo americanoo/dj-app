@@ -30,6 +30,7 @@ export function ExportPanel({ toast }: { toast: (text: string, kind?: 'info' | '
   const [pathTo, setPathTo] = useState('');
   const [macVolume, setMacVolume] = useState('');
   const [offsetMs, setOffsetMs] = useState(0);
+  const [learned, setLearned] = useState(true);
   const [notes, setNotes] = useState<string[]>([]);
 
   const info = EXPORT_TARGETS.find((t) => t.id === target)!;
@@ -54,6 +55,8 @@ export function ExportPanel({ toast }: { toast: (text: string, kind?: 'info' | '
   }, [trackIds, project.library.tracks]);
 
   const cueCount = tracks.reduce((n, t) => n + t.cues.length, 0);
+  const timebase = target === 'rekordbox' || target === 'traktor' ? target : undefined;
+  const withLearned = timebase ? tracks.filter((t) => t.sourceOffsets?.[timebase]).length : 0;
   const withoutPath = tracks.filter((t) => !t.path).length;
 
   const run = () => {
@@ -64,6 +67,7 @@ export function ExportPanel({ toast }: { toast: (text: string, kind?: 'info' | '
         pathTo,
         macVolumeName: macVolume || undefined,
         offsetMs,
+        applyLearnedOffsets: learned,
       });
       download(file.fileName, file.data, file.mime);
       setNotes(notes);
@@ -139,6 +143,12 @@ export function ExportPanel({ toast }: { toast: (text: string, kind?: 'info' | '
               <input type="number" step={1} value={offsetMs} onChange={(e) => setOffsetMs(Number(e.target.value) || 0)} />
             </label>
           </div>
+          {timebase && (
+            <label className="inline toggle">
+              <input type="checkbox" checked={learned} onChange={(e) => setLearned(e.target.checked)} />
+              Apply per-track timing offsets learned while merging ({withLearned} track{withLearned === 1 ? '' : 's'} affected)
+            </label>
+          )}
         </details>
 
         <div className="export-summary">

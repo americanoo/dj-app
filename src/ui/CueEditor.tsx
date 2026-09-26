@@ -466,6 +466,11 @@ function TrackCueWorkspace({ track }: { track: Track }) {
                     <td className="num">{formatTime(c.start)}</td>
                     <td className="num muted">{bpm ? barBeatLabel(c.start, bpm, gridStart) : ''}</td>
                     <td>{c.name}</td>
+                    <td className="muted origin" title={c.edited ? 'Edited in Setcraft: wins when merging imports' : `From ${c.origin ?? 'unknown'}`}>
+                      <span className={`src-dot src-${c.origin ?? 'manual'}`} />
+                      {c.origin === 'manual' ? 'setcraft' : (c.origin ?? '')}
+                      {c.edited ? ' · edited' : ''}
+                    </td>
                     <td className="num muted">
                       {c.kind === 'loop' && c.end !== undefined && beat ? `${round((c.end - c.start) / beat, 2)} beats` : ''}
                     </td>

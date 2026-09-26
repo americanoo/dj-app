@@ -106,6 +106,7 @@ export function importTraktor(text: string): ImportResult {
         end: isLoop ? start + len : undefined,
         name: rawName === 'n.n.' ? '' : rawName,
         color: CUE_COLORS[slot ?? (isLoop ? 1 : 0)],
+        origin: 'traktor',
       });
     }
 

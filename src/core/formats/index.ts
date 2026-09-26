@@ -1,4 +1,4 @@
-import type { Track } from '../model';
+import type { SourceFormat, Track } from '../model';
 import { exportRekordbox, importRekordbox, isRekordboxXml } from './rekordbox';
 import { exportSeratoCrate, importSeratoCrate, isSeratoCrate } from './serato';
 import { exportM3u, importCsv, importM3u, importPlainTracklist, looksLikeCsv } from './text';
@@ -103,13 +103,19 @@ export function shiftTrack(t: Track, offsetMs: number): Track {
   };
 }
 
+/** Program whose decoder timing an export target shares, for learned per-track offsets. */
+const TARGET_TIMEBASE: Partial<Record<ExportTarget, SourceFormat>> = { rekordbox: 'rekordbox', traktor: 'traktor' };
+
 export function exportFor(
   target: ExportTarget,
   tracks: Track[],
   playlistTrackIds: string[],
-  opts: ExportOptions & { offsetMs?: number },
+  opts: ExportOptions & { offsetMs?: number; applyLearnedOffsets?: boolean },
 ): { file: ExportFile; notes: string[] } {
-  const shifted = tracks.map((t) => shiftTrack(t, opts.offsetMs ?? 0));
+  const timebase = opts.applyLearnedOffsets === false ? undefined : TARGET_TIMEBASE[target];
+  const shifted = tracks.map((t) =>
+    shiftTrack(t, (opts.offsetMs ?? 0) + (timebase ? (t.sourceOffsets?.[timebase] ?? 0) : 0)),
+  );
   const playlists = [{ name: opts.playlistName, trackIds: playlistTrackIds }];
   const byId = new Map(shifted.map((t) => [t.id, t]));
   const ordered = playlistTrackIds.map((id) => byId.get(id)).filter((t): t is Track => !!t);

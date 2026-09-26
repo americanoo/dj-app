@@ -35,10 +35,37 @@ npm run build    # static site in dist/ – host anywhere
 | Anything else | M3U/M3U8, CSV/TSV, or a plain-text tracklist (`01. Artist - Title [Label]`) | track order and metadata             |
 
 Import from several programs and Setcraft combines them into one library. Two tracks count as the same when they
-point to the same file path. When a newer import carries cues for a track, its cues replace that track's older ones.
+point to the same file path. Their cues are combined with a **smart merge** (below).
 
 Drop **audio files** on the page to link them to tracks by file name. A file that matches no track in your library
 is added as a new track.
+
+#### Smart cue merging
+
+When a track you already have is imported again, from the same program or a different one, its cues are merged
+rather than overwritten:
+
+- **Timing offsets are detected.** Different programs can decode the same MP3 a few milliseconds apart. Setcraft
+  finds the constant shift from cue pairs and beat grids, lines the cues up, and remembers the offset per track and
+  program. Exports to that program re-apply it automatically (you can turn this off in Export → Advanced).
+- **The same cue is recognised.** Cues of the same kind within 50 ms are treated as one, matched one-to-one
+  (hot cue to hot cue, memory to memory).
+- **Your edits win.** Every cue remembers where it came from. A cue you created or changed in Setcraft is never
+  overwritten or removed by an import.
+- **Newer wins from the same program.** Re-importing from the program a cue came from updates its position, name,
+  pad and colour. If you deleted the cue there, it's removed here too. A *different* program only fills gaps,
+  such as a missing name, an empty pad, or real colours in place of Traktor's fixed ones.
+- **Pad clashes don't lose cues.** When two cues want the same pad, your edits keep it first, then cues already
+  in the library, then new ones. The other cue moves to a free pad, or becomes a memory cue if all eight are
+  taken.
+
+If an import would move, remove or re-time anything, a **review screen** shows each affected track:
+
+- the pads as they are in Setcraft, in the file, and after the merge;
+- a list of every change.
+
+Choose *Smart merge*, *Keep mine* or *Take the file*, for the whole import or per track. Imports that only add
+cues go straight through. Re-importing the same file changes nothing.
 
 ### 2. Narrative: planning the set's story
 
@@ -95,7 +122,8 @@ is added as a new track.
 ```
 src/
   core/                 pure TypeScript, no UI – unit tested
-    model.ts            software-neutral Track / Cue / SetPlan / Chapter model + library merge
+    model.ts            software-neutral Track / Cue / SetPlan / Chapter model
+    merge.ts            smart cue merge: offset detection, matching, provenance rules, pad conflicts
     keys.ts             key parsing (standard, Camelot, Open Key, Traktor ids) + harmonic relations
     time.ts             time formatting, beat grid snapping, bar.beat labels
     setplan.ts          set timeline, transition warnings, run-sheet generation
@@ -109,7 +137,7 @@ src/
   ui/                   React
     store.tsx           project state (reducer) persisted to IndexedDB
     audio.tsx           session-only audio attachments + waveform peak analysis
-    LibraryView, NarrativeView, EnergyArc, CueEditor, Waveform, ExportPanel
+    LibraryView, NarrativeView, EnergyArc, CueEditor, Waveform, ExportPanel, MergeReview
 ```
 
 Each importer converts into a single internal model, and each exporter converts out of it. Cue positions are stored

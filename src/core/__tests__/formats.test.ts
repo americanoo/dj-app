@@ -6,7 +6,8 @@ import { exportRekordbox, importRekordbox } from '../formats/rekordbox';
 import { exportSeratoCrate, importSeratoCrate, seratoRelativePath } from '../formats/serato';
 import { exportM3u, importCsv, importM3u, importPlainTracklist } from '../formats/text';
 import { exportTraktor, importTraktor, locationToPath, pathToLocation } from '../formats/traktor';
-import { emptyLibrary, mergeIntoLibrary, type Track } from '../model';
+import { emptyLibrary, type Track } from '../model';
+import { mergeIntoLibrary } from '../merge';
 
 const fixture = (name: string) => readFileSync(join(__dirname, 'fixtures', name), 'utf8');
 const opts = { playlistName: 'Test Set' };

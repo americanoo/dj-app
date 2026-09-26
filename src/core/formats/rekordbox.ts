@@ -148,6 +148,7 @@ function readCues(el: Element): Cue[] {
       end: type === '4' && end !== undefined && end > start ? end : undefined,
       name: pm.getAttribute('Name') ?? '',
       color,
+      origin: 'rekordbox',
     });
   }
   return cues;

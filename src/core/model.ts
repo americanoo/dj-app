@@ -21,6 +21,10 @@ export interface Cue {
   name: string;
   /** `#rrggbb` */
   color: string;
+  /** Where the cue came from: the importing program, or 'manual' when set in Setcraft. */
+  origin?: SourceFormat;
+  /** Changed in Setcraft after import. Edited cues win merge conflicts. */
+  edited?: boolean;
 }
 
 export interface Track {
@@ -46,6 +50,11 @@ export interface Track {
   source: SourceFormat;
   /** Opaque ids from the source software, kept so round-trips stay stable. */
   sourceIds?: Record<string, string>;
+  /**
+   * Decoder offsets learned while merging, in ms: a cue at library time `t`
+   * sits at `t + offset` in that program. Applied automatically on export.
+   */
+  sourceOffsets?: Partial<Record<SourceFormat, number>>;
 }
 
 export interface GridMarker {
@@ -171,55 +180,4 @@ export function trackIdentity(t: Pick<Track, 'path' | 'artist' | 'title'>): stri
 
 export function normalisePath(p: string): string {
   return p.replace(/\\/g, '/');
-}
-
-/**
- * Merge imported tracks into a library. Tracks already present (same identity)
- * keep their id; cues from the incoming track replace the existing ones only
- * when the incoming track actually carries cues.
- */
-export function mergeIntoLibrary(
-  lib: Library,
-  incoming: { tracks: Track[]; playlists: Playlist[] },
-): { library: Library; idMap: Record<string, string>; added: number; updated: number } {
-  const tracks = { ...lib.tracks };
-  const byIdentity = new Map<string, string>();
-  for (const t of Object.values(tracks)) byIdentity.set(trackIdentity(t), t.id);
-
-  const idMap: Record<string, string> = {};
-  let added = 0;
-  let updated = 0;
-  for (const t of incoming.tracks) {
-    const existingId = byIdentity.get(trackIdentity(t));
-    if (existingId) {
-      const prev = tracks[existingId];
-      tracks[existingId] = {
-        ...prev,
-        ...stripUndefined(t),
-        id: existingId,
-        cues: t.cues.length ? t.cues : prev.cues,
-        sourceIds: { ...prev.sourceIds, ...t.sourceIds },
-      };
-      idMap[t.id] = existingId;
-      updated++;
-    } else {
-      tracks[t.id] = t;
-      byIdentity.set(trackIdentity(t), t.id);
-      idMap[t.id] = t.id;
-      added++;
-    }
-  }
-  const playlists = [
-    ...lib.playlists,
-    ...incoming.playlists.map((p) => ({ ...p, trackIds: p.trackIds.map((id) => idMap[id] ?? id) })),
-  ];
-  return { library: { tracks, playlists }, idMap, added, updated };
-}
-
-function stripUndefined<T extends object>(o: T): Partial<T> {
-  const out: Partial<T> = {};
-  for (const [k, v] of Object.entries(o)) {
-    if (v !== undefined && v !== '') (out as Record<string, unknown>)[k] = v;
-  }
-  return out;
 }

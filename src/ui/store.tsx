@@ -2,7 +2,6 @@ import { createContext, useContext, useEffect, useReducer, useRef, useState, typ
 import { get, set as idbSet } from 'idb-keyval';
 import {
   emptyProject,
-  mergeIntoLibrary,
   newSet,
   uid,
   type Chapter,
@@ -13,12 +12,13 @@ import {
   type Track,
 } from '../core/model';
 import type { ImportResult } from '../core/formats';
+import { mergeIntoLibrary, type MergeChoices } from '../core/merge';
 
 const STORAGE_KEY = 'setcraft-project-v1';
 
 export type Action =
   | { type: 'load'; project: Project }
-  | { type: 'import'; result: ImportResult }
+  | { type: 'import'; result: ImportResult; choices?: MergeChoices }
   | { type: 'updateTrack'; id: string; patch: Partial<Track> }
   | { type: 'setCues'; trackId: string; cues: Cue[] }
   | { type: 'addTrack'; track: Track }
@@ -50,7 +50,7 @@ export function reducer(p: Project, a: Action): Project {
     case 'load':
       return a.project;
     case 'import': {
-      const { library } = mergeIntoLibrary(p.library, a.result);
+      const { library } = mergeIntoLibrary(p.library, a.result, a.choices);
       return { ...p, library };
     }
     case 'updateTrack': {
@@ -58,8 +58,10 @@ export function reducer(p: Project, a: Action): Project {
       if (!t) return p;
       return { ...p, library: { ...p.library, tracks: { ...p.library.tracks, [a.id]: { ...t, ...a.patch } } } };
     }
-    case 'setCues':
-      return reducer(p, { type: 'updateTrack', id: a.trackId, patch: { cues: a.cues } });
+    case 'setCues': {
+      const prev = p.library.tracks[a.trackId]?.cues ?? [];
+      return reducer(p, { type: 'updateTrack', id: a.trackId, patch: { cues: markEdits(prev, a.cues) } });
+    }
     case 'addTrack':
       return { ...p, library: { ...p.library, tracks: { ...p.library.tracks, [a.track.id]: a.track } } };
     case 'addSet': {
@@ -142,6 +144,24 @@ export function reducer(p: Project, a: Action): Project {
         sets: p.sets.map((s) => ({ ...s, entries: [] })),
       };
   }
+}
+
+/** Tag new cues as made in Setcraft and changed ones as edited, so merges know to keep them. */
+export function markEdits(prev: Cue[], next: Cue[]): Cue[] {
+  const byId = new Map(prev.map((c) => [c.id, c]));
+  return next.map((c) => {
+    const before = byId.get(c.id);
+    if (!before) return c.origin ? c : { ...c, origin: 'manual' };
+    if (c.edited) return c;
+    const differs =
+      before.start !== c.start ||
+      before.end !== c.end ||
+      before.name !== c.name ||
+      before.color !== c.color ||
+      before.slot !== c.slot ||
+      before.kind !== c.kind;
+    return differs ? { ...c, edited: true } : c;
+  });
 }
 
 function chapterOrder(s: SetPlan, chapterId: string): number {
