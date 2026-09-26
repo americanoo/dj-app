@@ -1,0 +1,225 @@
+/**
+ * Software-neutral data model. Every importer converts into these shapes and
+ * every exporter converts out of them, so a cue set in the app can travel from
+ * any supported DJ program to any other.
+ *
+ * All positions are in seconds from the start of the audio file.
+ */
+
+export type SourceFormat = 'rekordbox' | 'traktor' | 'serato' | 'djay' | 'm3u' | 'csv' | 'manual';
+
+export type CueKind = 'cue' | 'loop';
+
+export interface Cue {
+  id: string;
+  kind: CueKind;
+  /** Hot cue pad index 0-7 (A-H). `null` means a memory cue / stored loop. */
+  slot: number | null;
+  start: number;
+  /** Loop end, seconds. Only set for loops. */
+  end?: number;
+  name: string;
+  /** `#rrggbb` */
+  color: string;
+}
+
+export interface Track {
+  id: string;
+  title: string;
+  artist: string;
+  album?: string;
+  genre?: string;
+  label?: string;
+  comment?: string;
+  /** Musical key in standard notation, e.g. "Am", "F#", "Bbm". */
+  key?: string;
+  bpm?: number;
+  /** Seconds. */
+  duration?: number;
+  /** Absolute path on the DJ's machine, POSIX or Windows style. */
+  path?: string;
+  /** First downbeat of the beat grid, seconds. */
+  gridStart?: number;
+  /** Full tempo map when the source has one (rekordbox dynamic grids). */
+  beatGrid?: GridMarker[];
+  cues: Cue[];
+  source: SourceFormat;
+  /** Opaque ids from the source software, kept so round-trips stay stable. */
+  sourceIds?: Record<string, string>;
+}
+
+export interface GridMarker {
+  /** Seconds. */
+  position: number;
+  bpm: number;
+  /** Beat in bar at this marker, 1-4. */
+  beat: number;
+}
+
+export interface Playlist {
+  id: string;
+  name: string;
+  trackIds: string[];
+  source: SourceFormat;
+}
+
+export interface Chapter {
+  id: string;
+  name: string;
+  /** What the crowd should feel during this part of the set. */
+  intent: string;
+  color: string;
+}
+
+export interface SetEntry {
+  id: string;
+  trackId: string;
+  chapterId: string;
+  /** Planned energy, 1-10. */
+  energy: number;
+  /** How to get *into* this track from the previous one. */
+  transition: string;
+  notes: string;
+  /** Cue ids on the track used as the mix-in / mix-out points. */
+  mixInCueId?: string;
+  mixOutCueId?: string;
+}
+
+export interface SetPlan {
+  id: string;
+  name: string;
+  venue: string;
+  /** The story of the set, in the DJ's own words. */
+  story: string;
+  targetMinutes: number;
+  chapters: Chapter[];
+  entries: SetEntry[];
+}
+
+export interface Library {
+  tracks: Record<string, Track>;
+  playlists: Playlist[];
+}
+
+export interface Project {
+  version: 1;
+  library: Library;
+  sets: SetPlan[];
+  activeSetId: string | null;
+}
+
+/** Colors of rekordbox's hot cue palette, reused as the app-wide default. */
+export const CUE_COLORS = [
+  '#e62828', // red
+  '#ff8c00', // orange
+  '#e0c000', // yellow
+  '#28e214', // green
+  '#10b1f6', // aqua
+  '#305aff', // blue
+  '#aa72ff', // purple
+  '#ff47ae', // pink
+] as const;
+
+export const SLOT_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+
+export const MAX_HOT_CUES = 8;
+
+let counter = 0;
+export function uid(prefix = 'id'): string {
+  counter = (counter + 1) % 1e6;
+  return `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}${counter.toString(36)}`;
+}
+
+export function emptyLibrary(): Library {
+  return { tracks: {}, playlists: [] };
+}
+
+export function defaultChapters(): Chapter[] {
+  return [
+    { id: uid('ch'), name: 'Warm-up', intent: 'Invite people in. Groove over drama.', color: '#10b1f6' },
+    { id: uid('ch'), name: 'Build', intent: 'Raise tension, tighten the groove.', color: '#e0c000' },
+    { id: uid('ch'), name: 'Peak', intent: 'Full release. Biggest records.', color: '#e62828' },
+    { id: uid('ch'), name: 'Cool-down', intent: 'Land the plane. Leave them wanting more.', color: '#aa72ff' },
+  ];
+}
+
+export function newSet(name = 'Untitled set'): SetPlan {
+  return {
+    id: uid('set'),
+    name,
+    venue: '',
+    story: '',
+    targetMinutes: 60,
+    chapters: defaultChapters(),
+    entries: [],
+  };
+}
+
+export function emptyProject(): Project {
+  const set = newSet('My first set');
+  return { version: 1, library: emptyLibrary(), sets: [set], activeSetId: set.id };
+}
+
+/**
+ * Stable identity for de-duplicating the same file imported from different
+ * programs: normalised path when known, otherwise artist + title.
+ */
+export function trackIdentity(t: Pick<Track, 'path' | 'artist' | 'title'>): string {
+  if (t.path) return 'p:' + normalisePath(t.path).toLowerCase();
+  return 'm:' + `${t.artist}\u0000${t.title}`.toLowerCase().trim();
+}
+
+export function normalisePath(p: string): string {
+  return p.replace(/\\/g, '/');
+}
+
+/**
+ * Merge imported tracks into a library. Tracks already present (same identity)
+ * keep their id; cues from the incoming track replace the existing ones only
+ * when the incoming track actually carries cues.
+ */
+export function mergeIntoLibrary(
+  lib: Library,
+  incoming: { tracks: Track[]; playlists: Playlist[] },
+): { library: Library; idMap: Record<string, string>; added: number; updated: number } {
+  const tracks = { ...lib.tracks };
+  const byIdentity = new Map<string, string>();
+  for (const t of Object.values(tracks)) byIdentity.set(trackIdentity(t), t.id);
+
+  const idMap: Record<string, string> = {};
+  let added = 0;
+  let updated = 0;
+  for (const t of incoming.tracks) {
+    const existingId = byIdentity.get(trackIdentity(t));
+    if (existingId) {
+      const prev = tracks[existingId];
+      tracks[existingId] = {
+        ...prev,
+        ...stripUndefined(t),
+        id: existingId,
+        cues: t.cues.length ? t.cues : prev.cues,
+        sourceIds: { ...prev.sourceIds, ...t.sourceIds },
+      };
+      idMap[t.id] = existingId;
+      updated++;
+    } else {
+      tracks[t.id] = t;
+      byIdentity.set(trackIdentity(t), t.id);
+      idMap[t.id] = t.id;
+      added++;
+    }
+  }
+  const playlists = [
+    ...lib.playlists,
+    ...incoming.playlists.map((p) => ({ ...p, trackIds: p.trackIds.map((id) => idMap[id] ?? id) })),
+  ];
+  return { library: { tracks, playlists }, idMap, added, updated };
+}
+
+function stripUndefined<T extends object>(o: T): Partial<T> {
+  const out: Partial<T> = {};
+  for (const [k, v] of Object.entries(o)) {
+    if (v !== undefined && v !== '') (out as Record<string, unknown>)[k] = v;
+  }
+  return out;
+}
