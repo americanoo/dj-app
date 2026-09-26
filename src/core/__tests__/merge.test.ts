@@ -95,20 +95,61 @@ describe('smart cue merge', () => {
     expect(r.cues[1]).toMatchObject({ slot: 1, name: 'Filled' });
   });
 
-  it('removes cues deleted in their own program but keeps everything else', () => {
+  it('never deletes on its own: cues gone from their program are kept, flagged and pinned', () => {
+    const gone = cue(20, 1, 'rekordbox');
     const r = mergeCues(
       [
         cue(10, 0, 'rekordbox'),
-        cue(20, 1, 'rekordbox'), // deleted in rekordbox
-        cue(30, 2, 'rekordbox', { edited: true }), // edited here -> keep
+        gone, // deleted in rekordbox
+        cue(30, 2, 'rekordbox', { edited: true }), // edited here: not flagged
         cue(40, 3, 'manual'),
         cue(50, 4, 'traktor'),
       ],
       [cue(10, 0, 'rekordbox')],
       'rekordbox',
     );
-    expect(r.cues.map((c) => c.start)).toEqual([10, 30, 40, 50]);
-    expect(r.changes.filter((c) => c.kind === 'removed').map((c) => c.cue.start)).toEqual([20]);
+    expect(r.cues.map((c) => c.start)).toEqual([10, 20, 30, 40, 50]);
+    expect(r.changes.filter((c) => c.kind === 'missing').map((c) => c.cue.id)).toEqual([gone.id]);
+    expect(r.changes.some((c) => c.kind === 'removed')).toBe(false);
+    expect(r.cues.find((c) => c.id === gone.id)!.pinned).toBe(true);
+
+    // Importing the same file again doesn't flag it a second time.
+    const again = mergeCues(r.cues, [cue(10, 0, 'rekordbox')], 'rekordbox');
+    expect(again.changes.some((c) => c.kind === 'missing')).toBe(false);
+    expect(again.cues).toHaveLength(5);
+  });
+
+  it('removes a missing cue only when the DJ ticks it, and reuses its pad', () => {
+    const gone = cue(20, 1, 'rekordbox');
+    const incoming = [cue(10, 0, 'rekordbox'), cue(80, 1, 'rekordbox', { name: 'New B' })];
+    const kept = mergeCues([cue(10, 0, 'rekordbox'), gone], incoming, 'rekordbox');
+    expect(kept.cues.find((c) => c.name === 'New B')!.slot).toBe(2); // pad B still held by the kept cue
+
+    const removed = mergeCues([cue(10, 0, 'rekordbox'), gone], incoming, 'rekordbox', 0, new Set([gone.id]));
+    expect(removed.cues.some((c) => c.id === gone.id)).toBe(false);
+    expect(removed.cues.find((c) => c.name === 'New B')!.slot).toBe(1);
+    expect(removed.changes.find((c) => c.kind === 'removed')!.cue.id).toBe(gone.id);
+  });
+
+  it('flags missing cues for review and applies removals chosen per track', () => {
+    const gone = cue(20, 1, 'rekordbox');
+    const existing = track([cue(10, 0, 'rekordbox'), gone]);
+    const incoming = track([cue(10, 0, 'rekordbox')]);
+    const plan = planTrackMerge(existing, incoming, 'rekordbox');
+    expect(plan.needsReview).toBe(true);
+    expect(applyTrackMerge(plan, 'smart').cues).toHaveLength(2);
+    expect(applyTrackMerge(plan, 'smart', [gone.id]).cues).toHaveLength(1);
+
+    const lib = { tracks: { [existing.id]: existing }, playlists: [] };
+    const res = { format: 'rekordbox' as const, tracks: [incoming], playlists: [] };
+    expect(mergeIntoLibrary(lib, res).library.tracks[existing.id].cues).toHaveLength(2);
+    const chosen = mergeIntoLibrary(lib, res, { strategy: 'smart', remove: { [incoming.id]: [gone.id] } });
+    expect(chosen.library.tracks[existing.id].cues).toHaveLength(1);
+  });
+
+  it('un-pins a kept cue when it comes back in the file', () => {
+    const r = mergeCues([cue(20, 1, 'rekordbox', { pinned: true })], [cue(20, 1, 'rekordbox')], 'rekordbox');
+    expect(r.cues[0].pinned).toBeUndefined();
   });
 
   it('never deletes cues because of a file format that has no cues', () => {

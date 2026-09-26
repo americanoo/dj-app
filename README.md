@@ -53,13 +53,17 @@ rather than overwritten:
 - **Your edits win.** Every cue remembers where it came from. A cue you created or changed in Setcraft is never
   overwritten or removed by an import.
 - **Newer wins from the same program.** Re-importing from the program a cue came from updates its position, name,
-  pad and colour. If you deleted the cue there, it's removed here too. A *different* program only fills gaps,
-  such as a missing name, an empty pad, or real colours in place of Traktor's fixed ones.
+  pad and colour. A *different* program only fills gaps, such as a missing name, an empty pad, or real colours in
+  place of Traktor's fixed ones.
+- **Nothing is deleted without asking.** A cue may have come from rekordbox or Traktor but no longer be in the
+  re-imported file. It's kept and listed in the review under *no longer in rekordbox*, and it's removed only if you
+  tick it. If you leave it, it's pinned and won't be flagged again.
 - **Pad clashes don't lose cues.** When two cues want the same pad, your edits keep it first, then cues already
   in the library, then new ones. The other cue moves to a free pad, or becomes a memory cue if all eight are
   taken.
 
-If an import would move, remove or re-time anything, a **review screen** shows each affected track:
+If an import would move or re-time anything, or a cue is no longer in the file, a **review screen** shows each
+affected track:
 
 - the pads as they are in Setcraft, in the file, and after the merge;
 - a list of every change.

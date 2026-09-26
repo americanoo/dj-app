@@ -1105,3 +1105,29 @@ td.origin .src-dot {
     display: none;
   }
 }
+.missing-banner {
+  margin: 0 20px 8px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 181, 71, 0.35);
+  background: rgba(255, 181, 71, 0.07);
+  font-size: 13px;
+}
+.missing-banner p {
+  margin: 0 0 6px;
+}
+.missing-banner label,
+.remove-toggle {
+  color: inherit;
+  font-size: 12.5px;
+}
+.change-missing {
+  color: var(--warn);
+}
+.change-removed {
+  color: var(--danger);
+  text-decoration: line-through;
+}
+.change-removed input {
+  text-decoration: none;
+}

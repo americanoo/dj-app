@@ -25,6 +25,11 @@ export interface Cue {
   origin?: SourceFormat;
   /** Changed in Setcraft after import. Edited cues win merge conflicts. */
   edited?: boolean;
+  /**
+   * Kept on purpose after it disappeared from the program it came from, so
+   * later imports from that program don't flag it again.
+   */
+  pinned?: boolean;
 }
 
 export interface Track {

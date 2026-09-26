@@ -13,9 +13,11 @@
  * 3. **Combining.** Cues edited in Setcraft always win. Otherwise a re-import
  *    from the program a cue came from updates it; a different program only fills
  *    gaps (missing name, pad, or colour from programs that have colours).
- * 4. **Deletions.** An unedited cue that came from this program and is no longer
- *    in the file was deleted there, so it's removed. Cues from other programs or
- *    made in Setcraft are kept.
+ * 4. **Deletions are never automatic.** An unedited cue that came from this
+ *    program but is no longer in the file is kept and flagged as `missing`. It is
+ *    removed only if the DJ ticks it in the review. Once kept, it is pinned so it
+ *    isn't flagged again. Cues from other programs or made in Setcraft are
+ *    never flagged.
  * 5. **Pad conflicts.** When two cues want the same pad, the higher-priority
  *    cue keeps it (edited > already in library > new). The other moves to a free
  *    pad, or becomes a memory cue if all eight are taken. Nothing is dropped.
@@ -48,6 +50,7 @@ export type CueChange =
   | { kind: 'added'; cue: Cue }
   | { kind: 'matched'; cue: Cue; fields: ('position' | 'name' | 'color' | 'pad')[] }
   | { kind: 'kept'; cue: Cue }
+  | { kind: 'missing'; cue: Cue }
   | { kind: 'removed'; cue: Cue }
   | { kind: 'moved'; cue: Cue; fromSlot: number; toSlot: number }
   | { kind: 'demoted'; cue: Cue; fromSlot: number };
@@ -142,7 +145,9 @@ function matchCues(existing: Cue[], incoming: Cue[]): Map<Cue, Cue> {
   return byExisting;
 }
 
-function combine(e: Cue, i: Cue, source: SourceFormat): Cue {
+function combine(existing: Cue, i: Cue, source: SourceFormat): Cue {
+  // Back in the file, so no longer pinned.
+  const { pinned: _p, ...e } = existing;
   if (e.edited) return { ...e, name: e.name || i.name };
   if (e.origin === source) {
     // Re-import from the program this cue came from: it's the newer truth.
@@ -173,11 +178,23 @@ function changedFields(before: Cue, after: Cue): ('position' | 'name' | 'color' 
   return f;
 }
 
+/** A cue this program should still have, but the file no longer contains. */
+function isMissing(e: Cue, source: SourceFormat): boolean {
+  return !e.edited && !e.pinned && e.origin === source && SOURCES_WITH_CUES.has(source);
+}
+
 /**
  * Merge `incoming` cues (already in the incoming program's timebase) into
  * `existing`. `offset` is the detected shift in seconds (incoming = existing + offset).
  */
-export function mergeCues(existing: Cue[], incoming: Cue[], source: SourceFormat, offset = 0): CueMergeResult {
+export function mergeCues(
+  existing: Cue[],
+  incoming: Cue[],
+  source: SourceFormat,
+  offset = 0,
+  /** Ids of missing cues the DJ chose to remove. Every other missing cue is kept and pinned. */
+  remove: ReadonlySet<string> = new Set(),
+): CueMergeResult {
   const aligned = incoming.map((c) => ({ ...shiftCue(c, -offset), origin: c.origin ?? source }));
   const matches = matchCues(existing, aligned);
   const changes: CueChange[] = [];
@@ -191,8 +208,14 @@ export function mergeCues(existing: Cue[], incoming: Cue[], source: SourceFormat
       const merged = combine(e, i, source);
       changes.push({ kind: 'matched', cue: merged, fields: changedFields(e, merged) });
       kept.push(merged);
-    } else if (!e.edited && e.origin === source && SOURCES_WITH_CUES.has(source)) {
-      changes.push({ kind: 'removed', cue: e });
+    } else if (isMissing(e, source)) {
+      if (remove.has(e.id)) {
+        changes.push({ kind: 'removed', cue: e });
+      } else {
+        const pinned = { ...e, pinned: true };
+        changes.push({ kind: 'missing', cue: pinned });
+        kept.push(pinned);
+      }
     } else {
       changes.push({ kind: 'kept', cue: e });
       kept.push(e);
@@ -260,8 +283,10 @@ export interface TrackMergePlan {
   smart: CueMergeResult;
   /** Anything differs between library and file. */
   changed: boolean;
-  /** Something moved, got removed or demoted: worth a human look. */
+  /** Something moved, went missing or got demoted: worth a human look. */
   needsReview: boolean;
+  /** Offset used for alignment, seconds. */
+  offset: number;
 }
 
 export function planTrackMerge(existing: Track, incoming: Track, source: SourceFormat): TrackMergePlan {
@@ -275,9 +300,19 @@ export function planTrackMerge(existing: Track, incoming: Track, source: SourceF
   );
   const offsetMs = Math.round(offset * 1000);
   const offsetIsNew = detected !== undefined && offsetMs !== (existing.sourceOffsets?.[source] ?? 0);
-  const needsReview = count('removed') + count('moved') + count('demoted') > 0 || repositioned || offsetIsNew;
+  const needsReview = count('missing') + count('moved') + count('demoted') > 0 || repositioned || offsetIsNew;
   const changed = needsReview || matchedChanged || count('added') > 0 || (incoming.cues.length > 0 && count('kept') > 0);
-  return { existing, incoming, source, offsetMs, offsetDetected: detected !== undefined, smart, changed, needsReview };
+  return {
+    existing,
+    incoming,
+    source,
+    offset,
+    offsetMs,
+    offsetDetected: detected !== undefined,
+    smart,
+    changed,
+    needsReview,
+  };
 }
 
 export function describeChange(ch: CueChange): string {
@@ -290,8 +325,10 @@ export function describeChange(ch: CueChange): string {
       return `Same cue: ${label(ch.cue)}${ch.fields.length ? ` (updated ${ch.fields.join(', ')})` : ''}`;
     case 'kept':
       return `Kept from library: ${label(ch.cue)}${ch.cue.edited ? ' (edited in Setcraft)' : ''}`;
+    case 'missing':
+      return `No longer in ${ch.cue.origin}; kept unless you tick it for removal: ${label(ch.cue)}`;
     case 'removed':
-      return `Removed (deleted in ${ch.cue.origin}): ${label(ch.cue)}`;
+      return `Removed (no longer in ${ch.cue.origin}): ${label(ch.cue)}`;
     case 'moved':
       return `Pad ${SLOT_LETTERS[ch.fromSlot]} was taken; moved to pad ${SLOT_LETTERS[ch.toSlot]}: ${label(ch.cue)}`;
     case 'demoted':
@@ -307,8 +344,14 @@ function stripUndefined<T extends object>(o: T): Partial<T> {
   return out;
 }
 
-/** The merged track for a given strategy. */
-export function applyTrackMerge(plan: TrackMergePlan, strategy: MergeStrategy): Track {
+/** Smart result with the DJ's removals applied (pads freed by removals are reused). */
+export function smartResult(plan: TrackMergePlan, remove: readonly string[] = []): CueMergeResult {
+  if (!remove.length) return plan.smart;
+  return mergeCues(plan.existing.cues, plan.incoming.cues, plan.source, plan.offset, new Set(remove));
+}
+
+/** The merged track for a given strategy. `remove` lists missing cues to delete (smart only). */
+export function applyTrackMerge(plan: TrackMergePlan, strategy: MergeStrategy, remove: readonly string[] = []): Track {
   const { existing, incoming, source } = plan;
   // Metadata: newest non-empty wins. Grid and cues are handled per strategy.
   const {
@@ -352,7 +395,7 @@ export function applyTrackMerge(plan: TrackMergePlan, strategy: MergeStrategy): 
       return {
         ...base,
         ...(hasGrid ? {} : incomingGrid),
-        cues: plan.smart.cues,
+        cues: smartResult(plan, remove).cues,
         sourceOffsets: Object.keys(sourceOffsets).length ? sourceOffsets : undefined,
       };
     }
@@ -395,6 +438,8 @@ export interface MergeChoices {
   strategy: MergeStrategy;
   /** Per incoming-track overrides. */
   perTrack?: Record<string, MergeStrategy>;
+  /** Per incoming-track ids of missing cues to delete. Nothing is deleted otherwise. */
+  remove?: Record<string, string[]>;
 }
 
 export function mergeIntoLibrary(
@@ -407,7 +452,7 @@ export function mergeIntoLibrary(
   for (const t of plan.newTracks) tracks[t.id] = t;
   for (const m of plan.matches) {
     const strategy = choices.perTrack?.[m.incoming.id] ?? choices.strategy;
-    tracks[m.existing.id] = applyTrackMerge(m, strategy);
+    tracks[m.existing.id] = applyTrackMerge(m, strategy, choices.remove?.[m.incoming.id]);
   }
   const playlists = [
     ...lib.playlists,

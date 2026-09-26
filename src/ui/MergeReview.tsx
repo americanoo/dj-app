@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import {
   applyTrackMerge,
   describeChange,
+  smartResult,
   type MergeChoices,
   type MergePlan,
   type MergeStrategy,
@@ -33,7 +34,19 @@ export function MergeReview({
 }) {
   const [strategy, setStrategy] = useState<MergeStrategy>('smart');
   const [perTrack, setPerTrack] = useState<Record<string, MergeStrategy>>({});
+  const [remove, setRemove] = useState<Record<string, string[]>>({});
   const [showAll, setShowAll] = useState(false);
+
+  // Cues no longer in the file. Kept unless the DJ ticks them.
+  const missing = useMemo(
+    () =>
+      Object.fromEntries(
+        plan.matches.map((m) => [m.incoming.id, m.smart.changes.filter((c) => c.kind === 'missing').map((c) => c.cue.id)]),
+      ),
+    [plan.matches],
+  );
+  const missingTotal = Object.values(missing).reduce((n, ids) => n + ids.length, 0);
+  const removeTotal = Object.values(remove).reduce((n, ids) => n + ids.length, 0);
 
   const changed = useMemo(
     () => plan.matches.filter((m) => m.changed).sort((a, b) => Number(b.needsReview) - Number(a.needsReview)),
@@ -78,6 +91,28 @@ export function MergeReview({
           ))}
         </div>
 
+        {missingTotal > 0 && (
+          <div className="missing-banner">
+            <p>
+              <b>
+                {missingTotal} cue{missingTotal === 1 ? ' is' : 's are'} no longer in {plan.source}.
+              </b>{' '}
+              Nothing is deleted unless you tick it. Unticked cues stay in Setcraft and won't be flagged again.
+            </p>
+            <label className="inline toggle">
+              <input
+                type="checkbox"
+                checked={removeTotal === missingTotal}
+                ref={(el) => {
+                  if (el) el.indeterminate = removeTotal > 0 && removeTotal < missingTotal;
+                }}
+                onChange={(e) => setRemove(e.target.checked ? missing : {})}
+              />
+              {missingTotal === 1 ? 'Remove it from Setcraft too' : `Remove all ${missingTotal} from Setcraft too`}
+            </label>
+          </div>
+        )}
+
         <div className="merge-list">
           {visible.map((m) => (
             <TrackMergeRow
@@ -86,6 +121,8 @@ export function MergeReview({
               strategy={perTrack[m.incoming.id] ?? strategy}
               overridden={perTrack[m.incoming.id] !== undefined}
               onChange={(s) => setPerTrack((p) => ({ ...p, [m.incoming.id]: s }))}
+              remove={remove[m.incoming.id] ?? []}
+              onRemoveChange={(ids) => setRemove((r) => ({ ...r, [m.incoming.id]: ids }))}
             />
           ))}
           {changed.length > visible.length && (
@@ -97,8 +134,8 @@ export function MergeReview({
 
         <footer className="modal-foot">
           <button onClick={onCancel}>Cancel import</button>
-          <button className="primary" onClick={() => onApply({ strategy, perTrack })}>
-            Import &amp; merge
+          <button className="primary" onClick={() => onApply({ strategy, perTrack, remove })}>
+            Import &amp; merge{removeTotal ? ` (remove ${removeTotal})` : ''}
           </button>
         </footer>
       </div>
@@ -111,19 +148,24 @@ function TrackMergeRow({
   strategy,
   overridden,
   onChange,
+  remove,
+  onRemoveChange,
 }: {
   plan: TrackMergePlan;
   strategy: MergeStrategy;
   overridden: boolean;
   onChange: (s: MergeStrategy) => void;
+  remove: string[];
+  onRemoveChange: (ids: string[]) => void;
 }) {
   const [open, setOpen] = useState(plan.needsReview);
-  const result = useMemo(() => applyTrackMerge(plan, strategy).cues, [plan, strategy]);
-  const counts = plan.smart.changes.reduce<Record<string, number>>((acc, c) => {
+  const result = useMemo(() => applyTrackMerge(plan, strategy, remove).cues, [plan, strategy, remove]);
+  const smart = useMemo(() => smartResult(plan, remove), [plan, remove]);
+  const counts = smart.changes.reduce<Record<string, number>>((acc, c) => {
     acc[c.kind] = (acc[c.kind] ?? 0) + 1;
     return acc;
   }, {});
-  const notable = plan.smart.changes.filter(
+  const notable = smart.changes.filter(
     (c) => c.kind !== 'kept' && !(c.kind === 'matched' && c.fields.length === 0),
   );
 
@@ -142,7 +184,8 @@ function TrackMergeRow({
           )}
           {counts.added ? <span className="chip ok">+{counts.added} new</span> : null}
           {counts.matched ? <span className="chip">{counts.matched} matched</span> : null}
-          {counts.removed ? <span className="chip warn">{counts.removed} removed</span> : null}
+          {counts.missing ? <span className="chip warn">{counts.missing} no longer in file</span> : null}
+          {counts.removed ? <span className="chip warn">{counts.removed} to remove</span> : null}
           {counts.moved ? <span className="chip warn">{counts.moved} pad moved</span> : null}
           {counts.demoted ? <span className="chip warn">{counts.demoted} → memory</span> : null}
         </span>
@@ -168,7 +211,20 @@ function TrackMergeRow({
             <ul className="change-list">
               {notable.map((c, i) => (
                 <li key={i} className={`change-${c.kind}`}>
-                  {describeChange(c)}
+                  {c.kind === 'missing' || c.kind === 'removed' ? (
+                    <label className="inline toggle remove-toggle">
+                      <input
+                        type="checkbox"
+                        checked={c.kind === 'removed'}
+                        onChange={(e) =>
+                          onRemoveChange(e.target.checked ? [...remove, c.cue.id] : remove.filter((id) => id !== c.cue.id))
+                        }
+                      />
+                      {describeChange(c)}
+                    </label>
+                  ) : (
+                    describeChange(c)
+                  )}
                 </li>
               ))}
             </ul>
