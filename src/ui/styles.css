@@ -11,8 +11,11 @@
   --surface: #0a0a0f;
   --surface-2: #111118;
   --surface-3: #191922;
-  --line: rgba(255, 255, 255, 0.06);
-  --line-strong: rgba(255, 255, 255, 0.12);
+  --line: rgba(255, 255, 255, 0.045);
+  --line-strong: rgba(255, 255, 255, 0.085);
+  /* hairlines that fade out at both ends: dividers you feel more than see */
+  --hair-h: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.07) 18%, rgba(255, 255, 255, 0.07) 82%, transparent);
+  --hair-v: linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.07) 18%, rgba(255, 255, 255, 0.07) 82%, transparent);
 
   /* text */
   --text: #f4f4f8;
@@ -1980,4 +1983,165 @@ td.actions {
     min-width: 0;
     flex-wrap: wrap;
   }
+}
+
+
+/* ==========================================================================
+   Subtle frames: panels separate by light and depth, not outlines
+   ========================================================================== */
+
+.pane {
+  border: 1px solid rgba(255, 255, 255, 0.035);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.004) 40%),
+    #07070a;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 24px 48px -32px rgba(0, 0, 0, 0.9);
+}
+.topbar {
+  border-bottom: 0;
+}
+.topbar::after {
+  opacity: 0.22;
+}
+.splitter::after {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+/* dividers inside panels: fading hairlines instead of solid borders */
+.pane-head,
+.toolbar,
+.deck-pane .workspace > .track-head {
+  border-bottom: 0;
+  background-image: var(--hair-h);
+  background-repeat: no-repeat;
+  background-position: bottom;
+  background-size: 100% 1px;
+}
+.tl-inspector,
+.deck-pane .workspace > section:last-child,
+.folder-panel {
+  border-top: 0;
+  background-image: var(--hair-h);
+  background-repeat: no-repeat;
+  background-position: top;
+  background-size: 100% 1px;
+}
+.tl-inspector {
+  background-image: var(--hair-h), linear-gradient(90deg, rgba(166, 107, 255, 0.05), transparent 45%);
+  background-size: 100% 1px, 100% 100%;
+  background-position: top, 0 0;
+}
+.deck-pane .cue-columns > .card,
+.sidebar {
+  border-left: 0;
+  border-right: 0;
+  background-image: var(--hair-v);
+  background-repeat: no-repeat;
+  background-size: 1px 100%;
+}
+.deck-pane .cue-columns > .card {
+  background-position: left;
+}
+.sidebar {
+  background-position: right;
+}
+.tl-ruler,
+table.tracks th {
+  border-bottom-color: rgba(255, 255, 255, 0.04);
+}
+.tl-tick {
+  border-left-color: rgba(255, 255, 255, 0.06);
+}
+table.tracks td {
+  border-bottom-color: rgba(255, 255, 255, 0.022);
+}
+.cue-table td,
+.history-row,
+.version-row,
+.export-summary,
+.modal-foot {
+  border-color: rgba(255, 255, 255, 0.035);
+}
+
+/* controls: quieter edges, a touch more on hover */
+button {
+  border-color: rgba(255, 255, 255, 0.075);
+}
+button:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.16);
+}
+input,
+select,
+textarea {
+  border-color: rgba(255, 255, 255, 0.05);
+  background-color: rgba(255, 255, 255, 0.03);
+}
+input:hover,
+select:hover,
+textarea:hover {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+input[type='search'] {
+  background-color: rgba(255, 255, 255, 0.03);
+}
+canvas.wave {
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+}
+canvas.wave.detail {
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.03),
+    0 12px 32px -22px rgba(166, 107, 255, 0.45);
+}
+.pad {
+  border-color: rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.025);
+}
+.tl-block {
+  border-color: rgba(255, 255, 255, 0.06);
+  border-left-width: 2px;
+}
+.tl-block:hover {
+  border-color: rgba(255, 255, 255, 0.16);
+}
+.tl-lanes {
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(255, 255, 255, 0.012) 0,
+    rgba(255, 255, 255, 0.012) 46px,
+    transparent 46px,
+    transparent 50px
+  );
+}
+.zoom-controls {
+  border-color: rgba(255, 255, 255, 0.04);
+  background: rgba(255, 255, 255, 0.025);
+}
+.side-item.active {
+  border-color: rgba(166, 107, 255, 0.14);
+}
+
+/* pop-up panels and cards inside them */
+.modal {
+  border-color: rgba(255, 255, 255, 0.06);
+}
+.modal::before {
+  opacity: 0.6;
+}
+.card,
+.modal .card,
+.merge-row,
+.chapter-edit,
+.target,
+.strategy {
+  border-color: rgba(255, 255, 255, 0.045);
+}
+.modal .card {
+  background: rgba(255, 255, 255, 0.022);
+}
+.chapter-edit {
+  border-left-width: 2px;
+  background: rgba(255, 255, 255, 0.02);
 }
