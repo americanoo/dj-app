@@ -1,11 +1,15 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { maxPeak, sampleAt } from '../core/analysis';
 import { dragCue, findCueHandle, type CueEdge } from '../core/cues';
 import { SLOT_LETTERS, type Cue } from '../core/model';
 import { barBeatLabel, beatLength, formatTime } from '../core/time';
+import type { WaveformBands } from '../core/waveform';
 
 interface Props {
   duration: number;
   peaks?: Float32Array;
+  /** Bass / mid / high split for coloured drawing (single colour without it). */
+  bands?: WaveformBands;
   peaksPerSecond?: number;
   cues: Cue[];
   playhead: number;
@@ -34,10 +38,11 @@ interface DragState {
   active: boolean;
 }
 
+const BAND_COLORS = { low: '#2f6bff', mid: '#f59b23', high: '#f2efe8' };
+
 const COLORS = {
   bg: '#12141a',
   wave: '#3d6fd6',
-  wavePlayed: '#7aa2ff',
   grid: 'rgba(255,255,255,0.07)',
   bar: 'rgba(255,255,255,0.22)',
   playhead: '#ffffff',
@@ -48,6 +53,7 @@ export function Waveform(p: Props) {
   const drag = useRef<DragState | null>(null);
   const [dragging, setDragging] = useState<{ cueId: string; edge: CueEdge } | null>(null);
   const [width, setWidth] = useState(0);
+  const peakMax = useMemo(() => (p.peaks ? maxPeak(p.peaks) : 1), [p.peaks]);
 
   useEffect(() => {
     const c = canvas.current;
@@ -112,22 +118,47 @@ export function Waveform(p: Props) {
       ctx.fillRect(xOf(cue.start), 0, Math.max(1, xOf(cue.end) - xOf(cue.start)), h);
     }
 
-    // Waveform
+    // Waveform: rekordbox-style three bands (bass blue, mids amber, highs white),
+    // normalised so quiet masters fill the view. Played audio is dimmed.
     if (p.peaks && p.peaksPerSecond) {
       const pps = p.peaksPerSecond;
+      const peaks = p.peaks;
+      const gain = 1 / Math.max(peakMax, 0.05);
+      const height = mid - 3;
+      const scale = (v: number) => Math.pow(Math.min(1, v * gain), 0.75) * height;
+      const bucketsPerPx = (span / w) * pps;
+      // Zoomed out: loudest bucket under the pixel. Zoomed in past the analysis
+      // resolution: blend neighbours so the shape stays smooth.
+      const valueAt = (arr: Float32Array, s0: number, s1: number) => {
+        if (bucketsPerPx < 1) return sampleAt(arr, ((s0 + s1) / 2) * pps - 0.5);
+        const i0 = Math.max(0, Math.floor(s0 * pps));
+        const i1 = Math.min(arr.length, Math.max(i0 + 1, Math.ceil(s1 * pps)));
+        let m = 0;
+        for (let i = i0; i < i1; i++) if (arr[i] > m) m = arr[i];
+        return m;
+      };
+      const layers: [Float32Array, string, number][] = p.bands
+        ? [
+            // Highs are drawn on top and slightly smaller so bass stays readable.
+            [p.bands.low, BAND_COLORS.low, 1],
+            [p.bands.mid, BAND_COLORS.mid, 0.95],
+            [p.bands.high, BAND_COLORS.high, 0.75],
+          ]
+        : [[peaks, COLORS.wave, 1]];
+      const lastSec = peaks.length / pps;
       for (let px = 0; px < w; px++) {
         const s0 = from + (px / w) * span;
         const s1 = from + ((px + 1) / w) * span;
-        if (s1 <= 0) continue; // before the track starts
-        const i0 = Math.max(0, Math.floor(s0 * pps));
-        const i1 = Math.min(p.peaks.length, Math.max(i0 + 1, Math.ceil(s1 * pps)));
-        if (i0 >= p.peaks.length || i1 <= 0) continue;
-        let max = 0;
-        for (let i = i0; i < i1; i++) if (p.peaks[i] > max) max = p.peaks[i];
-        const amp = Math.sqrt(max) * (mid - 4);
-        ctx.fillStyle = s0 < p.playhead ? COLORS.wavePlayed : COLORS.wave;
-        ctx.fillRect(px, mid - amp, 1, amp * 2);
+        if (s1 <= 0 || s0 >= lastSec) continue; // outside the track
+        ctx.globalAlpha = s1 <= p.playhead ? 0.5 : 1;
+        for (const [arr, color, boost] of layers) {
+          const amp = scale(valueAt(arr, Math.max(0, s0), s1) * boost);
+          if (amp < 0.5) continue;
+          ctx.fillStyle = color;
+          ctx.fillRect(px, mid - amp, 1, amp * 2);
+        }
       }
+      ctx.globalAlpha = 1;
     } else {
       ctx.fillStyle = 'rgba(255,255,255,0.08)';
       ctx.fillRect(Math.max(0, xOf(0)), mid - 1, Math.min(w, xOf(p.duration)) - Math.max(0, xOf(0)), 2);
@@ -200,7 +231,7 @@ export function Waveform(p: Props) {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dragging, width, p.duration, p.peaks, p.peaksPerSecond, p.cues, p.playhead, p.bpm, p.gridStart, p.selectedCueId, p.windowSeconds, p.height]);
+  }, [dragging, width, peakMax, p.bands, p.duration, p.peaks, p.peaksPerSecond, p.cues, p.playhead, p.bpm, p.gridStart, p.selectedCueId, p.windowSeconds, p.height]);
 
   const secAt = (clientX: number) => {
     const rect = canvas.current!.getBoundingClientRect();

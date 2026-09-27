@@ -1283,3 +1283,21 @@ canvas.wave.dragging {
 .cue-table tr[draggable] {
   cursor: grab;
 }
+.pad.looping {
+  animation: loop-pulse 0.9s ease-in-out infinite;
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+@keyframes loop-pulse {
+  50% {
+    filter: brightness(1.35);
+  }
+}
+.looping-btn {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+.volume input {
+  width: 90px;
+  accent-color: var(--accent);
+}

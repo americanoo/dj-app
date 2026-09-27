@@ -15,9 +15,27 @@ describe('waveform storage', () => {
     expect(back).toMatchObject({ peaksPerSecond: 150, duration: 372.5, fileName: 'a.mp3' });
   });
 
+  it('stores and restores the three bands', () => {
+    const peaks = Float32Array.from([0.5, 1]);
+    const bands = { low: Float32Array.from([1, 0]), mid: Float32Array.from([0.5, 0.5]), high: Float32Array.from([0, 1]) };
+    const stored = encodeWaveform({ peaks, bands, peaksPerSecond: 150, duration: 2, fileName: 'b.wav' });
+    expect(stored.v).toBe(2);
+    const back = decodeWaveform(stored)!;
+    expect(Array.from(back.bands!.low)).toEqual([1, 0]);
+    expect(back.bands!.mid[0]).toBeCloseTo(0.5, 2);
+    expect(Array.from(back.bands!.high)).toEqual([0, 1]);
+  });
+
+  it('still reads single-colour waveforms saved by the previous version', () => {
+    const old = { v: 1 as const, peaks: Uint8Array.from([0, 255]), peaksPerSecond: 150, duration: 2, fileName: 'a.mp3', savedAt: 1 };
+    const back = decodeWaveform(old)!;
+    expect(back.bands).toBeUndefined();
+    expect(Array.from(back.peaks)).toEqual([0, 1]);
+  });
+
   it('ignores missing or unknown data', () => {
     expect(decodeWaveform(undefined)).toBeUndefined();
-    expect(decodeWaveform({ v: 2 } as never)).toBeUndefined();
+    expect(decodeWaveform({ v: 3 } as never)).toBeUndefined();
     expect(decodeWaveform({ v: 1, peaks: [1, 2], peaksPerSecond: 150 } as never)).toBeUndefined();
   });
 });

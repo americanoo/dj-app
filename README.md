@@ -126,7 +126,14 @@ cues go straight through. Re-importing the same file changes nothing.
 
 ### 3. Cues & loops
 
-- A detail waveform with the beat grid and bar numbers, and an overview below it for navigating. Without audio
+- **Waveforms** in rekordbox-style three-band colour (bass blue, mids amber, highs white), normalised so quiet
+  masters still fill the view and smooth at every zoom level. There's a detail view with the beat grid and bar
+  numbers, and an overview below it for navigating. Analysis runs in a background worker so the page stays
+  responsive.
+- **Audio engine** on the Web Audio API: cue jumps are instant and sample-accurate, with short fades so they don't
+  click. Tapping a filled pad plays from it, like a CDJ. **Loop pads really loop**: tap to engage, tap again (or
+  *exit*) to release, and jumping outside the loop releases it too. Loops follow you live as you drag or resize
+  them. There's also a preview volume control. Without audio
   you still get the timeline, grid and cue markers.
 - **Pads A–H** behave like a controller: an empty pad sets a cue at the playhead, a filled pad jumps to its cue.
   **Quantize** snaps cues to the grid.
@@ -173,6 +180,7 @@ src/
     merge.ts            smart cue merge: offset detection, matching, provenance rules, pad conflicts
     versions.ts         set copies, version pruning, per-track cue history and diffs
     waveform.ts         compact (8-bit) waveform storage
+    analysis.ts         three-band waveform analysis (biquad filters)
     pathmatch.ts        finding a track's file inside a linked music folder
     keys.ts             key parsing (standard, Camelot, Open Key, Traktor ids) + harmonic relations
     time.ts             time formatting, beat grid snapping, bar.beat labels
@@ -188,6 +196,8 @@ src/
     store.tsx           project state (reducer) persisted to IndexedDB
     audio.tsx           audio attachments, waveform analysis, remembered waveforms (IndexedDB)
     musicFolder.tsx     linked music folder (File System Access API, folder-input fallback)
+    deck.ts             Web Audio playback: instant jumps, real loops, click-free fades
+    analysisWorker.ts   waveform analysis off the main thread
     versions.tsx        version snapshots stored in IndexedDB
     LibraryView, NarrativeView, EnergyArc, CueEditor, Waveform, ExportPanel, MergeReview, VersionsPanel
 ```

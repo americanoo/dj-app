@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toCamelot, normaliseKey } from '../core/keys';
 import { CUE_COLORS, MAX_HOT_CUES, SLOT_LETTERS, uid, type Cue, type Project, type Track } from '../core/model';
 import { barBeatLabel, beatLength, formatTime, parseTime, round, snapToBeat } from '../core/time';
-import { useAudio } from './audio';
+import { audioContext, useAudio } from './audio';
+import { Deck } from './deck';
 import { moveCueToSlot } from '../core/cues';
 import { useMusicFolder } from './musicFolder';
 import { LinkFolderButton } from './MusicFolderControl';
@@ -109,13 +110,22 @@ function TrackPicker({
 
 function TrackCueWorkspace({ track }: { track: Track }) {
   const { dispatch } = useStore();
-  const { audio: attached, remembered, rememberedIds, loading, attach, loadRemembered } = useAudio();
+  const { audio: attached, remembered, rememberedIds, loading, attach, loadRemembered, getBuffer } = useAudio();
   const folder = useMusicFolder();
   const audioInfo = attached[track.id];
   // Playable audio from this visit, or the waveform remembered from an earlier one.
   const wave = audioInfo ?? remembered[track.id];
   const [folderMiss, setFolderMiss] = useState(false);
-  const audioEl = useRef<HTMLAudioElement>(null);
+  const deckRef = useRef<Deck | null>(null);
+  const [deckReady, setDeckReady] = useState(false);
+  const [activeLoopId, setActiveLoopId] = useState<string | null>(null);
+  const [volume, setVolume] = useState(() => {
+    try {
+      return Number(localStorage.getItem('setcraft-volume') ?? '0.9');
+    } catch {
+      return 0.9;
+    }
+  });
   const [playhead, setPlayhead] = useState(track.cues.find((c) => c.slot === 0)?.start ?? track.gridStart ?? 0);
   const [playing, setPlaying] = useState(false);
   const [quantize, setQuantize] = useState(true);
@@ -165,35 +175,125 @@ function TrackCueWorkspace({ track }: { track: Track }) {
   const updateCue = (id: string, patch: Partial<Cue>) =>
     setCues(track.cues.map((c) => (c.id === id ? { ...c, ...patch } : c)));
 
-  // Keep the playhead in sync with the audio element.
+  const playheadRef = useRef(playhead);
+  playheadRef.current = playhead;
+
+  // One deck per open track, on the shared AudioContext.
+  useEffect(() => {
+    const d = new Deck(audioContext(), () => {
+      setPlaying(false);
+      setPlayhead(d.position());
+    });
+    deckRef.current = d;
+    return () => {
+      d.dispose();
+      deckRef.current = null;
+    };
+  }, []);
+
+  // Load the decoded audio into the deck once the track's file is attached.
+  useEffect(() => {
+    setDeckReady(false);
+    if (!audioInfo) return;
+    let cancelled = false;
+    getBuffer(track.id)
+      .then((buf) => {
+        const d = deckRef.current;
+        if (cancelled || !buf || !d) return;
+        d.load(buf);
+        d.setVolume(volume);
+        d.seek(playheadRef.current);
+        setDeckReady(true);
+      })
+      .catch(() => setError('This audio could not be decoded for playback.'));
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [audioInfo, track.id]);
+
+  useEffect(() => {
+    deckRef.current?.setVolume(volume);
+    try {
+      localStorage.setItem('setcraft-volume', String(volume));
+    } catch {
+      // private mode: volume just isn't remembered
+    }
+  }, [volume]);
+
+  // Follow the deck while playing.
   useEffect(() => {
     if (!playing) return;
     let raf = 0;
     const tick = () => {
-      if (audioEl.current) setPlayhead(audioEl.current.currentTime);
+      if (deckRef.current) setPlayhead(deckRef.current.position());
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [playing]);
 
+  const activeLoop = track.cues.find((c) => c.id === activeLoopId && c.kind === 'loop' && c.end !== undefined);
+
+  const exitLoop = useCallback(() => {
+    deckRef.current?.setLoop(null);
+    setActiveLoopId(null);
+  }, []);
+
+  // Keep an engaged loop in step with edits (dragging, resizing, deleting).
+  useEffect(() => {
+    if (!activeLoopId) return;
+    if (!activeLoop) exitLoop();
+    else deckRef.current?.setLoop({ start: activeLoop.start, end: activeLoop.end! });
+  }, [activeLoopId, activeLoop?.start, activeLoop?.end, activeLoop, exitLoop]);
+
   const seek = useCallback(
     (s: number) => {
       const clamped = Math.max(0, Math.min(duration, s));
+      // Jumping out of an engaged loop releases it, like on a CDJ.
+      if (activeLoop && (clamped < activeLoop.start || clamped >= activeLoop.end!)) exitLoop();
       setPlayhead(clamped);
-      if (audioEl.current) audioEl.current.currentTime = clamped;
+      deckRef.current?.seek(clamped);
     },
-    [duration],
+    [duration, activeLoop, exitLoop],
+  );
+
+  /** Jump and start playing (when audio is loaded); no loop handling. */
+  const startAt = useCallback(
+    (s: number) => {
+      const d = deckRef.current;
+      const clamped = Math.max(0, Math.min(duration, s));
+      setPlayhead(clamped);
+      if (!d || !deckReady) return;
+      if (d.playing) d.seek(clamped);
+      else {
+        d.play(clamped);
+        setPlaying(true);
+      }
+    },
+    [deckReady, duration],
+  );
+
+  const playFrom = useCallback(
+    (s: number) => {
+      if (activeLoop && (s < activeLoop.start || s >= activeLoop.end!)) exitLoop();
+      startAt(s);
+    },
+    [activeLoop, exitLoop, startAt],
   );
 
   const togglePlay = useCallback(() => {
-    const el = audioEl.current;
-    if (!el || !audioInfo) return;
-    if (el.paused) {
-      el.currentTime = playhead;
-      void el.play();
-    } else el.pause();
-  }, [audioInfo, playhead]);
+    const d = deckRef.current;
+    if (!d || !deckReady) return;
+    if (d.playing) {
+      d.pause();
+      setPlaying(false);
+      setPlayhead(d.position());
+    } else {
+      d.play(playheadRef.current);
+      setPlaying(true);
+    }
+  }, [deckReady]);
 
   const hotCues = useMemo(() => {
     const bySlot: (Cue | undefined)[] = Array(MAX_HOT_CUES).fill(undefined);
@@ -237,12 +337,21 @@ function TrackCueWorkspace({ track }: { track: Track }) {
       const existing = hotCues[slot];
       if (existing) {
         setSelectedId(existing.id);
-        seek(existing.start);
+        // Loop pads engage the loop (press again to release); cue pads jump and play.
+        if (existing.kind === 'loop' && existing.end !== undefined) {
+          if (activeLoopId === existing.id) return exitLoop();
+          deckRef.current?.setLoop(null); // release any other loop first
+          startAt(existing.start);
+          deckRef.current?.setLoop({ start: existing.start, end: existing.end });
+          setActiveLoopId(existing.id);
+          return;
+        }
+        playFrom(existing.start);
         return;
       }
       addCue({ kind: 'cue', slot, start: round(q(playhead), 3), name: '', color: CUE_COLORS[slot] });
     },
-    [hotCues, seek, addCue, q, playhead],
+    [hotCues, playFrom, startAt, addCue, q, playhead, activeLoopId, exitLoop],
   );
 
   const addLoop = (beats: number) => {
@@ -313,9 +422,14 @@ function TrackCueWorkspace({ track }: { track: Track }) {
 
       <section className="card deck">
         <div className="deck-bar">
-          <button className="primary" onClick={togglePlay} disabled={!audioInfo} title="Space">
+          <button className="primary" onClick={togglePlay} disabled={!deckReady} title="Space">
             {playing ? '❚❚ Pause' : '▶ Play'}
           </button>
+          {activeLoop && (
+            <button className="small looping-btn" onClick={exitLoop} title="Release the loop and play on">
+              ↻ {activeLoop.name || 'Loop'} · exit
+            </button>
+          )}
           <span className="clock">
             {formatTime(playhead)}
             {bpm && <span className="muted"> · bar {barBeatLabel(playhead, bpm, gridStart)}</span>}
@@ -341,6 +455,19 @@ function TrackCueWorkspace({ track }: { track: Track }) {
             </select>
           </label>
           <span className="grow" />
+          <label className="inline volume" title="Preview volume">
+            🔈
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.01}
+              value={volume}
+              onChange={(e) => setVolume(Number(e.target.value))}
+              aria-label="Volume"
+            />
+          </label>
+          {audioInfo && !deckReady && !loading[track.id] && <span className="muted small-text">Loading audio…</span>}
           {loading[track.id] ? (
             <span className="muted">Analysing audio…</span>
           ) : (
@@ -382,6 +509,7 @@ function TrackCueWorkspace({ track }: { track: Track }) {
         <Waveform
           duration={duration}
           peaks={wave?.peaks}
+          bands={wave?.bands}
           peaksPerSecond={wave?.peaksPerSecond}
           cues={track.cues}
           playhead={playhead}
@@ -400,6 +528,7 @@ function TrackCueWorkspace({ track }: { track: Track }) {
         <Waveform
           duration={duration}
           peaks={wave?.peaks}
+          bands={wave?.bands}
           peaksPerSecond={wave?.peaksPerSecond}
           cues={track.cues}
           playhead={playhead}
@@ -416,31 +545,23 @@ function TrackCueWorkspace({ track }: { track: Track }) {
             if (c) seek(c.start);
           }}
         />
-        {audioInfo && (
-          <audio
-            ref={audioEl}
-            src={audioInfo.url}
-            onPlay={() => setPlaying(true)}
-            onPause={() => {
-              setPlaying(false);
-              if (audioEl.current) setPlayhead(audioEl.current.currentTime);
-            }}
-            onEnded={() => setPlaying(false)}
-          />
-        )}
       </section>
 
       <div className="cue-columns">
         <section className="card">
           <div className="card-head">
             <h3>Hot cues</h3>
-            <span className="muted">Empty pad: set at playhead · filled pad: jump · keys 1–8 · drag to rearrange</span>
+            <span className="muted" title="Empty pad: set a cue at the playhead. Filled pad: play from it (loop pads engage/release the loop). Keys 1–8. Drag pads to rearrange.">
+              Tap to set / play · 1–8 · drag to rearrange
+            </span>
           </div>
           <div className="pads">
             {hotCues.map((c, slot) => (
               <button
                 key={slot}
                 className={`pad ${c ? 'filled' : ''} ${c && c.id === selectedId ? 'selected' : ''} ${
+                  c && c.id === activeLoopId ? 'looping' : ''
+                } ${
                   padDrop === slot ? 'drop-target' : ''
                 } ${c && c.id === draggingCueId ? 'drag-source' : ''}`}
                 style={c ? { background: c.color, borderColor: c.color } : undefined}
