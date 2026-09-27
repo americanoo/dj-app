@@ -2145,3 +2145,53 @@ canvas.wave.detail {
   border-left-width: 2px;
   background: rgba(255, 255, 255, 0.02);
 }
+
+
+/* Deck layout: full-width waveform, pads in one row beneath, cue list beside them */
+.deck-pane .workspace {
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 360px);
+  row-gap: 12px;
+}
+.deck-pane .workspace > .deck {
+  grid-column: 1 / -1;
+}
+.deck-pane .pads {
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+}
+.deck-pane .pad {
+  height: 52px;
+}
+.deck-pane .cue-columns > .card:first-child {
+  background-image: none;
+  padding-left: 0;
+}
+.deck-pane .cue-columns > .card:first-child .row {
+  margin: 4px 0 0;
+}
+.deck-pane .cue-columns > .card:last-child {
+  max-height: 170px;
+  overflow: auto;
+}
+@media (max-width: 1100px) {
+  .deck-pane .workspace {
+    grid-template-columns: 1fr;
+  }
+  .deck-pane .pads {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+/* loop buttons, memory cue and clear share one line under the pads */
+.deck-pane .cue-columns > .card:first-child {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 14px;
+}
+.deck-pane .cue-columns > .card:first-child > .card-head,
+.deck-pane .cue-columns > .card:first-child > .pads,
+.deck-pane .cue-columns > .card:first-child > .memory-drop {
+  flex: 0 0 100%;
+}
+.deck-pane .cue-columns > .card:first-child > .row {
+  flex: none;
+}

@@ -314,7 +314,7 @@ function loadLayout(): { deck: number; timeline: number } {
   } catch {
     // fall through to defaults
   }
-  return { deck: 380, timeline: 250 };
+  return { deck: 440, timeline: 240 };
 }
 
 function clamp(v: number, min: number, max: number): number {
