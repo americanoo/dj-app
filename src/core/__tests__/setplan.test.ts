@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { newSet, type Library, type Track } from '../model';
-import { buildTimeline, setPlanMarkdown, totalSeconds } from '../setplan';
+import { buildTimeline, formatSetTime, parseClock, setEnd, setPlanMarkdown, totalSeconds, withTimes } from '../setplan';
 import { reducer } from '../../ui/store';
 import { emptyProject } from '../model';
 
@@ -61,24 +61,78 @@ describe('set timeline', () => {
   });
 });
 
-describe('set reducer', () => {
-  it('keeps chapters contiguous when adding and moving entries', () => {
-    let p = emptyProject();
+describe('timeline reducer', () => {
+  const lib = (): Library => ({
+    tracks: {
+      a: track('a', { duration: 300 }),
+      b: track('b', { duration: 240 }),
+      c: track('c', { duration: 360 }),
+    },
+    playlists: [],
+  });
+  const withLib = () => {
+    const p = emptyProject();
+    p.library = lib();
+    return p;
+  };
+  const times = (p: ReturnType<typeof emptyProject>) =>
+    p.sets[0].entries.map((e) => `${e.trackId}@${e.at}`);
+
+  it('appends added tracks after the last one', () => {
+    let p = withLib();
+    p = reducer(p, { type: 'addEntries', trackIds: ['a', 'b'] });
+    p = reducer(p, { type: 'addEntries', trackIds: ['c'] });
+    expect(times(p)).toEqual(['a@0', 'b@300', 'c@540']);
+    expect(new Set(p.sets[0].entries.map((e) => e.chapterId)).size).toBe(1);
+  });
+
+  it('places a dragged track at an exact time and keeps the night sorted', () => {
+    let p = withLib();
+    p = reducer(p, { type: 'addEntries', trackIds: ['a', 'b'] }); // 0, 300
+    p = reducer(p, { type: 'placeTrack', trackId: 'c', at: 150.5 });
+    expect(times(p)).toEqual(['a@0', 'c@150.5', 'b@300']);
+    p = reducer(p, { type: 'placeTrack', trackId: 'c', at: -20 });
+    expect(times(p)).toContain('c@0'); // never before the start of the night
+  });
+
+  it('moves tracks in time and adopts the chapter they land in', () => {
+    let p = withLib();
     const [warm, build] = p.sets[0].chapters;
-    p = reducer(p, { type: 'addEntries', trackIds: ['x', 'y'], chapterId: build.id });
-    p = reducer(p, { type: 'addEntries', trackIds: ['w'], chapterId: warm.id });
-    const ids = () => p.sets[0].entries.map((e) => e.trackId);
-    expect(ids()).toEqual(['w', 'x', 'y']);
+    p = reducer(p, { type: 'addEntries', trackIds: ['a', 'b'], chapterId: warm.id });
+    p = reducer(p, { type: 'addEntries', trackIds: ['c'], chapterId: build.id }); // c@540
+    const c = p.sets[0].entries.find((e) => e.trackId === 'c')!;
+    p = reducer(p, { type: 'setEntryTime', id: c.id, at: 100 });
+    expect(times(p)).toEqual(['a@0', 'c@100', 'b@300']);
+    expect(p.sets[0].entries.find((e) => e.id === c.id)!.chapterId).toBe(warm.id);
+  });
 
-    const y = p.sets[0].entries[2];
-    p = reducer(p, { type: 'moveEntry', id: y.id, toIndex: 0, chapterId: warm.id });
-    expect(ids()).toEqual(['y', 'w', 'x']);
-    expect(p.sets[0].entries[0].chapterId).toBe(warm.id);
+  it('lays out sets saved before tracks had times, end to end', () => {
+    const p = withLib();
+    const set = p.sets[0];
+    set.entries = ['a', 'b'].map((trackId, i) => ({ id: `e${i}`, trackId, chapterId: set.chapters[0].id, energy: 5, transition: '', notes: '' }));
+    expect(withTimes(set, p.library).entries.map((e) => e.at)).toEqual([0, 300]);
+    expect(setEnd(set, p.library)).toBe(540);
+  });
 
+  it('keeps entries when a chapter is removed or reordered', () => {
+    let p = withLib();
+    const [warm, build] = p.sets[0].chapters;
+    p = reducer(p, { type: 'addEntries', trackIds: ['a'], chapterId: build.id });
     p = reducer(p, { type: 'moveChapter', id: warm.id, delta: 1 });
-    expect(ids()).toEqual(['x', 'y', 'w']);
-
+    expect(p.sets[0].chapters[1].id).toBe(warm.id);
     p = reducer(p, { type: 'removeChapter', id: build.id });
-    expect(p.sets[0].entries.every((e) => e.chapterId === warm.id)).toBe(true);
+    expect(p.sets[0].entries.every((e) => e.chapterId !== build.id)).toBe(true);
+  });
+});
+
+describe('set clock', () => {
+  it('shows wall-clock or elapsed time', () => {
+    expect(parseClock('22:30')).toBe(81000);
+    expect(parseClock('25:00')).toBeUndefined();
+    expect(formatSetTime(3725, '22:30')).toBe('23:32');
+    expect(formatSetTime(3725, '22:30', true)).toBe('23:32:05');
+    expect(formatSetTime(7200, '23:00')).toBe('01:00'); // past midnight
+    expect(formatSetTime(3725)).toBe('1:02:05');
+    expect(formatSetTime(65)).toBe('1:05');
   });
 });

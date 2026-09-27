@@ -11,10 +11,10 @@ import { MergeReview } from './MergeReview';
 import { LinkFolderButton } from './MusicFolderControl';
 import { useVersions } from './versions';
 import { defaultVersionName, VersionsPanel } from './VersionsPanel';
-import { NarrativeView } from './NarrativeView';
+import { StoryPanel } from './StoryPanel';
+import { Timeline } from './Timeline';
 import { activeSet, useStore } from './store';
 
-export type Tab = 'library' | 'narrative' | 'cues' | 'export';
 
 interface PendingMerge {
   fileName: string;
@@ -33,8 +33,17 @@ export function App() {
   const { attach } = useAudio();
   const { save: saveVersion } = useVersions();
   const [versionsOpen, setVersionsOpen] = useState(false);
-  const [tab, setTab] = useState<Tab>('library');
-  const [cueTrackId, setCueTrackId] = useState<string | null>(null);
+  const [loadedTrackId, setLoadedTrackId] = useState<string | null>(null);
+  const [storyOpen, setStoryOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+  const [layout, setLayout] = useState(loadLayout);
+  useEffect(() => {
+    try {
+      localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout));
+    } catch {
+      // private mode: sizes just aren't remembered
+    }
+  }, [layout]);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [dragging, setDragging] = useState(false);
   const [pendingMerge, setPendingMerge] = useState<PendingMerge | null>(null);
@@ -48,10 +57,7 @@ export function App() {
     window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), kind === 'error' ? 9000 : 5000);
   }, []);
 
-  const openCues = useCallback((trackId: string) => {
-    setCueTrackId(trackId);
-    setTab('cues');
-  }, []);
+  const openCues = useCallback((trackId: string) => setLoadedTrackId(trackId), []);
 
   const handleFiles = useCallback(
     async (files: File[]) => {
@@ -164,7 +170,6 @@ export function App() {
   }, [handleFiles]);
 
   const set = activeSet(project);
-  const trackCount = Object.keys(project.library.tracks).length;
 
   return (
     <div className="app">
@@ -175,20 +180,6 @@ export function App() {
           </span>
           Setcraft
         </div>
-        <nav className="tabs" role="tablist">
-          {(
-            [
-              ['library', `Library (${trackCount})`],
-              ['narrative', `Narrative (${set.entries.length})`],
-              ['cues', 'Cues & loops'],
-              ['export', 'Export'],
-            ] as [Tab, string][]
-          ).map(([id, label]) => (
-            <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>
-              {label}
-            </button>
-          ))}
-        </nav>
         <div className="topbar-right">
           <select
             aria-label="Active set"
@@ -209,9 +200,15 @@ export function App() {
             <option value="__new">+ New set…</option>
             <option value="__dup">⧉ Duplicate "{set.name}"</option>
           </select>
+          <button onClick={() => setStoryOpen(true)} title="Story, venue, start time and chapters of this set">
+            Story &amp; chapters
+          </button>
           <LinkFolderButton topbar />
           <button onClick={() => setVersionsOpen(true)} title="Save and restore versions (⌘/Ctrl+S saves one)">
             Versions
+          </button>
+          <button onClick={() => setExportOpen(true)} title="Export to rekordbox, Traktor, Serato, djay Pro or M3U8">
+            Export
           </button>
           <button className="primary" onClick={() => fileInput.current?.click()}>
             Import
@@ -230,14 +227,38 @@ export function App() {
         </div>
       </header>
 
-      <main className="content">
-        {tab === 'library' && <LibraryView onOpenCues={openCues} onImport={() => fileInput.current?.click()} />}
-        {tab === 'narrative' && <NarrativeView onOpenCues={openCues} onGoLibrary={() => setTab('library')} />}
-        {tab === 'cues' && <CueEditor trackId={cueTrackId} onSelectTrack={setCueTrackId} />}
-        {tab === 'export' && <ExportPanel toast={toast} />}
+      <main className="workspace-layout">
+        <section className="pane deck-pane" style={{ height: layout.deck }}>
+          <CueEditor trackId={loadedTrackId} onSelectTrack={setLoadedTrackId} />
+        </section>
+        <Splitter onDrag={(dy) => setLayout((l) => ({ ...l, deck: clamp(l.deck + dy, 170, 900) }))} />
+        <section className="pane timeline-host" style={{ height: layout.timeline }}>
+          <Timeline selectedTrackId={loadedTrackId} onSelectTrack={setLoadedTrackId} onOpenStory={() => setStoryOpen(true)} />
+        </section>
+        <Splitter onDrag={(dy) => setLayout((l) => ({ ...l, timeline: clamp(l.timeline + dy, 150, 700) }))} />
+        <section className="pane library-pane">
+          <LibraryView
+            selectedTrackId={loadedTrackId}
+            onSelectTrack={setLoadedTrackId}
+            onImport={() => fileInput.current?.click()}
+          />
+        </section>
       </main>
 
       {versionsOpen && <VersionsPanel onClose={() => setVersionsOpen(false)} toast={toast} />}
+      {storyOpen && <StoryPanel onClose={() => setStoryOpen(false)} />}
+      {exportOpen && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Export" onClick={() => setExportOpen(false)}>
+          <div className="modal export-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-body">
+              <ExportPanel toast={toast} />
+            </div>
+            <footer className="modal-foot">
+              <button onClick={() => setExportOpen(false)}>Close</button>
+            </footer>
+          </div>
+        </div>
+      )}
       {pendingMerge && (
         <MergeReview
           fileName={pendingMerge.fileName}
@@ -267,5 +288,47 @@ export function App() {
         ))}
       </div>
     </div>
+  );
+}
+
+const LAYOUT_KEY = 'setcraft-layout-v1';
+
+/** Heights (px) of the deck and timeline panes; the library gets the rest. */
+function loadLayout(): { deck: number; timeline: number } {
+  try {
+    const saved = JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? 'null');
+    if (saved && typeof saved.deck === 'number' && typeof saved.timeline === 'number') return saved;
+  } catch {
+    // fall through to defaults
+  }
+  return { deck: 380, timeline: 250 };
+}
+
+function clamp(v: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, v));
+}
+
+/** Drag handle between two stacked panes. */
+function Splitter({ onDrag }: { onDrag: (dy: number) => void }) {
+  const last = useRef<number | null>(null);
+  return (
+    <div
+      className="splitter"
+      role="separator"
+      aria-orientation="horizontal"
+      title="Drag to resize"
+      onPointerDown={(e) => {
+        last.current = e.clientY;
+        e.currentTarget.setPointerCapture(e.pointerId);
+      }}
+      onPointerMove={(e) => {
+        if (last.current === null) return;
+        onDrag(e.clientY - last.current);
+        last.current = e.clientY;
+      }}
+      onPointerUp={() => {
+        last.current = null;
+      }}
+    />
   );
 }

@@ -97,6 +97,11 @@ export interface SetEntry {
   /** Cue ids on the track used as the mix-in / mix-out points. */
   mixInCueId?: string;
   mixOutCueId?: string;
+  /**
+   * When this track starts, in seconds from the start of the set. Entries from
+   * older versions don't have it and are laid out one after another.
+   */
+  at?: number;
 }
 
 export interface SetPlan {
@@ -106,6 +111,8 @@ export interface SetPlan {
   /** The story of the set, in the DJ's own words. */
   story: string;
   targetMinutes: number;
+  /** Clock time the set starts, "HH:MM" (e.g. "22:00"), for showing real times on the timeline. */
+  startClock?: string;
   chapters: Chapter[];
   entries: SetEntry[];
 }

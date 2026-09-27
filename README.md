@@ -17,6 +17,21 @@ npm run build    # static site in dist/ – host anywhere
 
 ---
 
+## One-page workspace
+
+Everything happens on one page, in three stacked panels. Drag the handles between them to resize; the sizes
+are remembered.
+
+| Panel | What it's for |
+|-------|---------------|
+| **Deck** (top) | The loaded track: colour waveform with sections, player, hot cue pads, loops and the cue list side by side. ‹ › steps through the night. |
+| **Journey of the night** (centre) | A zoomable timeline of the set, from the whole night down to seconds, shown in clock time once the set has a start time. Drag tracks here from the library at the exact moment they should start, and drag them along to move them. Tracks snap to whole seconds and to neighbouring tracks' edges; hold **Shift** for free placement. Alternating lanes show overlaps as blends. Chapter bands and the energy line sit above, and the dot on each track shows its key compatibility with the previous one. Click a track to load it into the deck and edit its start time, chapter, energy, transition, notes and mix points; **Delete** removes it. |
+| **Library** (bottom) | Your imported collection and playlists. Click a row to load it into the deck, drag it onto the timeline, or double-click to add it at the end of the night. |
+
+The top bar holds **Story & chapters** (story, venue, start time, target length, chapters and the energy arc),
+the music folder, **Versions**, **Export** and **Import**. Keys are colour-coded on the Camelot wheel everywhere:
+neighbouring (compatible) keys get neighbouring colours, and minor keys are deeper than major ones.
+
 ## The workflow
 
 1. **Import**: drop in your library exports (or click *Import*).
@@ -206,7 +221,8 @@ src/
     deck.ts             Web Audio playback: instant jumps, real loops, click-free fades
     analysisWorker.ts   waveform analysis off the main thread
     versions.tsx        version snapshots stored in IndexedDB
-    LibraryView, NarrativeView, EnergyArc, CueEditor, Waveform, ExportPanel, MergeReview, VersionsPanel
+    App (one-page layout), CueEditor (deck), Timeline, LibraryView, StoryPanel, EnergyArc, Waveform,
+    ExportPanel, MergeReview, VersionsPanel
 ```
 
 Each importer converts into a single internal model, and each exporter converts out of it. Cue positions are stored

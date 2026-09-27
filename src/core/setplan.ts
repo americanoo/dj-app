@@ -17,6 +17,8 @@ export interface TimelineItem {
   /** Percent change from the previous track's BPM. */
   bpmDelta: number | undefined;
   warnings: string[];
+  /** Seconds between the previous track's end and this start: negative = the two overlap (a blend). */
+  gap: number;
 }
 
 export function playLength(entry: SetEntry, track: Track | undefined): { seconds: number; estimated: boolean } {
@@ -28,13 +30,45 @@ export function playLength(entry: SetEntry, track: Track | undefined): { seconds
   return { seconds: Math.max(0, end - (mixIn ?? 0)), estimated: mixOut === undefined };
 }
 
+/**
+ * The set with a start time on every entry, sorted by time. Entries without
+ * one (from older versions) are placed straight after the entry before them.
+ */
+export function withTimes(set: SetPlan, lib: Library): SetPlan {
+  if (set.entries.every((e) => e.at !== undefined)) {
+    const sorted = sortByTime(set.entries);
+    return sorted === set.entries ? set : { ...set, entries: sorted };
+  }
+  let cursor = 0;
+  const entries = set.entries.map((e) => {
+    const at = e.at ?? cursor;
+    cursor = at + playLength(e, lib.tracks[e.trackId]).seconds;
+    return e.at === undefined ? { ...e, at } : e;
+  });
+  return { ...set, entries: sortByTime(entries) };
+}
+
+function sortByTime(entries: SetEntry[]): SetEntry[] {
+  const sorted = [...entries].sort((a, b) => (a.at ?? 0) - (b.at ?? 0));
+  return sorted.every((e, i) => e === entries[i]) ? entries : sorted;
+}
+
+/** End of the last track, seconds. */
+export function setEnd(set: SetPlan, lib: Library): number {
+  return withTimes(set, lib).entries.reduce(
+    (end, e) => Math.max(end, (e.at ?? 0) + playLength(e, lib.tracks[e.trackId]).seconds),
+    0,
+  );
+}
+
 export function buildTimeline(set: SetPlan, lib: Library): TimelineItem[] {
   const items: TimelineItem[] = [];
-  let t = 0;
   let prev: Track | undefined;
-  set.entries.forEach((entry, i) => {
+  let prevEnd: number | undefined;
+  withTimes(set, lib).entries.forEach((entry, i) => {
     const track = lib.tracks[entry.trackId];
     const { seconds, estimated } = playLength(entry, track);
+    const startsAt = entry.at ?? 0;
     const rel = i === 0 ? 'unknown' : keyRelation(prev?.key, track?.key);
     const bpmDelta =
       i > 0 && prev?.bpm && track?.bpm ? ((track.bpm - prev.bpm) / prev.bpm) * 100 : undefined;
@@ -46,16 +80,44 @@ export function buildTimeline(set: SetPlan, lib: Library): TimelineItem[] {
     if (track && entry.mixInCueId && !track.cues.some((c) => c.id === entry.mixInCueId)) {
       warnings.push('Mix-in cue was deleted');
     }
-    items.push({ entry, track, startsAt: t, playFor: seconds, estimated, keyRelation: rel, bpmDelta, warnings });
-    t += seconds;
+    const gap = prevEnd === undefined ? 0 : startsAt - prevEnd;
+    if (gap > 1) warnings.push(`${formatTime(gap, false)} of silence before this track`);
+    items.push({ entry, track, startsAt, playFor: seconds, estimated, keyRelation: rel, bpmDelta, warnings, gap });
     prev = track;
+    prevEnd = startsAt + seconds;
   });
   return items;
 }
 
 export function totalSeconds(items: TimelineItem[]): number {
-  const last = items[items.length - 1];
-  return last ? last.startsAt + last.playFor : 0;
+  return items.reduce((end, it) => Math.max(end, it.startsAt + it.playFor), 0);
+}
+
+/** "22:30" -> seconds after midnight. */
+export function parseClock(clock: string | undefined): number | undefined {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(clock?.trim() ?? '');
+  if (!m || Number(m[1]) > 23 || Number(m[2]) > 59) return undefined;
+  return Number(m[1]) * 3600 + Number(m[2]) * 60;
+}
+
+/**
+ * A moment of the set as a label: wall-clock time when the set has a start
+ * time ("23:15" / "23:15:30"), otherwise elapsed time ("1:15:00").
+ */
+export function formatSetTime(t: number, startClock?: string, withSeconds = false): string {
+  const base = parseClock(startClock);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const s = Math.max(0, Math.round(t));
+  if (base === undefined) {
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    return h ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`;
+  }
+  const clock = (base + s) % 86400;
+  const h = Math.floor(clock / 3600);
+  const m = Math.floor((clock % 3600) / 60);
+  return withSeconds ? `${pad(h)}:${pad(m)}:${pad(clock % 60)}` : `${pad(h)}:${pad(m)}`;
 }
 
 /** A human-readable run sheet to print or keep on the phone during the gig. */
@@ -64,6 +126,7 @@ export function setPlanMarkdown(set: SetPlan, lib: Library): string {
   const out: string[] = [];
   out.push(`# ${set.name}`);
   if (set.venue) out.push(`**Venue:** ${set.venue}`);
+  if (parseClock(set.startClock) !== undefined) out.push(`**Starts:** ${set.startClock}`);
   out.push(`**Planned length:** ${formatTime(totalSeconds(items), false)} of ${set.targetMinutes} min target`);
   out.push('');
   if (set.story.trim()) {
@@ -83,7 +146,7 @@ export function setPlanMarkdown(set: SetPlan, lib: Library): string {
       const meta = [t?.bpm ? `${t.bpm.toFixed(1)} BPM` : '', t?.key ? `${t.key} / ${toCamelot(t.key)}` : '', `energy ${it.entry.energy}/10`]
         .filter(Boolean)
         .join(' · ');
-      out.push(`${n}. **${t ? `${t.artist} – ${t.title}` : 'Missing track'}** @ ${formatTime(it.startsAt, false)}  `);
+      out.push(`${n}. **${t ? `${t.artist} – ${t.title}` : 'Missing track'}** @ ${formatSetTime(it.startsAt, set.startClock)}  `);
       out.push(`   ${meta}`);
       if (it.entry.transition) out.push(`   ↪ Transition: ${it.entry.transition}`);
       if (it.entry.notes) out.push(`   ✎ ${it.entry.notes}`);

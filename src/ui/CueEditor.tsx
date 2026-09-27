@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { toCamelot, normaliseKey } from '../core/keys';
+import { keyColor, toCamelot, normaliseKey } from '../core/keys';
+import { withTimes } from '../core/setplan';
 import { CUE_COLORS, MAX_HOT_CUES, SLOT_LETTERS, uid, type Cue, type Project, type Track } from '../core/model';
 import { barBeatLabel, beatLength, formatTime, parseTime, round, snapToBeat } from '../core/time';
 import { audioContext, useAudio } from './audio';
@@ -17,99 +18,21 @@ import { cueDiffSummary, cueHistory, type CueHistoryEntry, type VersionMeta } fr
 const LOOP_BEATS = [1, 2, 4, 8, 16, 32];
 const ZOOM_BARS = [2, 4, 8, 16, 32];
 
+/** The deck: waveform, pads and cues of the selected track. */
 export function CueEditor({ trackId, onSelectTrack }: { trackId: string | null; onSelectTrack: (id: string) => void }) {
   const { project } = useStore();
-  const set = activeSet(project);
-  const setTrackIds = set.entries.map((e) => e.trackId).filter((id) => project.library.tracks[id]);
-  const effectiveId = trackId && project.library.tracks[trackId] ? trackId : setTrackIds[0] ?? null;
-  const track = effectiveId ? project.library.tracks[effectiveId] : undefined;
-
-  return (
-    <div className="cue-editor">
-      <TrackPicker currentId={effectiveId} setTrackIds={setTrackIds} onSelect={onSelectTrack} />
-      {track ? (
-        <TrackCueWorkspace key={track.id} track={track} />
-      ) : (
-        <div className="empty-state small">
-          <h2>Pick a track</h2>
-          <p>Choose a track from your set or search the library above to plan its hot cues and loops.</p>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function TrackPicker({
-  currentId,
-  setTrackIds,
-  onSelect,
-}: {
-  currentId: string | null;
-  setTrackIds: string[];
-  onSelect: (id: string) => void;
-}) {
-  const { project } = useStore();
-  const [q, setQ] = useState('');
-  const results = useMemo(() => {
-    const s = q.trim().toLowerCase();
-    if (!s) return [];
-    return Object.values(project.library.tracks)
-      .filter((t) => `${t.artist} ${t.title}`.toLowerCase().includes(s))
-      .slice(0, 12);
-  }, [q, project.library.tracks]);
-  const idx = currentId ? setTrackIds.indexOf(currentId) : -1;
-
-  return (
-    <div className="track-picker card">
-      <label className="inline">
-        In this set
-        <select value={idx >= 0 ? currentId! : ''} onChange={(e) => e.target.value && onSelect(e.target.value)}>
-          <option value="">—</option>
-          {setTrackIds.map((id, i) => {
-            const t = project.library.tracks[id];
-            return (
-              <option key={id + i} value={id}>
-                {i + 1}. {t.artist} – {t.title}
-              </option>
-            );
-          })}
-        </select>
-      </label>
-      <button className="icon" disabled={idx <= 0} onClick={() => onSelect(setTrackIds[idx - 1])} title="Previous track in set">
-        ‹
-      </button>
-      <button
-        className="icon"
-        disabled={idx < 0 || idx >= setTrackIds.length - 1}
-        onClick={() => onSelect(setTrackIds[idx + 1])}
-        title="Next track in set"
-      >
-        ›
-      </button>
-      <div className="search-pop">
-        <input type="search" placeholder="…or search the whole library" value={q} onChange={(e) => setQ(e.target.value)} />
-        {results.length > 0 && (
-          <ul className="pop">
-            {results.map((t) => (
-              <li key={t.id}>
-                <button
-                  onClick={() => {
-                    onSelect(t.id);
-                    setQ('');
-                  }}
-                >
-                  <b>{t.artist}</b> – {t.title}
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
+  const track = trackId ? project.library.tracks[trackId] : undefined;
+  if (!track) {
+    return (
+      <div className="deck-empty">
+        <b>No track loaded.</b> Click a track in the library or on the timeline to load it here and set its cues.
       </div>
-    </div>
-  );
+    );
+  }
+  return <TrackCueWorkspace key={track.id} track={track} onSelectTrack={onSelectTrack} />;
 }
 
-function TrackCueWorkspace({ track }: { track: Track }) {
+function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTrack: (id: string) => void }) {
   const { dispatch } = useStore();
   const { audio: attached, remembered, rememberedIds, loading, attach, loadRemembered, getBuffer } = useAudio();
   const folder = useMusicFolder();
@@ -399,6 +322,8 @@ function TrackCueWorkspace({ track }: { track: Track }) {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.metaKey || e.ctrlKey || e.altKey) return;
+      // The timeline and library handle their own keys; only Space (play) reaches the deck from there.
+      if ((e.target as HTMLElement).closest?.('[data-keys-own]') && e.code !== 'Space') return;
       if (e.code === 'Space') {
         e.preventDefault();
         togglePlay();
@@ -436,9 +361,17 @@ function TrackCueWorkspace({ track }: { track: Track }) {
   return (
     <div className="workspace">
       <section className="card track-head">
+        <NightStepper trackId={track.id} onSelectTrack={onSelectTrack} />
         <div className="track-title">
           <h2>{track.title}</h2>
-          <div className="muted">{track.artist}</div>
+          <div className="muted">
+            {track.artist}
+            {track.key && (
+              <b className="key-pill" style={{ background: keyColor(track.key) }}>
+                {toCamelot(track.key)}
+              </b>
+            )}
+          </div>
         </div>
         <TrackFields track={track} />
       </section>
@@ -547,7 +480,7 @@ function TrackCueWorkspace({ track }: { track: Track }) {
           gridStart={gridStart}
           selectedCueId={selectedId}
           windowSeconds={beat ? zoomBars * 4 * beat : zoomBars * 2}
-          height={150}
+          height={118}
           onSeek={(s) => seek(q(s))}
           onSelectCue={(id) => {
             setSelectedId(id);
@@ -566,7 +499,7 @@ function TrackCueWorkspace({ track }: { track: Track }) {
           selectedCueId={selectedId}
           bpm={bpm}
           gridStart={gridStart}
-          height={56}
+          height={42}
           onSeek={seek}
           snap={dragSnap}
           onCueDrag={(id, change) => updateCue(id, change)}
@@ -843,6 +776,31 @@ function CueHistory({ track }: { track: Track }) {
         </div>
       ))}
     </section>
+  );
+}
+
+/** ‹ › to step to the previous / next track in the night. */
+function NightStepper({ trackId, onSelectTrack }: { trackId: string; onSelectTrack: (id: string) => void }) {
+  const { project } = useStore();
+  const ids = withTimes(activeSet(project), project.library)
+    .entries.map((e) => e.trackId)
+    .filter((id) => project.library.tracks[id]);
+  const idx = ids.indexOf(trackId);
+  return (
+    <div className="night-stepper">
+      <button className="icon" disabled={idx <= 0} onClick={() => onSelectTrack(ids[idx - 1])} title="Previous track in the night">
+        ‹
+      </button>
+      <span className="muted small-text">{idx >= 0 ? `${idx + 1}/${ids.length}` : 'not in set'}</span>
+      <button
+        className="icon"
+        disabled={idx < 0 || idx >= ids.length - 1}
+        onClick={() => onSelectTrack(ids[idx + 1])}
+        title="Next track in the night"
+      >
+        ›
+      </button>
+    </div>
   );
 }
 

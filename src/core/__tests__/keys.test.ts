@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fromTraktorKeyValue, keyRelation, normaliseKey, toCamelot, toOpenKey, toTraktorKeyValue } from '../keys';
+import { fromTraktorKeyValue, keyColor, keyRelation, normaliseKey, toCamelot, toOpenKey, toTraktorKeyValue } from '../keys';
 import { barBeatLabel, formatTime, parseTime, snapToBeat } from '../time';
 
 describe('keys', () => {
@@ -60,5 +60,14 @@ describe('time', () => {
     expect(barBeatLabel(0.1, 120, 0.1)).toBe('1.1');
     expect(barBeatLabel(2.1, 120, 0.1)).toBe('2.1');
     expect(barBeatLabel(2.6, 120, 0.1)).toBe('2.2');
+  });
+});
+
+describe('key colours', () => {
+  it('gives compatible keys neighbouring colours and separates minor from major', () => {
+    expect(keyColor('Am')).toBe(keyColor('8A'));
+    expect(keyColor('Am')).not.toBe(keyColor('C')); // same wheel number, different ring
+    expect(keyColor('Am')).toMatch(/^hsl\(/);
+    expect(keyColor('nonsense')).toBeUndefined();
   });
 });

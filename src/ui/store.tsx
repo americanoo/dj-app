@@ -14,6 +14,7 @@ import {
 import type { ImportResult } from '../core/formats';
 import { mergeIntoLibrary, type MergeChoices } from '../core/merge';
 import { copySet } from '../core/versions';
+import { playLength, setEnd, withTimes } from '../core/setplan';
 
 const STORAGE_KEY = 'setcraft-project-v1';
 
@@ -30,9 +31,10 @@ export type Action =
   | { type: 'duplicateSet'; id: string }
   | { type: 'addSetCopy'; set: SetPlan; name: string; tracks: Track[] }
   | { type: 'addEntries'; trackIds: string[]; chapterId?: string }
+  | { type: 'placeTrack'; trackId: string; at: number; chapterId?: string }
+  | { type: 'setEntryTime'; id: string; at: number }
   | { type: 'updateEntry'; id: string; patch: Partial<SetEntry> }
   | { type: 'removeEntry'; id: string }
-  | { type: 'moveEntry'; id: string; toIndex: number; chapterId?: string }
   | { type: 'addChapter' }
   | { type: 'updateChapter'; id: string; patch: Partial<Chapter> }
   | { type: 'removeChapter'; id: string }
@@ -96,38 +98,45 @@ export function reducer(p: Project, a: Action): Project {
       return { ...p, library: { ...p.library, tracks }, sets: [...p.sets, copy], activeSetId: copy.id };
     }
     case 'addEntries':
-      return mapActive(p, (s) => {
-        const chapterId = a.chapterId ?? s.chapters[s.chapters.length - 1]?.id ?? '';
-        const chapterIdx = s.chapters.findIndex((c) => c.id === chapterId);
-        const energy = Math.round(3 + (chapterIdx / Math.max(1, s.chapters.length - 1)) * 5) || 5;
-        const added: SetEntry[] = a.trackIds.map((trackId) => ({
-          id: uid('ent'),
-          trackId,
-          chapterId,
-          energy,
-          transition: '',
-          notes: '',
-        }));
-        // Insert after the last entry of that chapter so chapters stay contiguous.
-        const lastIdx = findLastIndex(s.entries, (e) => chapterOrder(s, e.chapterId) <= chapterIdx);
-        const entries = [...s.entries];
-        entries.splice(lastIdx + 1, 0, ...added);
-        return { ...s, entries };
+      // Appended after the last track in the night.
+      return mapActive(p, (s0) => {
+        const s = withTimes(s0, p.library);
+        const last = s.entries[s.entries.length - 1];
+        const chapterId = a.chapterId ?? last?.chapterId ?? s.chapters[0]?.id ?? '';
+        let cursor = setEnd(s, p.library);
+        const added = a.trackIds.map((trackId) => {
+          const e = newEntry(s, trackId, chapterId, cursor);
+          cursor += playLength(e, p.library.tracks[trackId]).seconds;
+          return e;
+        });
+        return { ...s, entries: [...s.entries, ...added] };
+      });
+    case 'placeTrack':
+      return mapActive(p, (s0) => {
+        const s = withTimes(s0, p.library);
+        const at = Math.max(0, a.at);
+        const e = newEntry(s, a.trackId, a.chapterId ?? chapterAt(s, at), at);
+        return withTimes({ ...s, entries: [...s.entries, e] }, p.library);
+      });
+    case 'setEntryTime':
+      return mapActive(p, (s0) => {
+        const s = withTimes(s0, p.library);
+        const at = Math.max(0, a.at);
+        const others = s.entries.filter((e) => e.id !== a.id);
+        const before = [...others].reverse().find((e) => (e.at ?? 0) <= at);
+        const after = others.find((e) => (e.at ?? 0) > at);
+        const entries = s.entries.map((e) => {
+          if (e.id !== a.id) return e;
+          // Dropped in the middle of another chapter: become part of it.
+          const adopt = before && after && before.chapterId === after.chapterId && before.chapterId !== e.chapterId;
+          return { ...e, at, chapterId: adopt ? before.chapterId : e.chapterId };
+        });
+        return withTimes({ ...s, entries }, p.library);
       });
     case 'updateEntry':
       return mapActive(p, (s) => ({ ...s, entries: s.entries.map((e) => (e.id === a.id ? { ...e, ...a.patch } : e)) }));
     case 'removeEntry':
       return mapActive(p, (s) => ({ ...s, entries: s.entries.filter((e) => e.id !== a.id) }));
-    case 'moveEntry':
-      return mapActive(p, (s) => {
-        const from = s.entries.findIndex((e) => e.id === a.id);
-        if (from < 0) return s;
-        const entries = [...s.entries];
-        const [moved] = entries.splice(from, 1);
-        const to = Math.max(0, Math.min(entries.length, a.toIndex > from ? a.toIndex - 1 : a.toIndex));
-        entries.splice(to, 0, a.chapterId ? { ...moved, chapterId: a.chapterId } : moved);
-        return { ...s, entries };
-      });
     case 'addChapter':
       return mapActive(p, (s) => ({
         ...s,
@@ -150,10 +159,7 @@ export function reducer(p: Project, a: Action): Project {
         if (idx < 0 || to < 0 || to >= s.chapters.length) return s;
         const chapters = [...s.chapters];
         [chapters[idx], chapters[to]] = [chapters[to], chapters[idx]];
-        // Keep entries grouped in chapter order.
-        const order = new Map(chapters.map((c, i) => [c.id, i]));
-        const entries = [...s.entries].sort((x, y) => (order.get(x.chapterId) ?? 0) - (order.get(y.chapterId) ?? 0));
-        return { ...s, chapters, entries };
+        return { ...s, chapters };
       });
     case 'clearLibrary':
       return {
@@ -182,14 +188,16 @@ export function markEdits(prev: Cue[], next: Cue[]): Cue[] {
   });
 }
 
-function chapterOrder(s: SetPlan, chapterId: string): number {
-  const i = s.chapters.findIndex((c) => c.id === chapterId);
-  return i < 0 ? s.chapters.length : i;
+function newEntry(s: SetPlan, trackId: string, chapterId: string, at: number): SetEntry {
+  const chapterIdx = Math.max(0, s.chapters.findIndex((c) => c.id === chapterId));
+  const energy = Math.round(3 + (chapterIdx / Math.max(1, s.chapters.length - 1)) * 5) || 5;
+  return { id: uid('ent'), trackId, chapterId, energy, transition: '', notes: '', at };
 }
 
-function findLastIndex<T>(arr: T[], pred: (x: T) => boolean): number {
-  for (let i = arr.length - 1; i >= 0; i--) if (pred(arr[i])) return i;
-  return -1;
+/** The chapter playing at a moment: the track starting at or before it, else the next one. */
+export function chapterAt(s: SetPlan, t: number): string {
+  const before = [...s.entries].reverse().find((e) => (e.at ?? 0) <= t);
+  return before?.chapterId ?? s.entries[0]?.chapterId ?? s.chapters[0]?.id ?? '';
 }
 
 interface Store {

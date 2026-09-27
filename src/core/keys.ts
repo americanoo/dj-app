@@ -111,3 +111,14 @@ export function keyRelation(a: string | undefined, b: string | undefined): KeyRe
   // 8A -> 7B / 9B: the keys share six of seven notes.
   return diff === 1 || diff === 11 ? 'diagonal' : 'clash';
 }
+
+/**
+ * Colour for a key on the Camelot wheel: neighbouring (compatible) keys get
+ * neighbouring hues, minor (A) keys are deeper and major (B) keys lighter.
+ */
+export function keyColor(raw: string | undefined): string | undefined {
+  const k = parseKey(raw);
+  if (!k) return undefined;
+  const hue = Math.round(((camelotNumber(k) - 1) * 30 + 165) % 360);
+  return k.minor ? `hsl(${hue} 62% 52%)` : `hsl(${hue} 72% 68%)`;
+}

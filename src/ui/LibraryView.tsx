@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { toCamelot } from '../core/keys';
+import { keyColor, toCamelot } from '../core/keys';
+import { TRACK_DRAG_TYPE } from './Timeline';
 import type { Track } from '../core/model';
 import { formatTime } from '../core/time';
 import { activeSet, useStore } from './store';
@@ -8,7 +9,15 @@ import { LinkFolderButton, MusicFolderPanel } from './MusicFolderControl';
 
 type SortKey = 'order' | 'artist' | 'title' | 'bpm' | 'key' | 'duration';
 
-export function LibraryView({ onOpenCues, onImport }: { onOpenCues: (id: string) => void; onImport: () => void }) {
+export function LibraryView({
+  selectedTrackId,
+  onSelectTrack,
+  onImport,
+}: {
+  selectedTrackId: string | null;
+  onSelectTrack: (id: string) => void;
+  onImport: () => void;
+}) {
   const { project, dispatch } = useStore();
   const { audio, rememberedIds, outdatedIds, forgetAll } = useAudio();
   const { library } = project;
@@ -191,7 +200,22 @@ export function LibraryView({ onOpenCues, onImport }: { onOpenCues: (id: string)
             </thead>
             <tbody>
               {rows.slice(0, 2000).map((t) => (
-                <tr key={t.id} className={selected.has(t.id) ? 'selected' : ''} onDoubleClick={() => onOpenCues(t.id)}>
+                <tr
+                  key={t.id}
+                  className={`${selected.has(t.id) ? 'selected' : ''} ${t.id === selectedTrackId ? 'loaded' : ''}`}
+                  onClick={(e) => {
+                    if ((e.target as HTMLElement).closest('button, input')) return;
+                    onSelectTrack(t.id);
+                  }}
+                  onDoubleClick={() => add([t.id])}
+                  draggable
+                  onDragStart={(e) => {
+                    e.dataTransfer.effectAllowed = 'copy';
+                    e.dataTransfer.setData(TRACK_DRAG_TYPE, t.id);
+                    e.dataTransfer.setData('text/plain', `${t.artist} - ${t.title}`);
+                  }}
+                  title="Click to load in the deck · drag onto the timeline · double-click to add at the end of the night"
+                >
                   <td className="check">
                     <input type="checkbox" checked={selected.has(t.id)} onChange={() => toggle(t.id)} aria-label="Select" />
                   </td>
@@ -207,14 +231,14 @@ export function LibraryView({ onOpenCues, onImport }: { onOpenCues: (id: string)
                   <td className="num">{t.bpm ? t.bpm.toFixed(1) : ''}</td>
                   <td>
                     {t.key && (
-                      <span className="key" title={t.key}>
+                      <span className="key-pill" style={{ background: keyColor(t.key) }} title={t.key}>
                         {toCamelot(t.key) ?? t.key}
                       </span>
                     )}
                   </td>
                   <td className="num">{formatTime(t.duration, false)}</td>
                   <td className="num">
-                    <button className="link" onClick={() => onOpenCues(t.id)}>
+                    <button className="link" onClick={() => onSelectTrack(t.id)}>
                       {t.cues.filter((c) => c.slot !== null).length} hot / {t.cues.filter((c) => c.slot === null).length} mem
                     </button>
                     {(audio[t.id] || rememberedIds.has(t.id)) && (
