@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { keyColor, toCamelot, normaliseKey } from '../core/keys';
 import { withTimes } from '../core/setplan';
+import { scaleTempo } from '../core/tempo';
 import { CUE_COLORS, MAX_HOT_CUES, SLOT_LETTERS, uid, type Cue, type Project, type Track } from '../core/model';
 import { barBeatLabel, beatLength, formatTime, parseTime, round, snapToBeat } from '../core/time';
 import { audioContext, useAudio } from './audio';
@@ -940,13 +941,32 @@ function TrackFields({ track }: { track: Track }) {
   const { dispatch } = useStore();
   const update = (patch: Partial<Track>) => dispatch({ type: 'updateTrack', id: track.id, patch });
   const [bpmText, setBpmText] = useState(track.bpm?.toString() ?? '');
+  useEffect(() => setBpmText(track.bpm?.toString() ?? ''), [track.bpm]);
   const [keyText, setKeyText] = useState(track.key ?? '');
   const [gridText, setGridText] = useState(track.gridStart !== undefined ? formatTime(track.gridStart) : '');
 
   return (
     <div className="track-fields">
       <label>
-        BPM
+        <span className="bpm-label">
+          BPM
+          <button
+            className="tempo-btn"
+            disabled={!track.bpm}
+            onClick={() => update(scaleTempo(track, 0.5))}
+            title="Halve the BPM (fix a double-time reading, e.g. 192 → 96)"
+          >
+            ×½
+          </button>
+          <button
+            className="tempo-btn"
+            disabled={!track.bpm}
+            onClick={() => update(scaleTempo(track, 2))}
+            title="Double the BPM (fix a half-time reading, e.g. 87 → 174)"
+          >
+            ×2
+          </button>
+        </span>
         <input
           value={bpmText}
           inputMode="decimal"

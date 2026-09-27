@@ -1,6 +1,7 @@
 /** Narrative analysis of a set: timeline, transition checks and a printable plan. */
 import type { Library, SetEntry, SetPlan, Track } from './model';
 import { keyRelation, toCamelot, type KeyRelation } from './keys';
+import { effectiveBpmDelta } from './tempo';
 import { formatTime } from './time';
 
 export const DEFAULT_TRACK_SECONDS = 5 * 60;
@@ -74,8 +75,10 @@ export function buildTimeline(set: SetPlan, lib: Library): TimelineItem[] {
       i > 0 && prev?.bpm && track?.bpm ? ((track.bpm - prev.bpm) / prev.bpm) * 100 : undefined;
     const warnings: string[] = [];
     if (rel === 'clash') warnings.push(`Key clash: ${toCamelot(prev?.key)} → ${toCamelot(track?.key)}`);
-    if (bpmDelta !== undefined && Math.abs(bpmDelta) > 6) {
-      warnings.push(`BPM jump ${bpmDelta > 0 ? '+' : ''}${bpmDelta.toFixed(1)}% — plan a cut, echo-out or breakdown`);
+    // Half/double-time counts as the same groove, so 96 -> 192 isn't a "jump".
+    const groove = i > 0 && prev?.bpm && track?.bpm ? effectiveBpmDelta(prev.bpm, track.bpm) : undefined;
+    if (groove !== undefined && Math.abs(groove) > 6) {
+      warnings.push(`BPM jump ${groove > 0 ? '+' : ''}${groove.toFixed(1)}% — plan a cut, echo-out or breakdown`);
     }
     if (track && entry.mixInCueId && !track.cues.some((c) => c.id === entry.mixInCueId)) {
       warnings.push('Mix-in cue was deleted');

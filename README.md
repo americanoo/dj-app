@@ -169,6 +169,8 @@ cues go straight through. Re-importing the same file changes nothing.
 - Keyboard: `Space` play/pause · `1`–`8` pads · `M` memory cue · `Q` quantize · `←/→` beat (`Shift`: bar) ·
   `Delete` removes the selected cue.
 - Editing a track's BPM, key, grid start or file location here fixes that track's details before export.
+  **×½ / ×2** next to BPM fix half- or double-time readings (e.g. a 96 BPM reggaeton track read as 192)
+  without moving the downbeat. On the timeline, half/double-time mixes (96 → 192) aren't flagged as BPM jumps.
 
 ### 4. Export
 

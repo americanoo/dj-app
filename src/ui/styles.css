@@ -2195,3 +2195,26 @@ canvas.wave.detail {
 .deck-pane .cue-columns > .card:first-child > .row {
   flex: none;
 }
+
+/* ×½ / ×2 tempo fix buttons next to the BPM label */
+.bpm-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+button.tempo-btn {
+  height: 16px;
+  padding: 0 5px;
+  font-size: 10px;
+  font-family: var(--mono);
+  font-weight: 700;
+  letter-spacing: 0;
+  border-radius: 4px;
+  color: var(--cyan);
+  background: rgba(34, 211, 238, 0.06);
+  border-color: rgba(34, 211, 238, 0.2);
+}
+button.tempo-btn:hover:not(:disabled) {
+  background: rgba(34, 211, 238, 0.14);
+  border-color: rgba(34, 211, 238, 0.45);
+}

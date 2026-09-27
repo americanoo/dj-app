@@ -52,6 +52,16 @@ describe('set timeline', () => {
     expect(tl[2].warnings.join()).toMatch(/Key clash.*BPM jump \+12\.9%/);
   });
 
+  it('does not flag half/double-time mixes as BPM jumps', () => {
+    const half: Library = {
+      tracks: { x: track('x', { duration: 200, bpm: 96, key: 'Am' }), y: track('y', { duration: 200, bpm: 192, key: 'Am' }) },
+      playlists: [],
+    };
+    const s = newSet('Reggaeton');
+    s.entries = ['x', 'y'].map((trackId, i) => ({ id: `r${i}`, trackId, chapterId: s.chapters[0].id, energy: 5, transition: '', notes: '' }));
+    expect(buildTimeline(s, half)[1].warnings).toEqual([]);
+  });
+
   it('renders a run sheet', () => {
     const md = setPlanMarkdown(set, lib);
     expect(md).toContain('# Test');
