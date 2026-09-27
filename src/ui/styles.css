@@ -1246,3 +1246,11 @@ button.wide {
   background: rgba(79, 125, 255, 0.1);
   color: var(--accent);
 }
+.empty-folder {
+  margin-top: 28px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+.empty-folder p {
+  margin: 0 0 10px;
+}

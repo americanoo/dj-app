@@ -42,7 +42,8 @@ point to the same file path. Their cues are combined with a **smart merge** (bel
 Your library export only holds file paths, so Setcraft needs the audio to draw waveforms. There are three ways to
 give it:
 
-- **Link your music folder** (Library sidebar → *Music folder*, or *Link music folder…* in the cue editor). Setcraft
+- **Link your music folder** with **♫ Link music folder** in the top bar (also on the start screen, in the
+  Library sidebar and in the cue editor). Setcraft
   finds each track's file by name, using parent folders to tell apart files with the same name. Waveforms then load
   automatically when you open a track. Every subfolder is searched, at any depth. The only folders skipped are
   hidden ones and `_Serato_` / `PIONEER`, which hold DJ-software databases rather than music. *Analyse N missing* prepares every track in the current set in one go.

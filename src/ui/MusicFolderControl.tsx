@@ -3,8 +3,13 @@ import { useAudio } from './audio';
 import { useMusicFolder } from './musicFolder';
 import { activeSet, useStore } from './store';
 
-/** Link / reconnect the music folder. `compact` is a single button for toolbars. */
-export function LinkFolderButton({ compact = false }: { compact?: boolean }) {
+/**
+ * Link / reconnect the music folder.
+ * - default: "Link music folder…" / "Change folder…"
+ * - compact: hidden once linked (for the cue editor toolbar)
+ * - topbar: always visible and shows the linked folder's name
+ */
+export function LinkFolderButton({ compact = false, topbar = false }: { compact?: boolean; topbar?: boolean }) {
   const folder = useMusicFolder();
   const input = useRef<HTMLInputElement>(null);
 
@@ -35,10 +40,21 @@ export function LinkFolderButton({ compact = false }: { compact?: boolean }) {
     return <span className="muted small-text">Scanning {folder.folderName}… {folder.fileCount} files</span>;
   }
   if (folder.status === 'ready' && compact) return null;
+  const label = topbar
+    ? folder.status === 'ready'
+      ? `♫ ${folder.folderName}`
+      : '♫ Link music folder'
+    : folder.status === 'ready'
+      ? 'Change folder…'
+      : 'Link music folder…';
+  const title =
+    folder.status === 'ready'
+      ? `Linked: ${folder.folderName} (${folder.fileCount.toLocaleString()} audio file${folder.fileCount === 1 ? '' : 's'}). Click to pick a different folder.`
+      : "Pick the folder your music lives in (subfolders included). Setcraft finds each track's audio for waveforms and playback.";
   return (
     <>
-      <button className="small" onClick={pick} title="Pick the folder your music lives in; Setcraft finds each track's audio by itself">
-        {folder.status === 'ready' ? 'Change folder…' : 'Link music folder…'}
+      <button className={topbar ? '' : 'small'} onClick={pick} title={title}>
+        {label}
       </button>
       {fallbackInput}
     </>

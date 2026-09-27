@@ -8,6 +8,7 @@ import { CueEditor } from './CueEditor';
 import { ExportPanel } from './ExportPanel';
 import { LibraryView } from './LibraryView';
 import { MergeReview } from './MergeReview';
+import { LinkFolderButton } from './MusicFolderControl';
 import { useVersions } from './versions';
 import { defaultVersionName, VersionsPanel } from './VersionsPanel';
 import { NarrativeView } from './NarrativeView';
@@ -208,6 +209,7 @@ export function App() {
             <option value="__new">+ New set…</option>
             <option value="__dup">⧉ Duplicate "{set.name}"</option>
           </select>
+          <LinkFolderButton topbar />
           <button onClick={() => setVersionsOpen(true)} title="Save and restore versions (⌘/Ctrl+S saves one)">
             Versions
           </button>

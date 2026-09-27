@@ -4,7 +4,7 @@ import type { Track } from '../core/model';
 import { formatTime } from '../core/time';
 import { activeSet, useStore } from './store';
 import { useAudio } from './audio';
-import { MusicFolderPanel } from './MusicFolderControl';
+import { LinkFolderButton, MusicFolderPanel } from './MusicFolderControl';
 
 type SortKey = 'order' | 'artist' | 'title' | 'bpm' | 'key' | 'duration';
 
@@ -81,7 +81,14 @@ export function LibraryView({ onOpenCues, onImport }: { onOpenCues: (id: string)
         <button className="primary big" onClick={onImport}>
           Choose files…
         </button>
-        <p className="muted">…or drag &amp; drop them anywhere on this page. Drop audio files to see waveforms.</p>
+        <p className="muted">…or drag &amp; drop them anywhere on this page.</p>
+        <div className="empty-folder">
+          <p>
+            <b>For waveforms</b>, link the folder your music lives in. Subfolders are searched too, and each track's
+            audio is found automatically.
+          </p>
+          <LinkFolderButton />
+        </div>
       </div>
     );
   }
