@@ -131,7 +131,12 @@ cues go straight through. Re-importing the same file changes nothing.
 - **Pads A–H** behave like a controller: an empty pad sets a cue at the playhead, a filled pad jumps to its cue.
   **Quantize** snaps cues to the grid.
 - **Loops** from 1 beat to 8 bars, either on a pad or saved as memory loops. **Memory cues** too.
-- Drag markers on the waveform to move them. Each cue can be edited by name, colour, pad, start time (typed or
+- **Drag cues anywhere.** Grab a marker on either waveform and drop it somewhere else. It snaps to the beat
+  (hold **Shift** for free placement), a readout shows the time and bar while you drag, and **Esc** cancels. Drag a
+  loop's right edge to resize it.
+- **Drag between pads.** Drop a pad onto another pad to move it; if that pad is taken, the two swap. Drop a pad
+  on *make it a memory cue*, or drag a memory cue from the list onto a pad.
+- Markers can also be moved precisely in the cue form. Each cue can be edited by name, colour, pad, start time (typed or
   nudged by bar, beat or 10 ms), type, and loop length in beats.
 - Keyboard: `Space` play/pause · `1`–`8` pads · `M` memory cue · `Q` quantize · `←/→` beat (`Shift`: bar) ·
   `Delete` removes the selected cue.

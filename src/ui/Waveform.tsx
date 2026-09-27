@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
+import { dragCue, findCueHandle, type CueEdge } from '../core/cues';
 import { SLOT_LETTERS, type Cue } from '../core/model';
-import { beatLength } from '../core/time';
+import { barBeatLabel, beatLength, formatTime } from '../core/time';
 
 interface Props {
   duration: number;
@@ -16,7 +17,21 @@ interface Props {
   height: number;
   onSeek: (sec: number) => void;
   onSelectCue?: (id: string) => void;
-  onMoveCue?: (id: string, sec: number) => void;
+  /** Enables dragging cues: called with the new position while dragging. */
+  onCueDrag?: (id: string, change: Pick<Cue, 'start' | 'end'>) => void;
+  /** Beat-grid snapping for drags (Shift bypasses it). */
+  snap?: (sec: number) => number;
+}
+
+/** Pixels the pointer must move before a press on a cue becomes a drag. */
+const DRAG_THRESHOLD = 3;
+
+interface DragState {
+  cueId: string;
+  edge: CueEdge;
+  original: Cue;
+  startX: number;
+  active: boolean;
 }
 
 const COLORS = {
@@ -30,7 +45,8 @@ const COLORS = {
 
 export function Waveform(p: Props) {
   const canvas = useRef<HTMLCanvasElement>(null);
-  const drag = useRef<{ cueId: string; moved: boolean } | null>(null);
+  const drag = useRef<DragState | null>(null);
+  const [dragging, setDragging] = useState<{ cueId: string; edge: CueEdge } | null>(null);
   const [width, setWidth] = useState(0);
 
   useEffect(() => {
@@ -149,11 +165,42 @@ export function Waveform(p: Props) {
       }
     }
 
+    // Loop end handles (drag to resize)
+    for (const cue of p.cues) {
+      if (cue.kind !== 'loop' || cue.end === undefined) continue;
+      const ex = xOf(cue.end);
+      if (ex < -10 || ex > w + 10) continue;
+      ctx.fillStyle = cue.color;
+      ctx.fillRect(Math.round(ex) - 1, 0, 2, h);
+      ctx.fillRect(Math.round(ex) - 5, h - 12, 5, 12);
+    }
+
     // Playhead
     ctx.fillStyle = COLORS.playhead;
     ctx.fillRect(Math.round(xOf(p.playhead)), 0, 1.5, h);
+
+    // Live position readout while dragging
+    if (dragging) {
+      const cue = p.cues.find((c) => c.id === dragging.cueId);
+      const sec = cue && (dragging.edge === 'end' ? cue.end : cue.start);
+      if (cue && sec !== undefined) {
+        const bb = barBeatLabel(sec, p.bpm, p.gridStart);
+        const text =
+          dragging.edge === 'end' && cue.end !== undefined
+            ? `end ${formatTime(sec)}${p.bpm ? ` · ${Math.round(((cue.end - cue.start) / beatLength(p.bpm)) * 100) / 100} beats` : ''}`
+            : `${formatTime(sec)}${bb ? ` · bar ${bb}` : ''}`;
+        ctx.font = 'bold 12px system-ui';
+        const tw = ctx.measureText(text).width + 12;
+        const x = Math.min(Math.max(0, xOf(sec) + 6), w - tw);
+        const y = p.windowSeconds ? 22 : Math.max(2, h / 2 - 10);
+        ctx.fillStyle = 'rgba(0,0,0,0.8)';
+        ctx.fillRect(x, y, tw, 20);
+        ctx.fillStyle = '#fff';
+        ctx.fillText(text, x + 6, y + 14);
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [width, p.duration, p.peaks, p.peaksPerSecond, p.cues, p.playhead, p.bpm, p.gridStart, p.selectedCueId, p.windowSeconds, p.height]);
+  }, [dragging, width, p.duration, p.peaks, p.peaksPerSecond, p.cues, p.playhead, p.bpm, p.gridStart, p.selectedCueId, p.windowSeconds, p.height]);
 
   const secAt = (clientX: number) => {
     const rect = canvas.current!.getBoundingClientRect();
@@ -161,28 +208,42 @@ export function Waveform(p: Props) {
     return from + ((clientX - rect.left) / rect.width) * (to - from);
   };
 
-  const cueNear = (clientX: number): Cue | undefined => {
+  const handleAt = (clientX: number) => {
     const rect = canvas.current!.getBoundingClientRect();
     const { from, to } = view();
-    const pxPerSec = rect.width / (to - from);
-    const s = secAt(clientX);
-    return p.cues
-      .map((c) => ({ c, d: Math.abs(c.start - s) * pxPerSec }))
-      .filter((x) => x.d < 7)
-      .sort((a, b) => a.d - b.d)[0]?.c;
+    return findCueHandle(p.cues, secAt(clientX), rect.width / (to - from));
   };
+
+  const endDrag = () => {
+    drag.current = null;
+    setDragging(null);
+  };
+
+  // Esc cancels a drag and puts the cue back.
+  useEffect(() => {
+    if (!dragging) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || !drag.current) return;
+      const { original } = drag.current;
+      p.onCueDrag?.(original.id, { start: original.start, end: original.end });
+      endDrag();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dragging]);
 
   return (
     <canvas
       ref={canvas}
-      className={p.windowSeconds ? 'wave detail' : 'wave overview'}
+      className={`${p.windowSeconds ? 'wave detail' : 'wave overview'}${dragging ? ' dragging' : ''}`}
       style={{ height: p.height }}
       onPointerDown={(e) => {
-        const hit = cueNear(e.clientX);
+        const hit = handleAt(e.clientX);
         if (hit) {
-          p.onSelectCue?.(hit.id);
-          if (p.onMoveCue && p.windowSeconds) {
-            drag.current = { cueId: hit.id, moved: false };
+          p.onSelectCue?.(hit.cue.id);
+          if (p.onCueDrag) {
+            drag.current = { cueId: hit.cue.id, edge: hit.edge, original: hit.cue, startX: e.clientX, active: false };
             (e.target as HTMLElement).setPointerCapture(e.pointerId);
           }
           return;
@@ -190,13 +251,25 @@ export function Waveform(p: Props) {
         p.onSeek(Math.max(0, Math.min(p.duration, secAt(e.clientX))));
       }}
       onPointerMove={(e) => {
-        if (!drag.current) return;
-        drag.current.moved = true;
-        p.onMoveCue?.(drag.current.cueId, Math.max(0, secAt(e.clientX)));
+        const d = drag.current;
+        if (!d) {
+          // Hover feedback: hand over cues, resize arrows over loop ends.
+          if (p.onCueDrag) {
+            const hit = handleAt(e.clientX);
+            e.currentTarget.style.cursor = hit ? (hit.edge === 'end' ? 'ew-resize' : 'grab') : '';
+          }
+          return;
+        }
+        if (!d.active) {
+          if (Math.abs(e.clientX - d.startX) < DRAG_THRESHOLD) return;
+          d.active = true;
+          setDragging({ cueId: d.cueId, edge: d.edge });
+        }
+        const snap = e.shiftKey ? undefined : p.snap;
+        p.onCueDrag?.(d.cueId, dragCue(d.original, d.edge, secAt(e.clientX), p.duration, snap));
       }}
-      onPointerUp={() => {
-        drag.current = null;
-      }}
+      onPointerUp={endDrag}
+      onPointerCancel={endDrag}
     />
   );
 }

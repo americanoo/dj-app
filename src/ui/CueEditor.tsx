@@ -3,6 +3,7 @@ import { toCamelot, normaliseKey } from '../core/keys';
 import { CUE_COLORS, MAX_HOT_CUES, SLOT_LETTERS, uid, type Cue, type Project, type Track } from '../core/model';
 import { barBeatLabel, beatLength, formatTime, parseTime, round, snapToBeat } from '../core/time';
 import { useAudio } from './audio';
+import { moveCueToSlot } from '../core/cues';
 import { useMusicFolder } from './musicFolder';
 import { LinkFolderButton } from './MusicFolderControl';
 import { activeSet, useStore } from './store';
@@ -154,6 +155,8 @@ function TrackCueWorkspace({ track }: { track: Track }) {
   const gridStart = track.gridStart ?? 0;
   const beat = bpm ? beatLength(bpm) : undefined;
   const q = useCallback((s: number) => (quantize ? snapToBeat(s, bpm, gridStart) : s), [quantize, bpm, gridStart]);
+  // Dragging on the waveform snaps like the pads do (hold Shift to place freely).
+  const dragSnap = quantize && bpm ? q : undefined;
 
   const setCues = useCallback(
     (cues: Cue[]) => dispatch({ type: 'setCues', trackId: track.id, cues }),
@@ -199,6 +202,26 @@ function TrackCueWorkspace({ track }: { track: Track }) {
   }, [track.cues]);
 
   const firstFreeSlot = () => hotCues.findIndex((c) => !c);
+
+  // Drag & drop between pads (and to/from memory cues).
+  const [draggingCueId, setDraggingCueId] = useState<string | null>(null);
+  const [padDrop, setPadDrop] = useState<number | 'memory' | null>(null);
+  const startCueDrag = (e: React.DragEvent, id: string) => {
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('application/x-setcraft-cue', id);
+    setDraggingCueId(id);
+  };
+  const endCueDrag = () => {
+    setDraggingCueId(null);
+    setPadDrop(null);
+  };
+  const dropCueOnSlot = (slot: number | null) => {
+    if (draggingCueId) {
+      setCues(moveCueToSlot(track.cues, draggingCueId, slot));
+      setSelectedId(draggingCueId);
+    }
+    endCueDrag();
+  };
 
   const addCue = useCallback(
     (cue: Omit<Cue, 'id'>) => {
@@ -371,13 +394,8 @@ function TrackCueWorkspace({ track }: { track: Track }) {
           onSelectCue={(id) => {
             setSelectedId(id);
           }}
-          onMoveCue={(id, s) => {
-            const c = track.cues.find((x) => x.id === id);
-            if (!c) return;
-            const start = round(q(s), 3);
-            const len = c.end !== undefined ? c.end - c.start : undefined;
-            updateCue(id, { start, end: len !== undefined ? round(start + len, 3) : undefined });
-          }}
+          snap={dragSnap}
+          onCueDrag={(id, change) => updateCue(id, change)}
         />
         <Waveform
           duration={duration}
@@ -386,8 +404,12 @@ function TrackCueWorkspace({ track }: { track: Track }) {
           cues={track.cues}
           playhead={playhead}
           selectedCueId={selectedId}
+          bpm={bpm}
+          gridStart={gridStart}
           height={56}
           onSeek={seek}
+          snap={dragSnap}
+          onCueDrag={(id, change) => updateCue(id, change)}
           onSelectCue={(id) => {
             setSelectedId(id);
             const c = track.cues.find((x) => x.id === id);
@@ -412,15 +434,31 @@ function TrackCueWorkspace({ track }: { track: Track }) {
         <section className="card">
           <div className="card-head">
             <h3>Hot cues</h3>
-            <span className="muted">Empty pad: set at playhead · filled pad: jump · keys 1–8</span>
+            <span className="muted">Empty pad: set at playhead · filled pad: jump · keys 1–8 · drag to rearrange</span>
           </div>
           <div className="pads">
             {hotCues.map((c, slot) => (
               <button
                 key={slot}
-                className={`pad ${c ? 'filled' : ''} ${c && c.id === selectedId ? 'selected' : ''}`}
+                className={`pad ${c ? 'filled' : ''} ${c && c.id === selectedId ? 'selected' : ''} ${
+                  padDrop === slot ? 'drop-target' : ''
+                } ${c && c.id === draggingCueId ? 'drag-source' : ''}`}
                 style={c ? { background: c.color, borderColor: c.color } : undefined}
                 onClick={() => pad(slot)}
+                draggable={!!c}
+                title={c ? 'Click to jump · drag onto another pad to move (swaps if taken) or below to make it a memory cue' : ''}
+                onDragStart={(e) => c && startCueDrag(e, c.id)}
+                onDragEnd={endCueDrag}
+                onDragOver={(e) => {
+                  if (!draggingCueId) return;
+                  e.preventDefault();
+                  setPadDrop(slot);
+                }}
+                onDragLeave={() => setPadDrop((d) => (d === slot ? null : d))}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  dropCueOnSlot(slot);
+                }}
               >
                 <span className="pad-letter">{SLOT_LETTERS[slot]}</span>
                 {c ? (
@@ -437,6 +475,22 @@ function TrackCueWorkspace({ track }: { track: Track }) {
               </button>
             ))}
           </div>
+          {draggingCueId && track.cues.find((c) => c.id === draggingCueId)?.slot !== null && (
+            <div
+              className={`memory-drop ${padDrop === 'memory' ? 'over' : ''}`}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setPadDrop('memory');
+              }}
+              onDragLeave={() => setPadDrop((d) => (d === 'memory' ? null : d))}
+              onDrop={(e) => {
+                e.preventDefault();
+                dropCueOnSlot(null);
+              }}
+            >
+              Drop here to make it a memory cue
+            </div>
+          )}
           <div className="row wrap">
             <span className="muted">Loop at playhead:</span>
             {LOOP_BEATS.map((b) => (
@@ -504,7 +558,14 @@ function TrackCueWorkspace({ track }: { track: Track }) {
             <table className="cue-table">
               <tbody>
                 {sortedCues.map((c) => (
-                  <tr key={c.id} onClick={() => setSelectedId(c.id)}>
+                  <tr
+                    key={c.id}
+                    onClick={() => setSelectedId(c.id)}
+                    draggable
+                    onDragStart={(e) => startCueDrag(e, c.id)}
+                    onDragEnd={endCueDrag}
+                    title="Drag onto a pad to put this cue there"
+                  >
                     <td>
                       <span className="swatch" style={{ background: c.color }} />
                       {c.slot !== null ? SLOT_LETTERS[c.slot] : 'Mem'}
