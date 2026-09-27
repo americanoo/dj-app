@@ -3,11 +3,14 @@ import { toCamelot } from '../core/keys';
 import type { Track } from '../core/model';
 import { formatTime } from '../core/time';
 import { activeSet, useStore } from './store';
+import { useAudio } from './audio';
+import { MusicFolderPanel } from './MusicFolderControl';
 
 type SortKey = 'order' | 'artist' | 'title' | 'bpm' | 'key' | 'duration';
 
 export function LibraryView({ onOpenCues, onImport }: { onOpenCues: (id: string) => void; onImport: () => void }) {
   const { project, dispatch } = useStore();
+  const { audio, rememberedIds, forgetAll } = useAudio();
   const { library } = project;
   const set = activeSet(project);
   const [playlistId, setPlaylistId] = useState<string | 'all'>('all');
@@ -109,10 +112,15 @@ export function LibraryView({ onOpenCues, onImport }: { onOpenCues: (id: string)
             {p.name} <span className="count">{p.trackIds.length}</span>
           </button>
         ))}
+        <MusicFolderPanel />
         <div className="sidebar-footer">
           <button
             className="danger small"
-            onClick={() => confirm('Remove all tracks, playlists and set entries?') && dispatch({ type: 'clearLibrary' })}
+            onClick={() => {
+              if (!confirm('Remove all tracks, playlists and set entries?')) return;
+              dispatch({ type: 'clearLibrary' });
+              forgetAll();
+            }}
           >
             Clear library
           </button>
@@ -202,6 +210,11 @@ export function LibraryView({ onOpenCues, onImport }: { onOpenCues: (id: string)
                     <button className="link" onClick={() => onOpenCues(t.id)}>
                       {t.cues.filter((c) => c.slot !== null).length} hot / {t.cues.filter((c) => c.slot === null).length} mem
                     </button>
+                    {(audio[t.id] || rememberedIds.has(t.id)) && (
+                      <span className="wave-badge" title="Waveform ready">
+                        〰
+                      </span>
+                    )}
                   </td>
                   <td className="actions">
                     {inSet.has(t.id) ? (

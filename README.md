@@ -37,8 +37,25 @@ npm run build    # static site in dist/ – host anywhere
 Import from several programs and Setcraft combines them into one library. Two tracks count as the same when they
 point to the same file path. Their cues are combined with a **smart merge** (below).
 
-Drop **audio files** on the page to link them to tracks by file name. A file that matches no track in your library
-is added as a new track.
+#### Waveforms
+
+Your library export only holds file paths, so Setcraft needs the audio to draw waveforms. There are three ways to
+give it:
+
+- **Link your music folder** (Library sidebar → *Music folder*, or *Link music folder…* in the cue editor). Setcraft
+  finds each track's file by name, using parent folders to tell apart files with the same name. Waveforms then load
+  automatically when you open a track. *Analyse N missing* prepares every track in the current set in one go.
+  - In **Chrome/Edge** the folder is remembered. On later visits, one click on *Reconnect* is enough.
+  - In **Safari/Firefox** the link lasts for the current visit.
+  - The folder doesn't need to be at the same path as in your DJ software (e.g. a USB copy works), as long as
+    file names match.
+- **Drop audio files** on the page. They're linked to tracks by file name. A file that matches no track is added
+  as a new track.
+- **Attach audio file…** in the cue editor, for one track.
+
+Waveforms are **remembered**. After the first analysis, each waveform's shape (about 50 KB per track, never the
+audio itself) is kept in the browser, so it appears immediately on later visits. Playing the track still needs the
+audio. Tracks with a waveform show a 〰 in the library. *Clear library* also forgets the waveforms.
 
 #### Smart cue merging
 
@@ -148,6 +165,8 @@ src/
     model.ts            software-neutral Track / Cue / SetPlan / Chapter model
     merge.ts            smart cue merge: offset detection, matching, provenance rules, pad conflicts
     versions.ts         set copies, version pruning, per-track cue history and diffs
+    waveform.ts         compact (8-bit) waveform storage
+    pathmatch.ts        finding a track's file inside a linked music folder
     keys.ts             key parsing (standard, Camelot, Open Key, Traktor ids) + harmonic relations
     time.ts             time formatting, beat grid snapping, bar.beat labels
     setplan.ts          set timeline, transition warnings, run-sheet generation
@@ -160,7 +179,8 @@ src/
       index.ts          format detection, export targets, cue offset
   ui/                   React
     store.tsx           project state (reducer) persisted to IndexedDB
-    audio.tsx           session-only audio attachments + waveform peak analysis
+    audio.tsx           audio attachments, waveform analysis, remembered waveforms (IndexedDB)
+    musicFolder.tsx     linked music folder (File System Access API, folder-input fallback)
     versions.tsx        version snapshots stored in IndexedDB
     LibraryView, NarrativeView, EnergyArc, CueEditor, Waveform, ExportPanel, MergeReview, VersionsPanel
 ```

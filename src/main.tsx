@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './ui/App';
 import { AudioProvider } from './ui/audio';
+import { MusicFolderProvider } from './ui/musicFolder';
 import { StoreProvider } from './ui/store';
 import { VersionsProvider } from './ui/versions';
 import './ui/styles.css';
@@ -11,7 +12,9 @@ createRoot(document.getElementById('root')!).render(
     <StoreProvider>
       <VersionsProvider>
         <AudioProvider>
-          <App />
+          <MusicFolderProvider>
+            <App />
+          </MusicFolderProvider>
         </AudioProvider>
       </VersionsProvider>
     </StoreProvider>

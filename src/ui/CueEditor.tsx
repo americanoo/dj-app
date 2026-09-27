@@ -3,6 +3,8 @@ import { toCamelot, normaliseKey } from '../core/keys';
 import { CUE_COLORS, MAX_HOT_CUES, SLOT_LETTERS, uid, type Cue, type Project, type Track } from '../core/model';
 import { barBeatLabel, beatLength, formatTime, parseTime, round, snapToBeat } from '../core/time';
 import { useAudio } from './audio';
+import { useMusicFolder } from './musicFolder';
+import { LinkFolderButton } from './MusicFolderControl';
 import { activeSet, useStore } from './store';
 import { Waveform } from './Waveform';
 import { PadStrip } from './MergeReview';
@@ -106,8 +108,12 @@ function TrackPicker({
 
 function TrackCueWorkspace({ track }: { track: Track }) {
   const { dispatch } = useStore();
-  const { audio: attached, loading, attach } = useAudio();
+  const { audio: attached, remembered, rememberedIds, loading, attach, loadRemembered } = useAudio();
+  const folder = useMusicFolder();
   const audioInfo = attached[track.id];
+  // Playable audio from this visit, or the waveform remembered from an earlier one.
+  const wave = audioInfo ?? remembered[track.id];
+  const [folderMiss, setFolderMiss] = useState(false);
   const audioEl = useRef<HTMLAudioElement>(null);
   const [playhead, setPlayhead] = useState(track.cues.find((c) => c.slot === 0)?.start ?? track.gridStart ?? 0);
   const [playing, setPlaying] = useState(false);
@@ -118,8 +124,32 @@ function TrackCueWorkspace({ track }: { track: Track }) {
   const [error, setError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
+  // Show a remembered waveform straight away, then fetch the audio from the linked folder.
+  useEffect(() => {
+    if (audioInfo) return;
+    if (rememberedIds.has(track.id) && !remembered[track.id]) void loadRemembered(track.id);
+    if (folder.status !== 'ready' || loading[track.id]) return;
+    let cancelled = false;
+    folder
+      .findFile(track.path)
+      .then((file) => {
+        if (cancelled) return;
+        setFolderMiss(!file);
+        if (file) {
+          return attach(track.id, file).then((info) => {
+            if (!track.duration) dispatch({ type: 'updateTrack', id: track.id, patch: { duration: info.duration } });
+          });
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [track.id, track.path, folder.status, !!audioInfo, rememberedIds]);
+
   const duration =
-    audioInfo?.duration ?? track.duration ?? Math.max(360, ...track.cues.map((c) => (c.end ?? c.start) + 30));
+    wave?.duration ?? track.duration ?? Math.max(360, ...track.cues.map((c) => (c.end ?? c.start) + 30));
   const bpm = track.bpm;
   const gridStart = track.gridStart ?? 0;
   const beat = bpm ? beatLength(bpm) : undefined;
@@ -295,6 +325,7 @@ function TrackCueWorkspace({ track }: { track: Track }) {
               {audioInfo ? `♫ ${audioInfo.fileName}` : 'Attach audio file…'}
             </button>
           )}
+          {!audioInfo && !loading[track.id] && <LinkFolderButton compact />}
           <input
             ref={fileInput}
             type="file"
@@ -307,6 +338,19 @@ function TrackCueWorkspace({ track }: { track: Track }) {
           />
         </div>
         {error && <div className="error-line">{error}</div>}
+        {!audioInfo && !loading[track.id] && remembered[track.id] && (
+          <div className="hint-line info">
+            Showing the remembered waveform of “{remembered[track.id].fileName}”. Attach the audio file
+            {folder.status === 'ready' ? '' : ' or link your music folder'} to play it.
+          </div>
+        )}
+        {!audioInfo && !loading[track.id] && folder.status === 'ready' && folderMiss && (
+          <div className="hint-line">
+            {track.path
+              ? `Couldn't find “${track.path.split(/[\\/]/).pop()}” in ${folder.folderName}.`
+              : 'This track has no file location, so it can’t be found in the linked folder.'}
+          </div>
+        )}
         {!bpm && (
           <div className="hint-line">
             This track has no BPM yet. Enter one above to get quantizing, bar numbers and beat-length loops.
@@ -314,8 +358,8 @@ function TrackCueWorkspace({ track }: { track: Track }) {
         )}
         <Waveform
           duration={duration}
-          peaks={audioInfo?.peaks}
-          peaksPerSecond={audioInfo?.peaksPerSecond}
+          peaks={wave?.peaks}
+          peaksPerSecond={wave?.peaksPerSecond}
           cues={track.cues}
           playhead={playhead}
           bpm={bpm}
@@ -337,8 +381,8 @@ function TrackCueWorkspace({ track }: { track: Track }) {
         />
         <Waveform
           duration={duration}
-          peaks={audioInfo?.peaks}
-          peaksPerSecond={audioInfo?.peaksPerSecond}
+          peaks={wave?.peaks}
+          peaksPerSecond={wave?.peaksPerSecond}
           cues={track.cues}
           playhead={playhead}
           selectedCueId={selectedId}

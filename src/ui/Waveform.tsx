@@ -102,6 +102,7 @@ export function Waveform(p: Props) {
       for (let px = 0; px < w; px++) {
         const s0 = from + (px / w) * span;
         const s1 = from + ((px + 1) / w) * span;
+        if (s1 <= 0) continue; // before the track starts
         const i0 = Math.max(0, Math.floor(s0 * pps));
         const i1 = Math.min(p.peaks.length, Math.max(i0 + 1, Math.ceil(s1 * pps)));
         if (i0 >= p.peaks.length || i1 <= 0) continue;
