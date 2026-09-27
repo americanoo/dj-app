@@ -58,8 +58,9 @@ export async function walk(dir: DirHandle, prefix: string, out: Map<string, File
     if (entry.name.startsWith('.')) continue; // hidden files, .Trash, etc.
     const rel = prefix + entry.name;
     if (entry.kind === 'directory') {
-      // Skip the DJ programs' own databases and caches.
-      if (/^(_Serato_|PIONEER|rekordbox|Traktor|Native Instruments)$/i.test(entry.name)) continue;
+      // Skip only folders that hold DJ-software databases, never music:
+      // Serato's library/crates and rekordbox's USB export database.
+      if (/^(_Serato_|PIONEER)$/i.test(entry.name)) continue;
       await walk(entry, rel + '/', out, onCount);
     } else if (AUDIO_EXTENSIONS.test(entry.name)) {
       out.set(rel, entry);

@@ -44,7 +44,8 @@ give it:
 
 - **Link your music folder** (Library sidebar → *Music folder*, or *Link music folder…* in the cue editor). Setcraft
   finds each track's file by name, using parent folders to tell apart files with the same name. Waveforms then load
-  automatically when you open a track. *Analyse N missing* prepares every track in the current set in one go.
+  automatically when you open a track. Every subfolder is searched, at any depth. The only folders skipped are
+  hidden ones and `_Serato_` / `PIONEER`, which hold DJ-software databases rather than music. *Analyse N missing* prepares every track in the current set in one go.
   - In **Chrome/Edge** the folder is remembered. On later visits, one click on *Reconnect* is enough.
   - In **Safari/Firefox** the link lasts for the current visit.
   - The folder doesn't need to be at the same path as in your DJ software (e.g. a USB copy works), as long as

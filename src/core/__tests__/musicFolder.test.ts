@@ -29,4 +29,25 @@ describe('scanning a linked folder (File System Access API)', () => {
     const rel = resolveTrackFile('/Users/eric/Music/House/Deep/B - Two.flac', index)!;
     expect((await found.get(rel)!.getFile()).name).toBe('B - Two.flac');
   });
+
+  it('finds music at any depth, including in folders named after DJ programs', async () => {
+    const root = dir('Music', [
+      dir('Genres', [dir('Techno', [dir('2024', [dir('Label Promos', [file('Deep - Down.wav')])])])]),
+      dir('Traktor', [dir('Recordings', [file('Live set.wav')])]),
+      dir('rekordbox', [file('Edit.mp3')]),
+      dir('Music', [dir('Media.localized', [dir('Music', [dir('Artist', [dir('Album', [file('01 Song.m4a')])])])])]),
+    ]);
+    const found = new Map<string, FileHandle>();
+    await walk(root, '', found, () => undefined);
+    expect([...found.keys()].sort()).toEqual([
+      'Genres/Techno/2024/Label Promos/Deep - Down.wav',
+      'Music/Media.localized/Music/Artist/Album/01 Song.m4a',
+      'Traktor/Recordings/Live set.wav',
+      'rekordbox/Edit.mp3',
+    ]);
+    const index = buildIndex(found.keys());
+    expect(resolveTrackFile('/Users/eric/Music/Genres/Techno/2024/Label Promos/Deep - Down.wav', index)).toBe(
+      'Genres/Techno/2024/Label Promos/Deep - Down.wav',
+    );
+  });
 });
