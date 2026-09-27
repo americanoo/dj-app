@@ -4,10 +4,13 @@ import { dragCue, findCueHandle, type CueEdge } from '../core/cues';
 import { SLOT_LETTERS, type Cue } from '../core/model';
 import { barBeatLabel, beatLength, formatTime } from '../core/time';
 import type { WaveformBands } from '../core/waveform';
+import { SECTION_LABELS, type Section, type SectionKind } from '../core/sections';
 
 interface Props {
   duration: number;
   peaks?: Float32Array;
+  /** Detected song parts, shaded and labelled. */
+  sections?: Section[];
   /** Bass / mid / high split for coloured drawing (single colour without it). */
   bands?: WaveformBands;
   peaksPerSecond?: number;
@@ -40,11 +43,21 @@ interface DragState {
 
 const BAND_COLORS = { low: '#2f6bff', mid: '#f59b23', high: '#f2efe8' };
 
+export const SECTION_COLORS: Record<SectionKind, string> = {
+  intro: '#7c8db5',
+  breakdown: '#a78bfa',
+  build: '#fbbf24',
+  drop: '#f43f5e',
+  main: '#34d399',
+  outro: '#7c8db5',
+};
+
 const COLORS = {
   bg: '#12141a',
   wave: '#3d6fd6',
   grid: 'rgba(255,255,255,0.07)',
   bar: 'rgba(255,255,255,0.22)',
+  phrase: 'rgba(255,255,255,0.45)',
   playhead: '#ffffff',
 };
 
@@ -90,6 +103,25 @@ export function Waveform(p: Props) {
     const xOf = (s: number) => ((s - from) / span) * w;
     const mid = h / 2;
 
+    // Song sections: tinted backgrounds so intro / breakdown / drop read at a glance.
+    for (const sec of p.sections ?? []) {
+      const x0 = Math.max(0, xOf(sec.start));
+      const x1 = Math.min(w, xOf(sec.end));
+      if (x1 <= x0) continue;
+      ctx.fillStyle = hexA(SECTION_COLORS[sec.kind], p.windowSeconds ? 0.13 : 0.2);
+      ctx.fillRect(x0, 0, x1 - x0, h);
+    }
+
+    // Phrase lines every 16 bars on the overview
+    if (p.bpm && !p.windowSeconds) {
+      const phrase = beatLength(p.bpm) * 64;
+      const g0 = p.gridStart ?? 0;
+      ctx.fillStyle = 'rgba(255,255,255,0.1)';
+      for (let t = g0 - Math.floor(g0 / phrase) * phrase; t < to; t += phrase) {
+        if (t > 0) ctx.fillRect(Math.round(xOf(t)), 0, 1, h);
+      }
+    }
+
     // Beat grid (detail view only, when zoomed enough to be readable)
     if (p.bpm && p.windowSeconds) {
       const beat = beatLength(p.bpm);
@@ -100,8 +132,9 @@ export function Waveform(p: Props) {
         for (let b = first; b <= last; b++) {
           const sx = xOf(g0 + b * beat);
           const isBar = ((b % 4) + 4) % 4 === 0;
-          ctx.fillStyle = isBar ? COLORS.bar : COLORS.grid;
-          ctx.fillRect(Math.round(sx), 0, 1, h);
+          const isPhrase = ((b % 64) + 64) % 64 === 0; // every 16 bars
+          ctx.fillStyle = isPhrase ? COLORS.phrase : isBar ? COLORS.bar : COLORS.grid;
+          ctx.fillRect(Math.round(sx) - (isPhrase ? 1 : 0), 0, isPhrase ? 2 : 1, h);
           if (isBar && (b / 4) % 4 === 0) {
             ctx.fillStyle = 'rgba(255,255,255,0.4)';
             ctx.font = '10px system-ui';
@@ -125,7 +158,8 @@ export function Waveform(p: Props) {
       const peaks = p.peaks;
       const gain = 1 / Math.max(peakMax, 0.05);
       const height = mid - 3;
-      const scale = (v: number) => Math.pow(Math.min(1, v * gain), 0.75) * height;
+      // Close to linear, so quiet breakdowns stay visibly lower than drops.
+      const scale = (v: number) => Math.pow(Math.min(1, v * gain), 0.95) * height;
       const bucketsPerPx = (span / w) * pps;
       // Zoomed out: loudest bucket under the pixel. Zoomed in past the analysis
       // resolution: blend neighbours so the shape stays smooth.
@@ -170,6 +204,30 @@ export function Waveform(p: Props) {
         ctx.textAlign = 'start';
       }
     }
+
+    // Section boundaries and names
+    ctx.font = 'bold 10px system-ui';
+    const secs = p.sections ?? [];
+    secs.forEach((sec, i) => {
+      const color = SECTION_COLORS[sec.kind];
+      const x0 = xOf(sec.start);
+      const x1 = xOf(sec.end);
+      if (x1 < 0 || x0 > w) return;
+      if (i > 0 && x0 >= 0) {
+        ctx.fillStyle = hexA(color, 0.9);
+        ctx.fillRect(Math.round(x0), 0, 2, h);
+      }
+      const label = SECTION_LABELS[sec.kind].toUpperCase();
+      // Pin the name to the left edge while its section is on screen.
+      const lx = Math.max(x0, 0) + 5;
+      const tw = ctx.measureText(label).width;
+      if (Math.min(x1, w) - lx < tw + 4) return;
+      const ly = p.windowSeconds ? 19 : 3;
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillRect(lx - 3, ly, tw + 6, 13);
+      ctx.fillStyle = color;
+      ctx.fillText(label, lx, ly + 10);
+    });
 
     // Track bounds
     ctx.fillStyle = 'rgba(0,0,0,0.5)';
@@ -223,7 +281,7 @@ export function Waveform(p: Props) {
         ctx.font = 'bold 12px system-ui';
         const tw = ctx.measureText(text).width + 12;
         const x = Math.min(Math.max(0, xOf(sec) + 6), w - tw);
-        const y = p.windowSeconds ? 22 : Math.max(2, h / 2 - 10);
+        const y = p.windowSeconds ? 38 : Math.max(2, h / 2 - 10);
         ctx.fillStyle = 'rgba(0,0,0,0.8)';
         ctx.fillRect(x, y, tw, 20);
         ctx.fillStyle = '#fff';
@@ -231,7 +289,7 @@ export function Waveform(p: Props) {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dragging, width, peakMax, p.bands, p.duration, p.peaks, p.peaksPerSecond, p.cues, p.playhead, p.bpm, p.gridStart, p.selectedCueId, p.windowSeconds, p.height]);
+  }, [dragging, width, peakMax, p.sections, p.bands, p.duration, p.peaks, p.peaksPerSecond, p.cues, p.playhead, p.bpm, p.gridStart, p.selectedCueId, p.windowSeconds, p.height]);
 
   const secAt = (clientX: number) => {
     const rect = canvas.current!.getBoundingClientRect();

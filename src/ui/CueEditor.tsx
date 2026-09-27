@@ -8,7 +8,8 @@ import { moveCueToSlot } from '../core/cues';
 import { useMusicFolder } from './musicFolder';
 import { LinkFolderButton } from './MusicFolderControl';
 import { activeSet, useStore } from './store';
-import { Waveform } from './Waveform';
+import { SECTION_COLORS, Waveform } from './Waveform';
+import { detectSections, SECTION_LABELS } from '../core/sections';
 import { PadStrip } from './MergeReview';
 import { formatWhen, useVersions } from './versions';
 import { cueDiffSummary, cueHistory, type CueHistoryEntry, type VersionMeta } from '../core/versions';
@@ -165,6 +166,12 @@ function TrackCueWorkspace({ track }: { track: Track }) {
   const gridStart = track.gridStart ?? 0;
   const beat = bpm ? beatLength(bpm) : undefined;
   const q = useCallback((s: number) => (quantize ? snapToBeat(s, bpm, gridStart) : s), [quantize, bpm, gridStart]);
+  // Song sections from the colour waveform (intro / breakdown / build / drop / outro).
+  const sections = useMemo(
+    () => (wave?.bands ? detectSections(wave.bands, wave.peaksPerSecond, wave.duration, bpm, gridStart) : []),
+    [wave, bpm, gridStart],
+  );
+
   // Dragging on the waveform snaps like the pads do (hold Shift to place freely).
   const dragSnap = quantize && bpm ? q : undefined;
 
@@ -368,6 +375,22 @@ function TrackCueWorkspace({ track }: { track: Track }) {
     });
   };
 
+  const cueSections = () => {
+    const added = sections
+      .filter((sec) => sec.start > 0.5)
+      .map((sec) => ({ sec, start: round(q(sec.start), 3) }))
+      .filter(({ start }) => !track.cues.some((c) => Math.abs(c.start - start) < 0.25))
+      .map(({ sec, start }) => ({
+        id: uid('cue'),
+        kind: 'cue' as const,
+        slot: null,
+        start,
+        name: SECTION_LABELS[sec.kind],
+        color: SECTION_COLORS[sec.kind],
+      }));
+    if (added.length) setCues([...track.cues, ...added]);
+  };
+
   const addMemory = () =>
     addCue({ kind: 'cue', slot: null, start: round(q(playhead), 3), name: '', color: CUE_COLORS[0] });
 
@@ -516,6 +539,7 @@ function TrackCueWorkspace({ track }: { track: Track }) {
           duration={duration}
           peaks={wave?.peaks}
           bands={wave?.bands}
+          sections={sections}
           peaksPerSecond={wave?.peaksPerSecond}
           cues={track.cues}
           playhead={playhead}
@@ -535,6 +559,7 @@ function TrackCueWorkspace({ track }: { track: Track }) {
           duration={duration}
           peaks={wave?.peaks}
           bands={wave?.bands}
+          sections={sections}
           peaksPerSecond={wave?.peaksPerSecond}
           cues={track.cues}
           playhead={playhead}
@@ -551,6 +576,31 @@ function TrackCueWorkspace({ track }: { track: Track }) {
             if (c) seek(c.start);
           }}
         />
+        {sections.length > 0 && (
+          <div className="section-chips">
+            {sections.map((sec) => (
+              <button
+                key={sec.start}
+                className={`section-chip ${playhead >= sec.start && playhead < sec.end ? 'current' : ''}`}
+                style={{ '--sec': SECTION_COLORS[sec.kind] } as React.CSSProperties}
+                onClick={() => seek(q(sec.start))}
+                title={`${SECTION_LABELS[sec.kind]}: ${formatTime(sec.start, false)}–${formatTime(sec.end, false)}${
+                  bpm ? ` (${Math.round((sec.end - sec.start) / (beat! * 4))} bars)` : ''
+                }`}
+              >
+                {SECTION_LABELS[sec.kind]}
+                <span>{formatTime(sec.start, false)}</span>
+              </button>
+            ))}
+            <button
+              className="small"
+              onClick={cueSections}
+              title="Add a memory cue, named after the section, at the start of each section (skips ones already cued)"
+            >
+              + Memory cues at sections
+            </button>
+          </div>
+        )}
       </section>
 
       <div className="cue-columns">

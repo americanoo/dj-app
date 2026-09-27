@@ -1304,3 +1304,35 @@ canvas.wave.dragging {
 .wave-badge.outdated {
   color: var(--muted);
 }
+
+/* ---------- song sections ---------- */
+
+.section-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.section-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 3px 9px;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid var(--sec);
+  color: var(--sec);
+  background: color-mix(in srgb, var(--sec) 12%, transparent);
+}
+.section-chip span {
+  font-weight: 400;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.section-chip.current {
+  background: var(--sec);
+  color: #0b0c10;
+}
+.section-chip.current span {
+  color: #0b0c10;
+}
