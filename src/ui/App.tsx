@@ -130,6 +130,19 @@ export function App() {
     [attach, dispatch, openCues, toast, saveVersion],
   );
 
+  // Esc closes the pop-up panels.
+  useEffect(() => {
+    if (!storyOpen && !exportOpen && !versionsOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      setStoryOpen(false);
+      setExportOpen(false);
+      setVersionsOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [storyOpen, exportOpen, versionsOpen]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {

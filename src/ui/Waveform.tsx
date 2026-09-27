@@ -53,7 +53,7 @@ export const SECTION_COLORS: Record<SectionKind, string> = {
 };
 
 const COLORS = {
-  bg: '#12141a',
+  bg: '#07070a',
   wave: '#3d6fd6',
   grid: 'rgba(255,255,255,0.07)',
   bar: 'rgba(255,255,255,0.22)',

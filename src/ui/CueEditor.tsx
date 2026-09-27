@@ -378,7 +378,7 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
 
       <section className="card deck">
         <div className="deck-bar">
-          <button className="primary" onClick={togglePlay} disabled={!deckReady} title="Space">
+          <button className={`primary ${playing ? 'playing' : ''}`} onClick={togglePlay} disabled={!deckReady} title="Space">
             {playing ? '❚❚ Pause' : '▶ Play'}
           </button>
           {activeLoop && (

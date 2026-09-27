@@ -99,7 +99,7 @@ export function StoryPanel({ onClose }: { onClose: () => void }) {
         </div>
         <div className="chapters">
           {set.chapters.map((c, i) => (
-            <div key={c.id} className="chapter-edit" style={{ borderColor: c.color }}>
+            <div key={c.id} className="chapter-edit" style={{ borderLeftColor: c.color }}>
               <div className="row">
                 <input
                   type="color"
