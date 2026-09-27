@@ -1301,3 +1301,6 @@ canvas.wave.dragging {
   width: 90px;
   accent-color: var(--accent);
 }
+.wave-badge.outdated {
+  color: var(--muted);
+}

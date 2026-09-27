@@ -15,8 +15,14 @@ export interface AttachedAudio extends WaveformData {
 
 export const PEAKS_PER_SECOND = 150;
 
-const WAVEFORM_PREFIX = 'setcraft-waveform-v1:';
+// Colour (three-band) waveforms. Single-colour ones saved by earlier versions
+// stay under the old prefix until the track is analysed again.
+const WAVEFORM_PREFIX = 'setcraft-waveform-v2:';
+const LEGACY_PREFIX = 'setcraft-waveform-v1:';
 const waveformKey = (trackId: string) => WAVEFORM_PREFIX + trackId;
+const legacyKey = (trackId: string) => LEGACY_PREFIX + trackId;
+const isWaveformKey = (k: IDBValidKey): k is string =>
+  typeof k === 'string' && (k.startsWith(WAVEFORM_PREFIX) || k.startsWith(LEGACY_PREFIX));
 
 interface AudioStore {
   /** Attached this session: waveform plus playable audio. */
@@ -25,6 +31,8 @@ interface AudioStore {
   remembered: Record<string, WaveformData>;
   /** Tracks that have a remembered waveform (loaded or not). */
   rememberedIds: ReadonlySet<string>;
+  /** Of those, the single-colour ones from an earlier version, worth analysing again. */
+  outdatedIds: ReadonlySet<string>;
   loading: Record<string, boolean>;
   attach: (trackId: string, file: File) => Promise<AttachedAudio>;
   /** Load a remembered waveform into `remembered`, if there is one. */
@@ -105,16 +113,21 @@ export function AudioProvider({ children }: { children: ReactNode }) {
   const [audio, setAudio] = useState<Record<string, AttachedAudio>>({});
   const [remembered, setRemembered] = useState<Record<string, WaveformData>>({});
   const [rememberedIds, setRememberedIds] = useState<ReadonlySet<string>>(new Set());
+  const [outdatedIds, setOutdatedIds] = useState<ReadonlySet<string>>(new Set());
   const [loading, setLoading] = useState<Record<string, boolean>>({});
 
   // Only the keys are read up front; waveforms load when a track is opened.
   useEffect(() => {
     keys()
       .then((all) => {
-        const ids = all
-          .filter((k): k is string => typeof k === 'string' && k.startsWith(WAVEFORM_PREFIX))
-          .map((k) => k.slice(WAVEFORM_PREFIX.length));
-        setRememberedIds(new Set(ids));
+        const strings = all.filter((k): k is string => typeof k === 'string');
+        const colour = new Set(strings.filter((k) => k.startsWith(WAVEFORM_PREFIX)).map((k) => k.slice(WAVEFORM_PREFIX.length)));
+        const legacy = strings
+          .filter((k) => k.startsWith(LEGACY_PREFIX))
+          .map((k) => k.slice(LEGACY_PREFIX.length))
+          .filter((id) => !colour.has(id));
+        setRememberedIds(new Set([...colour, ...legacy]));
+        setOutdatedIds(new Set(legacy));
       })
       .catch(() => undefined);
   }, []);
@@ -128,8 +141,17 @@ export function AudioProvider({ children }: { children: ReactNode }) {
         if (a[trackId]) URL.revokeObjectURL(a[trackId].url);
         return { ...a, [trackId]: entry };
       });
+      setRemembered(({ [trackId]: _, ...rest }) => rest); // the fresh analysis replaces any old one
       idbSet(waveformKey(trackId), encodeWaveform(info))
-        .then(() => setRememberedIds((s) => new Set(s).add(trackId)))
+        .then(() => {
+          del(legacyKey(trackId)).catch(() => undefined);
+          setRememberedIds((s) => new Set(s).add(trackId));
+          setOutdatedIds((s) => {
+            const n = new Set(s);
+            n.delete(trackId);
+            return n;
+          });
+        })
         .catch(() => undefined); // storage full or unavailable: still works this session
       return entry;
     } finally {
@@ -138,13 +160,22 @@ export function AudioProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loadRemembered = useCallback(async (trackId: string) => {
-    const w = decodeWaveform(await get<StoredWaveform>(waveformKey(trackId)).catch(() => undefined));
+    const stored =
+      (await get<StoredWaveform>(waveformKey(trackId)).catch(() => undefined)) ??
+      (await get<StoredWaveform>(legacyKey(trackId)).catch(() => undefined));
+    const w = decodeWaveform(stored);
     if (w) setRemembered((r) => ({ ...r, [trackId]: w }));
   }, []);
 
   const forget = useCallback((trackId: string) => {
     del(waveformKey(trackId)).catch(() => undefined);
+    del(legacyKey(trackId)).catch(() => undefined);
     setRemembered(({ [trackId]: _, ...rest }) => rest);
+    setOutdatedIds((s) => {
+      const n = new Set(s);
+      n.delete(trackId);
+      return n;
+    });
     setRememberedIds((s) => {
       const n = new Set(s);
       n.delete(trackId);
@@ -154,10 +185,11 @@ export function AudioProvider({ children }: { children: ReactNode }) {
 
   const forgetAll = useCallback(() => {
     keys()
-      .then((all) => delMany(all.filter((k) => typeof k === 'string' && k.startsWith(WAVEFORM_PREFIX))))
+      .then((all) => delMany(all.filter(isWaveformKey)))
       .catch(() => undefined);
     setRemembered({});
     setRememberedIds(new Set());
+    setOutdatedIds(new Set());
   }, []);
 
   const getBuffer = useCallback(
@@ -173,7 +205,7 @@ export function AudioProvider({ children }: { children: ReactNode }) {
   );
 
   return (
-    <Ctx.Provider value={{ audio, remembered, rememberedIds, loading, attach, loadRemembered, forget, forgetAll, getBuffer }}>
+    <Ctx.Provider value={{ audio, remembered, rememberedIds, outdatedIds, loading, attach, loadRemembered, forget, forgetAll, getBuffer }}>
       {children}
     </Ctx.Provider>
   );

@@ -10,7 +10,7 @@ type SortKey = 'order' | 'artist' | 'title' | 'bpm' | 'key' | 'duration';
 
 export function LibraryView({ onOpenCues, onImport }: { onOpenCues: (id: string) => void; onImport: () => void }) {
   const { project, dispatch } = useStore();
-  const { audio, rememberedIds, forgetAll } = useAudio();
+  const { audio, rememberedIds, outdatedIds, forgetAll } = useAudio();
   const { library } = project;
   const set = activeSet(project);
   const [playlistId, setPlaylistId] = useState<string | 'all'>('all');
@@ -218,7 +218,14 @@ export function LibraryView({ onOpenCues, onImport }: { onOpenCues: (id: string)
                       {t.cues.filter((c) => c.slot !== null).length} hot / {t.cues.filter((c) => c.slot === null).length} mem
                     </button>
                     {(audio[t.id] || rememberedIds.has(t.id)) && (
-                      <span className="wave-badge" title="Waveform ready">
+                      <span
+                        className={`wave-badge ${!audio[t.id] && outdatedIds.has(t.id) ? 'outdated' : ''}`}
+                        title={
+                          !audio[t.id] && outdatedIds.has(t.id)
+                            ? 'Single-colour waveform from an earlier version; loads in colour when the audio is analysed again'
+                            : 'Colour waveform ready'
+                        }
+                      >
                         〰
                       </span>
                     )}

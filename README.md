@@ -58,6 +58,8 @@ give it:
 Waveforms are **remembered**. After the first analysis, each waveform's shape (about 50 KB per track, never the
 audio itself) is kept in the browser, so it appears immediately on later visits. Playing the track still needs the
 audio. Tracks with a waveform show a 〰 in the library. *Clear library* also forgets the waveforms.
+Single-colour waveforms saved by earlier versions show a grey 〰. They're upgraded to colour when the audio loads
+again, and *Analyse N tracks* includes them.
 
 #### Smart cue merging
 

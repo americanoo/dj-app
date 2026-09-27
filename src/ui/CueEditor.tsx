@@ -488,7 +488,13 @@ function TrackCueWorkspace({ track }: { track: Track }) {
           />
         </div>
         {error && <div className="error-line">{error}</div>}
-        {!audioInfo && !loading[track.id] && remembered[track.id] && (
+        {wave && !wave.bands && !loading[track.id] && (
+          <div className="hint-line">
+            This waveform was saved by an earlier version, in one colour. It turns into the colour waveform as soon as
+            the audio loads: link your music folder (♫ in the top bar) or attach the file.
+          </div>
+        )}
+        {!audioInfo && !loading[track.id] && remembered[track.id]?.bands && (
           <div className="hint-line info">
             Showing the remembered waveform of “{remembered[track.id].fileName}”. Attach the audio file
             {folder.status === 'ready' ? '' : ' or link your music folder'} to play it.

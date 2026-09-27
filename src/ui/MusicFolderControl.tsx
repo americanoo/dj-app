@@ -65,15 +65,17 @@ export function LinkFolderButton({ compact = false, topbar = false }: { compact?
 export function MusicFolderPanel() {
   const folder = useMusicFolder();
   const { project, dispatch } = useStore();
-  const { audio, rememberedIds, attach } = useAudio();
+  const { audio, rememberedIds, outdatedIds, attach } = useAudio();
   const [progress, setProgress] = useState<{ done: number; total: number; missing: number } | null>(null);
 
   const set = activeSet(project);
   const setTracks = [...new Set(set.entries.map((e) => e.trackId))]
     .map((id) => project.library.tracks[id])
     .filter(Boolean);
-  const withWave = setTracks.filter((t) => audio[t.id] || rememberedIds.has(t.id)).length;
-  const todo = setTracks.filter((t) => !audio[t.id] && !rememberedIds.has(t.id));
+  const hasColour = (id: string) => !!audio[id]?.bands || (rememberedIds.has(id) && !outdatedIds.has(id));
+  const withWave = setTracks.filter((t) => hasColour(t.id)).length;
+  // Missing, or single-colour from an earlier version: both get (re)analysed.
+  const todo = setTracks.filter((t) => !hasColour(t.id));
 
   const analyseSet = async () => {
     let missing = 0;
@@ -119,11 +121,11 @@ export function MusicFolderPanel() {
       {setTracks.length > 0 && (
         <div className="small-text">
           <span className="muted">
-            Waveforms for “{set.name}”: {withWave} of {setTracks.length}
+            Colour waveforms for “{set.name}”: {withWave} of {setTracks.length}
           </span>
           {folder.status === 'ready' && todo.length > 0 && !progress && (
             <button className="small wide" onClick={() => void analyseSet()}>
-              Analyse {todo.length} missing
+              Analyse {todo.length} track{todo.length === 1 ? '' : 's'}
             </button>
           )}
           {progress && (
