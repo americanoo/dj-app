@@ -50,3 +50,13 @@ export function round(n: number, digits = 3): number {
   const f = 10 ** digits;
   return Math.round(n * f) / f;
 }
+
+export type SnapMode = 'off' | 'beat' | 'bar';
+export const SNAP_MODES: SnapMode[] = ['off', 'beat', 'bar'];
+
+/** Snap to the nearest beat or bar (4 beats) of the grid, or leave as is. */
+export function snapTime(sec: number, mode: SnapMode, bpm: number | undefined, gridStart = 0): number {
+  if (mode === 'off' || !bpm || bpm <= 0) return sec;
+  const step = beatLength(bpm) * (mode === 'bar' ? 4 : 1);
+  return gridStart + Math.round((sec - gridStart) / step) * step;
+}

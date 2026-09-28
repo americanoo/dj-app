@@ -145,8 +145,11 @@ cues go straight through. Re-importing the same file changes nothing.
 
 - **Waveforms** in rekordbox-style three-band colour (bass blue, mids amber, highs white), normalised so quiet
   masters still fill the view and smooth at every zoom level. There's a detail view with the beat grid and bar
-  numbers, and an overview below it for navigating. Analysis runs in a background worker so the page stays
-  responsive.
+  numbers, and an overview below it for navigating. Both redraw every frame while playing, so the playhead glides
+  instead of stepping. Analysis runs in a background worker so the page stays responsive.
+- **Easy navigation.** Grab the zoomed waveform and pull it like a record (drag left to go forward), or drag along
+  the overview. Scroll the wheel/trackpad over the waveform to move through the track, and **⌘/Ctrl + scroll**
+  to zoom from 2 to 32 bars. A plain click jumps there.
 - **Song sections** are detected automatically from the colour waveform: Intro, Main, Breakdown, Build, Drop and
   Outro, decided in 8-bar phrases from where the bass drops out and comes back. Each part is tinted and labelled on
   both waveforms, with phrase lines every 16 bars. Section chips under the waveform jump to each part, and
@@ -156,18 +159,21 @@ cues go straight through. Re-importing the same file changes nothing.
   *exit*) to release, and jumping outside the loop releases it too. Loops follow you live as you drag or resize
   them. There's also a preview volume control. Without audio
   you still get the timeline, grid and cue markers.
+- **Snap: Free / Beat / Bar.** Choose where cues, loops and clicks land: exactly where you put them (*Free*),
+  on the nearest beat, or on the nearest bar. `Q` cycles through the three, and the choice is remembered.
 - **Pads A–H** behave like a controller: an empty pad sets a cue at the playhead, a filled pad jumps to its cue.
-  **Quantize** snaps cues to the grid.
+  Pads fire the moment you press them (not on release) and use the exact audio position, so the marker lands
+  where you heard it, even with a large library loaded.
 - **Loops** from 1 beat to 8 bars, either on a pad or saved as memory loops. **Memory cues** too.
-- **Drag cues anywhere.** Grab a marker on either waveform and drop it somewhere else. It snaps to the beat
-  (hold **Shift** for free placement), a readout shows the time and bar while you drag, and **Esc** cancels. Drag a
+- **Drag cues anywhere.** Grab a marker on either waveform and drop it somewhere else. It follows the snap
+  setting (hold **Shift** for free placement), a readout shows the time and bar while you drag, and **Esc** cancels. Drag a
   loop's right edge to resize it.
 - **Drag between pads.** Drop a pad onto another pad to move it; if that pad is taken, the two swap. Drop a pad
   on *make it a memory cue*, or drag a memory cue from the list onto a pad.
 - Markers can also be moved precisely in the cue form. Each cue can be edited by name, colour, pad, start time (typed or
   nudged by bar, beat or 10 ms), type, and loop length in beats.
-- Keyboard: `Space` play/pause · `1`–`8` pads · `M` memory cue · `Q` quantize · `←/→` beat (`Shift`: bar) ·
-  `Delete` removes the selected cue.
+- Keyboard: `Space` play/pause · `1`–`8` pads · `M` memory cue · `Q` snap Free/Beat/Bar · `←/→` beat
+  (`Shift`: bar) · `[` / `]` previous/next cue · `Delete` removes the selected cue.
 - Editing a track's BPM, key, grid start or file location here fixes that track's details before export.
   **×½ / ×2** next to BPM fix half- or double-time readings (e.g. a 96 BPM reggaeton track read as 192)
   without moving the downbeat. On the timeline, half/double-time mixes (96 → 192) aren't flagged as BPM jumps.
@@ -207,7 +213,7 @@ src/
     sections.ts         intro / breakdown / build / drop / outro detection
     pathmatch.ts        finding a track's file inside a linked music folder
     keys.ts             key parsing (standard, Camelot, Open Key, Traktor ids) + harmonic relations
-    time.ts             time formatting, beat grid snapping, bar.beat labels
+    time.ts             time formatting, beat/bar snapping, bar.beat labels
     setplan.ts          set timeline, transition warnings, run-sheet generation
     xml.ts              XML + file-URL helpers
     formats/

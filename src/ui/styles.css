@@ -2218,3 +2218,71 @@ button.tempo-btn:hover:not(:disabled) {
   background: rgba(34, 211, 238, 0.14);
   border-color: rgba(34, 211, 238, 0.45);
 }
+
+/* library rows: fixed height so the table can be virtualised (ROW_H in LibraryView) */
+table.tracks tbody tr {
+  height: 32px;
+}
+table.tracks tbody td {
+  padding-top: 0;
+  padding-bottom: 0;
+  height: 32px;
+}
+table.tracks tbody button.small {
+  height: 22px;
+}
+table.tracks tr.spacer,
+table.tracks tr.spacer td {
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: none !important;
+}
+
+/* snap: Free / Beat / Bar */
+.snap-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+.snap-control .snap-label {
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-3);
+  padding: 0 6px 0 4px;
+}
+.snap-control button {
+  height: 22px;
+  padding: 0 9px;
+  font-size: 11px;
+  border-radius: 6px;
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-2);
+}
+.snap-control button:hover:not(:disabled) {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.05);
+}
+.snap-control button.on {
+  color: #07070a;
+  background: var(--cyan);
+  font-weight: 700;
+}
+.snap-control button:disabled {
+  opacity: 0.35;
+}
+
+/* waveform navigation: drag empty space to scrub */
+canvas.wave.detail {
+  cursor: grab;
+}
+canvas.wave.dragging {
+  cursor: grabbing;
+}

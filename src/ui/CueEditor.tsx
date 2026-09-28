@@ -3,7 +3,7 @@ import { keyColor, toCamelot, normaliseKey } from '../core/keys';
 import { withTimes } from '../core/setplan';
 import { scaleTempo } from '../core/tempo';
 import { CUE_COLORS, MAX_HOT_CUES, SLOT_LETTERS, uid, type Cue, type Project, type Track } from '../core/model';
-import { barBeatLabel, beatLength, formatTime, parseTime, round, snapToBeat } from '../core/time';
+import { barBeatLabel, beatLength, formatTime, parseTime, round, SNAP_MODES, snapTime, type SnapMode } from '../core/time';
 import { audioContext, useAudio } from './audio';
 import { Deck } from './deck';
 import { moveCueToSlot } from '../core/cues';
@@ -53,7 +53,21 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
   });
   const [playhead, setPlayhead] = useState(track.cues.find((c) => c.slot === 0)?.start ?? track.gridStart ?? 0);
   const [playing, setPlaying] = useState(false);
-  const [quantize, setQuantize] = useState(true);
+  const [snapMode, setSnapMode] = useState<SnapMode>(() => {
+    try {
+      const saved = localStorage.getItem('setcraft-snap');
+      return saved === 'off' || saved === 'bar' ? saved : 'beat';
+    } catch {
+      return 'beat';
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem('setcraft-snap', snapMode);
+    } catch {
+      // private mode: not remembered
+    }
+  }, [snapMode]);
   const [zoomBars, setZoomBars] = useState(8);
   const [hotLoops, setHotLoops] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -89,7 +103,8 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
   const bpm = track.bpm;
   const gridStart = track.gridStart ?? 0;
   const beat = bpm ? beatLength(bpm) : undefined;
-  const q = useCallback((s: number) => (quantize ? snapToBeat(s, bpm, gridStart) : s), [quantize, bpm, gridStart]);
+  // Snap to the beat, the bar, or nowhere (free placement).
+  const q = useCallback((s: number) => snapTime(s, snapMode, bpm, gridStart), [snapMode, bpm, gridStart]);
   // Song sections from the colour waveform (intro / breakdown / build / drop / outro).
   const sections = useMemo(
     () => (wave?.bands ? detectSections(wave.bands, wave.peaksPerSecond, wave.duration, bpm, gridStart) : []),
@@ -97,7 +112,7 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
   );
 
   // Dragging on the waveform snaps like the pads do (hold Shift to place freely).
-  const dragSnap = quantize && bpm ? q : undefined;
+  const dragSnap = snapMode !== 'off' && bpm ? q : undefined;
 
   const setCues = useCallback(
     (cues: Cue[]) => dispatch({ type: 'setCues', trackId: track.id, cues }),
@@ -152,17 +167,29 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
     }
   }, [volume]);
 
-  // Follow the deck while playing.
+  // Follow the deck while playing. The waveforms read the deck themselves every
+  // frame; the clock and the rest of the deck only need ~12 updates a second.
   useEffect(() => {
     if (!playing) return;
     let raf = 0;
-    const tick = () => {
-      if (deckRef.current) setPlayhead(deckRef.current.position());
+    let last = 0;
+    const tick = (t: number) => {
+      if (deckRef.current && t - last > 80) {
+        last = t;
+        setPlayhead(deckRef.current.position());
+      }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [playing]);
+
+  /** Exact position right now: the live deck while playing, else the playhead. */
+  const now = useCallback(() => {
+    const d = deckRef.current;
+    return d?.playing ? d.position() : playheadRef.current;
+  }, []);
+  const livePlayhead = useCallback(() => deckRef.current?.position() ?? playheadRef.current, []);
 
   const activeLoop = track.cues.find((c) => c.id === activeLoopId && c.kind === 'loop' && c.end !== undefined);
 
@@ -280,14 +307,14 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
         playFrom(existing.start);
         return;
       }
-      addCue({ kind: 'cue', slot, start: round(q(playhead), 3), name: '', color: CUE_COLORS[slot] });
+      addCue({ kind: 'cue', slot, start: round(q(now()), 3), name: '', color: CUE_COLORS[slot] });
     },
     [hotCues, playFrom, startAt, addCue, q, playhead, activeLoopId, exitLoop],
   );
 
   const addLoop = (beats: number) => {
     if (!beat) return;
-    const start = round(q(playhead), 3);
+    const start = round(q(now()), 3);
     const slot = hotLoops ? firstFreeSlot() : -1;
     addCue({
       kind: 'loop',
@@ -316,9 +343,9 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
   };
 
   const addMemory = () =>
-    addCue({ kind: 'cue', slot: null, start: round(q(playhead), 3), name: '', color: CUE_COLORS[0] });
+    addCue({ kind: 'cue', slot: null, start: round(q(now()), 3), name: '', color: CUE_COLORS[0] });
 
-  // Keyboard: space play, 1-8 pads, M memory cue, Q quantize, ←/→ one beat (shift: one bar).
+  // Keyboard: space play, 1-8 pads, M memory cue, Q snap mode, ←/→ one beat (shift: one bar), [ ] prev/next cue.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement).tagName;
@@ -331,11 +358,18 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
       } else if (/^Digit[1-8]$/.test(e.code)) {
         pad(Number(e.code.slice(5)) - 1);
       } else if (e.key === 'm' || e.key === 'M') addMemory();
-      else if (e.key === 'q' || e.key === 'Q') setQuantize((v) => !v);
+      else if (e.key === 'q' || e.key === 'Q') setSnapMode((m) => SNAP_MODES[(SNAP_MODES.indexOf(m) + 1) % SNAP_MODES.length]);
+      else if (e.key === '[' || e.key === ']') {
+        // Jump to the previous / next cue.
+        const t = now();
+        const starts = [...track.cues.map((c) => c.start)].sort((a, b) => a - b);
+        const target = e.key === ']' ? starts.find((x) => x > t + 0.01) : [...starts].reverse().find((x) => x < t - 0.01);
+        if (target !== undefined) seek(target);
+      }
       else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
         e.preventDefault();
         const step = (beat ?? 0.5) * (e.shiftKey ? 4 : 1) * (e.key === 'ArrowLeft' ? -1 : 1);
-        seek(q(playhead + step));
+        seek(q(now() + step));
       } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
         setCues(track.cues.filter((c) => c.id !== selectedId));
         setSelectedId(null);
@@ -391,16 +425,27 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
             {formatTime(playhead)}
             {bpm && <span className="muted"> · bar {barBeatLabel(playhead, bpm, gridStart)}</span>}
           </span>
-          <button className="small" onClick={() => seek(q(playhead - (beat ?? 0.5) * 4))} title="Back one bar (Shift+←)">
+          <button className="small" onClick={() => seek(q(now() - (beat ?? 0.5) * 4))} title="Back one bar (Shift+←)">
             −1 bar
           </button>
-          <button className="small" onClick={() => seek(q(playhead + (beat ?? 0.5) * 4))} title="Forward one bar (Shift+→)">
+          <button className="small" onClick={() => seek(q(now() + (beat ?? 0.5) * 4))} title="Forward one bar (Shift+→)">
             +1 bar
           </button>
-          <label className="inline toggle" title="Snap cues to the beat grid (Q)">
-            <input type="checkbox" checked={quantize} onChange={(e) => setQuantize(e.target.checked)} disabled={!bpm} />
-            Quantize
-          </label>
+          <div className="snap-control" role="radiogroup" aria-label="Snap" title="Where cues, loops and clicks land (Q cycles; hold Shift while dragging to place freely)">
+            <span className="snap-label">Snap</span>
+            {SNAP_MODES.map((m) => (
+              <button
+                key={m}
+                role="radio"
+                aria-checked={snapMode === m}
+                className={snapMode === m ? 'on' : ''}
+                disabled={m !== 'off' && !bpm}
+                onClick={() => setSnapMode(m)}
+              >
+                {m === 'off' ? 'Free' : m === 'beat' ? 'Beat' : 'Bar'}
+              </button>
+            ))}
+          </div>
           <label className="inline">
             Zoom
             <select value={zoomBars} onChange={(e) => setZoomBars(Number(e.target.value))}>
@@ -483,6 +528,12 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
           windowSeconds={beat ? zoomBars * 4 * beat : zoomBars * 2}
           height={118}
           onSeek={(s) => seek(q(s))}
+          onScrub={seek}
+          onZoom={(dir) =>
+            setZoomBars((z) => ZOOM_BARS[Math.max(0, Math.min(ZOOM_BARS.length - 1, ZOOM_BARS.indexOf(z) - dir))])
+          }
+          livePlayhead={livePlayhead}
+          playing={playing}
           onSelectCue={(id) => {
             setSelectedId(id);
           }}
@@ -501,7 +552,10 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
           bpm={bpm}
           gridStart={gridStart}
           height={42}
-          onSeek={seek}
+          onSeek={(s) => seek(q(s))}
+          onScrub={seek}
+          livePlayhead={livePlayhead}
+          playing={playing}
           snap={dragSnap}
           onCueDrag={(id, change) => updateCue(id, change)}
           onSelectCue={(id) => {
@@ -555,7 +609,13 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
                   padDrop === slot ? 'drop-target' : ''
                 } ${c && c.id === draggingCueId ? 'drag-source' : ''}`}
                 style={c ? { background: c.color, borderColor: c.color } : undefined}
-                onClick={() => pad(slot)}
+                // Trigger on press, like a controller pad (no waiting for release).
+                onPointerDown={(e) => {
+                  if (e.button === 0) pad(slot);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') pad(slot);
+                }}
                 draggable={!!c}
                 title={c ? 'Click to jump · drag onto another pad to move (swaps if taken) or below to make it a memory cue' : ''}
                 onDragStart={(e) => c && startCueDrag(e, c.id)}
@@ -660,7 +720,7 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
               }}
               onJump={() => seek(selected.start)}
               onSetToPlayhead={() => {
-                const start = round(q(playhead), 3);
+                const start = round(q(now()), 3);
                 const len = selected.end !== undefined ? selected.end - selected.start : undefined;
                 updateCue(selected.id, { start, end: len !== undefined ? round(start + len, 3) : undefined });
               }}

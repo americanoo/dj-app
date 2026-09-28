@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { keyColor, toCamelot } from '../core/keys';
 import { TRACK_DRAG_TYPE } from './Timeline';
 import type { Track } from '../core/model';
@@ -8,6 +8,10 @@ import { useAudio } from './audio';
 import { LinkFolderButton, MusicFolderPanel } from './MusicFolderControl';
 
 type SortKey = 'order' | 'artist' | 'title' | 'bpm' | 'key' | 'duration';
+
+/** Fixed row height (px, matches the CSS) so only the rows in view are rendered. */
+const ROW_H = 32;
+const OVERSCAN = 12;
 
 export function LibraryView({
   selectedTrackId,
@@ -59,8 +63,45 @@ export function LibraryView({
     dispatch({ type: 'addEntries', trackIds: ids, chapterId: validChapterId });
     setSelected(new Set());
   };
+  // Stable callbacks so unchanged rows skip re-rendering when one track is edited.
+  const addRef = useRef(add);
+  addRef.current = add;
+  const addOne = useCallback((id: string) => addRef.current([id]), []);
+  const toggleOne = useCallback(
+    (id: string) =>
+      setSelected((s) => {
+        const n = new Set(s);
+        if (n.has(id)) n.delete(id);
+        else n.add(id);
+        return n;
+      }),
+    [],
+  );
 
-  if (!Object.keys(library.tracks).length) {
+  // Virtual scrolling: a 10k-track collection renders only the ~30 rows on
+  // screen, so editing a cue doesn't make React walk thousands of rows.
+  const hasTracks = Object.keys(library.tracks).length > 0;
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewH, setViewH] = useState(600);
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const measure = () => setViewH(el.clientHeight);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [hasTracks]);
+  // Back to the top when the list itself changes (search, playlist, sort).
+  useEffect(() => {
+    if (wrapRef.current) wrapRef.current.scrollTop = 0;
+    setScrollTop(0);
+  }, [playlistId, query, sort]);
+  const first = Math.max(0, Math.floor(scrollTop / ROW_H) - OVERSCAN);
+  const last = Math.min(rows.length, Math.ceil((scrollTop + viewH) / ROW_H) + OVERSCAN);
+
+  if (!hasTracks) {
     return (
       <div className="empty-state">
         <h2>Start with your music</h2>
@@ -101,14 +142,6 @@ export function LibraryView({
       </div>
     );
   }
-
-  const toggle = (id: string) =>
-    setSelected((s) => {
-      const n = new Set(s);
-      if (n.has(id)) n.delete(id);
-      else n.add(id);
-      return n;
-    });
 
   return (
     <div className="library">
@@ -169,7 +202,7 @@ export function LibraryView({
           )}
         </div>
 
-        <div className="table-wrap">
+        <div className="table-wrap" ref={wrapRef} onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}>
           <table className="tracks">
             <thead>
               <tr>
@@ -199,78 +232,114 @@ export function LibraryView({
               </tr>
             </thead>
             <tbody>
-              {rows.slice(0, 2000).map((t) => (
-                <tr
+              {first > 0 && <tr className="spacer" style={{ height: first * ROW_H }} aria-hidden />}
+              {rows.slice(first, last).map((t) => (
+                <TrackRow
                   key={t.id}
-                  className={`${selected.has(t.id) ? 'selected' : ''} ${t.id === selectedTrackId ? 'loaded' : ''}`}
-                  onClick={(e) => {
-                    if ((e.target as HTMLElement).closest('button, input')) return;
-                    onSelectTrack(t.id);
-                  }}
-                  onDoubleClick={() => add([t.id])}
-                  draggable
-                  onDragStart={(e) => {
-                    e.dataTransfer.effectAllowed = 'copy';
-                    e.dataTransfer.setData(TRACK_DRAG_TYPE, t.id);
-                    e.dataTransfer.setData('text/plain', `${t.artist} - ${t.title}`);
-                  }}
-                  title="Click to load in the deck · drag onto the timeline · double-click to add at the end of the night"
-                >
-                  <td className="check">
-                    <input type="checkbox" checked={selected.has(t.id)} onChange={() => toggle(t.id)} aria-label="Select" />
-                  </td>
-                  <td>{t.artist}</td>
-                  <td>
-                    {t.title}
-                    {!t.path && (
-                      <span className="badge warn" title="No file location: can't be exported to DJ software">
-                        no file
-                      </span>
-                    )}
-                  </td>
-                  <td className="num">{t.bpm ? t.bpm.toFixed(1) : ''}</td>
-                  <td>
-                    {t.key && (
-                      <span className="key-pill" style={{ background: keyColor(t.key) }} title={t.key}>
-                        {toCamelot(t.key) ?? t.key}
-                      </span>
-                    )}
-                  </td>
-                  <td className="num">{formatTime(t.duration, false)}</td>
-                  <td className="num">
-                    <button className="link" onClick={() => onSelectTrack(t.id)}>
-                      {t.cues.filter((c) => c.slot !== null).length} hot / {t.cues.filter((c) => c.slot === null).length} mem
-                    </button>
-                    {(audio[t.id] || rememberedIds.has(t.id)) && (
-                      <span
-                        className={`wave-badge ${!audio[t.id] && outdatedIds.has(t.id) ? 'outdated' : ''}`}
-                        title={
-                          !audio[t.id] && outdatedIds.has(t.id)
-                            ? 'Single-colour waveform from an earlier version; loads in colour when the audio is analysed again'
-                            : 'Colour waveform ready'
-                        }
-                      >
-                        〰
-                      </span>
-                    )}
-                  </td>
-                  <td className="actions">
-                    {inSet.has(t.id) ? (
-                      <span className="badge ok">in set</span>
-                    ) : (
-                      <button className="small" onClick={() => add([t.id])}>
-                        + Set
-                      </button>
-                    )}
-                  </td>
-                </tr>
+                  track={t}
+                  selected={selected.has(t.id)}
+                  loaded={t.id === selectedTrackId}
+                  inSet={inSet.has(t.id)}
+                  wave={audio[t.id] ? 'ok' : rememberedIds.has(t.id) ? (outdatedIds.has(t.id) ? 'outdated' : 'ok') : 'none'}
+                  onSelect={onSelectTrack}
+                  onAdd={addOne}
+                  onToggle={toggleOne}
+                />
               ))}
+              {last < rows.length && (
+                <tr className="spacer" style={{ height: (rows.length - last) * ROW_H }} aria-hidden />
+              )}
             </tbody>
           </table>
-          {rows.length > 2000 && <p className="muted pad">Showing 2,000 of {rows.length}. Search to narrow down.</p>}
           {!rows.length && <p className="muted pad">No tracks match.</p>}
         </div>
       </section>
     </div>
   );
 }
+
+const TrackRow = memo(function TrackRow({
+  track: t,
+  selected,
+  loaded,
+  inSet,
+  wave,
+  onSelect,
+  onAdd,
+  onToggle,
+}: {
+  track: Track;
+  selected: boolean;
+  loaded: boolean;
+  inSet: boolean;
+  wave: 'none' | 'ok' | 'outdated';
+  onSelect: (id: string) => void;
+  onAdd: (id: string) => void;
+  onToggle: (id: string) => void;
+}) {
+  return (
+    <tr
+      className={`${selected ? 'selected' : ''} ${loaded ? 'loaded' : ''}`}
+      onClick={(e) => {
+        if ((e.target as HTMLElement).closest('button, input')) return;
+        onSelect(t.id);
+      }}
+      onDoubleClick={() => onAdd(t.id)}
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = 'copy';
+        e.dataTransfer.setData(TRACK_DRAG_TYPE, t.id);
+        e.dataTransfer.setData('text/plain', `${t.artist} - ${t.title}`);
+      }}
+      title="Click to load in the deck · drag onto the timeline · double-click to add at the end of the night"
+    >
+      <td className="check">
+        <input type="checkbox" checked={selected} onChange={() => onToggle(t.id)} aria-label="Select" />
+      </td>
+      <td>{t.artist}</td>
+      <td>
+        {t.title}
+        {!t.path && (
+          <span className="badge warn" title="No file location: can't be exported to DJ software">
+            no file
+          </span>
+        )}
+      </td>
+      <td className="num">{t.bpm ? t.bpm.toFixed(1) : ''}</td>
+      <td>
+        {t.key && (
+          <span className="key-pill" style={{ background: keyColor(t.key) }} title={t.key}>
+            {toCamelot(t.key) ?? t.key}
+          </span>
+        )}
+      </td>
+      <td className="num">{formatTime(t.duration, false)}</td>
+      <td className="num">
+        <button className="link" onClick={() => onSelect(t.id)}>
+          {t.cues.filter((c) => c.slot !== null).length} hot / {t.cues.filter((c) => c.slot === null).length} mem
+        </button>
+        {wave !== 'none' && (
+          <span
+            className={`wave-badge ${wave === 'outdated' ? 'outdated' : ''}`}
+            title={
+              wave === 'outdated'
+                ? 'Single-colour waveform from an earlier version; loads in colour when the audio is analysed again'
+                : 'Colour waveform ready'
+            }
+          >
+            〰
+          </span>
+        )}
+      </td>
+      <td className="actions">
+        {inSet ? (
+          <span className="badge ok">in set</span>
+        ) : (
+          <button className="small" onClick={() => onAdd(t.id)}>
+            + Set
+          </button>
+        )}
+      </td>
+    </tr>
+  );
+});

@@ -22,7 +22,15 @@ interface Props {
   /** Detail view: visible window in seconds, centred on the playhead. Omit for overview. */
   windowSeconds?: number;
   height: number;
+  /** Click to jump (the parent applies beat / bar snapping). */
   onSeek: (sec: number) => void;
+  /** Free movement while scrubbing (drag or wheel); falls back to onSeek. */
+  onScrub?: (sec: number) => void;
+  /** ⌘/Ctrl + wheel: 1 = zoom in, -1 = zoom out. */
+  onZoom?: (dir: 1 | -1) => void;
+  /** While playing, the waveform follows this at display rate instead of `playhead`. */
+  livePlayhead?: () => number;
+  playing?: boolean;
   onSelectCue?: (id: string) => void;
   /** Enables dragging cues: called with the new position while dragging. */
   onCueDrag?: (id: string, change: Pick<Cue, 'start' | 'end'>) => void;
@@ -67,6 +75,12 @@ export function Waveform(p: Props) {
   const [dragging, setDragging] = useState<{ cueId: string; edge: CueEdge } | null>(null);
   const [width, setWidth] = useState(0);
   const peakMax = useMemo(() => (p.peaks ? maxPeak(p.peaks) : 1), [p.peaks]);
+  /** The playhead the canvas last drew; pointer maths uses it so it matches what you see. */
+  const shownPlayhead = useRef(p.playhead);
+  const scrub = useRef<{ startX: number; startPlay: number; moved: boolean } | null>(null);
+  const [scrubbing, setScrubbing] = useState(false);
+  const props = useRef(p);
+  props.current = p;
 
   useEffect(() => {
     const c = canvas.current;
@@ -76,13 +90,14 @@ export function Waveform(p: Props) {
     return () => ro.disconnect();
   }, []);
 
-  const view = () => {
+  const view = (playhead = shownPlayhead.current) => {
     if (!p.windowSeconds) return { from: 0, to: Math.max(p.duration, 1) };
     const half = p.windowSeconds / 2;
-    return { from: p.playhead - half, to: p.playhead + half };
+    return { from: playhead - half, to: playhead + half };
   };
 
-  useEffect(() => {
+  const draw = (playhead: number) => {
+    shownPlayhead.current = playhead;
     const c = canvas.current;
     if (!c) return;
     const dpr = window.devicePixelRatio || 1;
@@ -98,7 +113,7 @@ export function Waveform(p: Props) {
     ctx.fillStyle = COLORS.bg;
     ctx.fillRect(0, 0, w, h);
 
-    const { from, to } = view();
+    const { from, to } = view(playhead);
     const span = to - from;
     const xOf = (s: number) => ((s - from) / span) * w;
     const mid = h / 2;
@@ -180,17 +195,42 @@ export function Waveform(p: Props) {
           ]
         : [[peaks, COLORS.wave, 1]];
       const lastSec = peaks.length / pps;
-      for (let px = 0; px < w; px++) {
-        const s0 = from + (px / w) * span;
-        const s1 = from + ((px + 1) / w) * span;
-        if (s1 <= 0 || s0 >= lastSec) continue; // outside the track
-        ctx.globalAlpha = s1 <= p.playhead ? 0.5 : 1;
-        for (const [arr, color, boost] of layers) {
-          const amp = scale(valueAt(arr, Math.max(0, s0), s1) * boost);
-          if (amp < 0.5) continue;
-          ctx.fillStyle = color;
-          ctx.fillRect(px, mid - amp, 1, amp * 2);
+      const x0 = Math.max(0, Math.floor(xOf(0)));
+      const x1 = Math.min(w, Math.ceil(xOf(lastSec)));
+      const playX = Math.max(0, Math.min(w, xOf(playhead)));
+      for (const [arr, color, boost] of layers) {
+        // One amplitude per pixel column, lightly smoothed so the outline flows.
+        const cols = new Float32Array(Math.max(0, x1 - x0));
+        for (let px = x0; px < x1; px++) {
+          const s0 = from + (px / w) * span;
+          cols[px - x0] = scale(valueAt(arr, Math.max(0, s0), s0 + span / w) * boost);
         }
+        const smooth = new Float32Array(cols.length);
+        for (let i = 0; i < cols.length; i++) {
+          const a = cols[i - 1] ?? cols[i];
+          const b = cols[i + 1] ?? cols[i];
+          smooth[i] = Math.max(cols[i] * 0.7, a * 0.25 + cols[i] * 0.5 + b * 0.25);
+        }
+        const path = new Path2D();
+        path.moveTo(x0, mid);
+        for (let i = 0; i < smooth.length; i++) path.lineTo(x0 + i + 0.5, mid - smooth[i]);
+        for (let i = smooth.length - 1; i >= 0; i--) path.lineTo(x0 + i + 0.5, mid + smooth[i]);
+        path.closePath();
+        ctx.fillStyle = color;
+        // Already-played audio is dimmed.
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, 0, playX, h);
+        ctx.clip();
+        ctx.globalAlpha = 0.42;
+        ctx.fill(path);
+        ctx.restore();
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(playX, 0, w - playX, h);
+        ctx.clip();
+        ctx.fill(path);
+        ctx.restore();
       }
       ctx.globalAlpha = 1;
     } else {
@@ -266,7 +306,17 @@ export function Waveform(p: Props) {
 
     // Playhead
     ctx.fillStyle = COLORS.playhead;
-    ctx.fillRect(Math.round(xOf(p.playhead)), 0, 1.5, h);
+    ctx.fillRect(Math.round(xOf(playhead)), 0, 1.5, h);
+    if (p.windowSeconds) {
+      // soft glow either side of the playhead
+      const gx = xOf(playhead);
+      const glow = ctx.createLinearGradient(gx - 14, 0, gx + 14, 0);
+      glow.addColorStop(0, 'rgba(255,255,255,0)');
+      glow.addColorStop(0.5, 'rgba(255,255,255,0.10)');
+      glow.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = glow;
+      ctx.fillRect(gx - 14, 0, 28, h);
+    }
 
     // Live position readout while dragging
     if (dragging) {
@@ -288,8 +338,48 @@ export function Waveform(p: Props) {
         ctx.fillText(text, x + 6, y + 14);
       }
     }
+  };
+  const drawRef = useRef(draw);
+  drawRef.current = draw;
+
+  // Redraw on any change; while playing, follow the live position every frame
+  // without waiting for React (smooth 60 fps scrolling).
+  useEffect(() => {
+    if (!(p.playing && p.livePlayhead)) {
+      drawRef.current(p.playhead);
+      return;
+    }
+    let raf = 0;
+    const tick = () => {
+      const live = props.current.livePlayhead;
+      drawRef.current(live ? live() : props.current.playhead);
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dragging, width, peakMax, p.sections, p.bands, p.duration, p.peaks, p.peaksPerSecond, p.cues, p.playhead, p.bpm, p.gridStart, p.selectedCueId, p.windowSeconds, p.height]);
+  }, [p.playing, dragging, width, peakMax, p.sections, p.bands, p.duration, p.peaks, p.peaksPerSecond, p.cues, p.playhead, p.bpm, p.gridStart, p.selectedCueId, p.windowSeconds, p.height]);
+
+  // Wheel / trackpad scrolls through the track; ⌘/Ctrl + wheel zooms.
+  useEffect(() => {
+    const c = canvas.current;
+    if (!c) return;
+    const onWheel = (e: WheelEvent) => {
+      const q = props.current;
+      e.preventDefault();
+      if (e.ctrlKey || e.metaKey) {
+        q.onZoom?.(e.deltaY < 0 ? 1 : -1);
+        return;
+      }
+      const { from, to } = view();
+      const secPerPx = (to - from) / c.clientWidth;
+      const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      (q.onScrub ?? q.onSeek)(Math.max(0, Math.min(q.duration, shownPlayhead.current + delta * secPerPx)));
+    };
+    c.addEventListener('wheel', onWheel, { passive: false });
+    return () => c.removeEventListener('wheel', onWheel);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.windowSeconds, p.duration]);
 
   const secAt = (clientX: number) => {
     const rect = canvas.current!.getBoundingClientRect();
@@ -325,7 +415,7 @@ export function Waveform(p: Props) {
   return (
     <canvas
       ref={canvas}
-      className={`${p.windowSeconds ? 'wave detail' : 'wave overview'}${dragging ? ' dragging' : ''}`}
+      className={`${p.windowSeconds ? 'wave detail' : 'wave overview'}${dragging || scrubbing ? ' dragging' : ''}`}
       style={{ height: p.height }}
       onPointerDown={(e) => {
         const hit = handleAt(e.clientX);
@@ -337,10 +427,30 @@ export function Waveform(p: Props) {
           }
           return;
         }
-        p.onSeek(Math.max(0, Math.min(p.duration, secAt(e.clientX))));
+        // Empty area: grab to scrub (zoomed view) or drag along (overview); a plain click jumps.
+        (e.target as HTMLElement).setPointerCapture(e.pointerId);
+        scrub.current = { startX: e.clientX, startPlay: shownPlayhead.current, moved: false };
       }}
       onPointerMove={(e) => {
         const d = drag.current;
+        const sc = scrub.current;
+        if (sc) {
+          const dx = e.clientX - sc.startX;
+          if (!sc.moved && Math.abs(dx) < DRAG_THRESHOLD) return;
+          if (!sc.moved) {
+            sc.moved = true;
+            setScrubbing(true);
+          }
+          const scrubTo = p.onScrub ?? p.onSeek;
+          if (p.windowSeconds) {
+            // Pull the waveform like a record: drag left to move forward.
+            const secPerPx = p.windowSeconds / e.currentTarget.clientWidth;
+            scrubTo(Math.max(0, Math.min(p.duration, sc.startPlay - dx * secPerPx)));
+          } else {
+            scrubTo(Math.max(0, Math.min(p.duration, secAt(e.clientX))));
+          }
+          return;
+        }
         if (!d) {
           // Hover feedback: hand over cues, resize arrows over loop ends.
           if (p.onCueDrag) {
@@ -357,8 +467,18 @@ export function Waveform(p: Props) {
         const snap = e.shiftKey ? undefined : p.snap;
         p.onCueDrag?.(d.cueId, dragCue(d.original, d.edge, secAt(e.clientX), p.duration, snap));
       }}
-      onPointerUp={endDrag}
-      onPointerCancel={endDrag}
+      onPointerUp={(e) => {
+        const sc = scrub.current;
+        if (sc && !sc.moved) p.onSeek(Math.max(0, Math.min(p.duration, secAt(e.clientX))));
+        scrub.current = null;
+        setScrubbing(false);
+        endDrag();
+      }}
+      onPointerCancel={() => {
+        scrub.current = null;
+        setScrubbing(false);
+        endDrag();
+      }}
     />
   );
 }

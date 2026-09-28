@@ -227,9 +227,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!loaded) return;
     window.clearTimeout(saveTimer.current);
+    // Saving copies the whole project; do it when the browser is idle so it
+    // never competes with pads, drags or playback.
     saveTimer.current = window.setTimeout(() => {
-      idbSet(STORAGE_KEY, project).catch(() => undefined);
-    }, 400);
+      const save = () => idbSet(STORAGE_KEY, project).catch(() => undefined);
+      if ('requestIdleCallback' in window) window.requestIdleCallback(save, { timeout: 2000 });
+      else save();
+    }, 600);
   }, [project, loaded]);
 
   return <Ctx.Provider value={{ project, dispatch, loaded }}>{children}</Ctx.Provider>;
