@@ -2702,3 +2702,15 @@ button.auto-cue-btn {
   color: var(--cyan);
   border-color: rgba(34, 211, 238, 0.3);
 }
+.auto-hint {
+  margin: 6px 0 0;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--warn);
+  background: rgba(255, 176, 32, 0.07);
+}
+.auto-hint button.link {
+  color: var(--cyan);
+  font-weight: 700;
+}

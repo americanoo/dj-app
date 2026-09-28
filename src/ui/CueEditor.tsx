@@ -869,7 +869,7 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
         </section>
       </div>
 
-      {autoOpen && <AutoCuePanel track={track} sections={sections} onApply={setCues} onClose={() => setAutoOpen(false)} />}
+      {autoOpen && <AutoCuePanel track={track} sections={sections} wave={wave} onApply={setCues} onClose={() => setAutoOpen(false)} />}
       {historyOpen &&
         // Portalled so the pop-up isn't scaled with the deck.
         createPortal(

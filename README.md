@@ -165,7 +165,11 @@ cues go straight through. Re-importing the same file changes nothing.
 - **Auto cues** (✦ next to the section chips) set cue points from those sections: the first downbeat, the drop,
   breakdowns, the build and the outro, on the beat grid, named and coloured by section. When there are more
   sections than pads, the most useful win (start, first drop, outro, first breakdown and build), and they go on
-  the pads in time order. Choose **Fill empty pads** (your cues stay put), **Replace pads** (your hot cues become
+  the pads in time order. When there are fewer sections than pads (a reggaeton or hip-hop track whose bass never
+  stops is one long section), the rest are filled from **phrase changes**: every 4-bar line compares the 8 bars
+  before and after in each band, so a vocal coming in, the hats dropping out or the chorus lifting all show up.
+  They're named *Lift*, *Dip* or *Switch* (or *Phrase* when it's just the next phrase) and kept 16 bars apart where
+  possible, so all eight pads get used and spread over the track. Choose **Fill empty pads** (your cues stay put), **Replace pads** (your hot cues become
   memory cues) or **Memory cues** (pads untouched), and optionally add 4-bar mix loops at the intro and outro.
   Preview first, then apply to the track or to **every track in the set** that has a colour waveform. ⌘Z undoes it.
 - **Audio engine** on the Web Audio API: cue jumps are instant and sample-accurate, with short fades so they don't

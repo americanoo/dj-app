@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { planAutoCues, type AutoCueMode } from '../core/autocues';
 import { SLOT_LETTERS, uid, type Cue, type Track } from '../core/model';
-import { detectSections, type Section } from '../core/sections';
+import { detectSections, phraseChanges, type PhraseChange, type Section } from '../core/sections';
+import type { WaveformData } from '../core/waveform';
 import { barBeatLabel, formatTime } from '../core/time';
 import { useAudio } from './audio';
 import { PadStrip } from './MergeReview';
@@ -35,11 +36,14 @@ const MODES: { id: AutoCueMode; label: string; hint: string }[] = [
 export function AutoCuePanel({
   track,
   sections,
+  wave,
   onApply,
   onClose,
 }: {
   track: Track;
   sections: Section[];
+  /** The track's colour waveform, for finding phrase changes inside long sections. */
+  wave?: WaveformData;
   onApply: (cues: Cue[]) => void;
   onClose: () => void;
 }) {
@@ -59,18 +63,27 @@ export function AutoCuePanel({
     }
   };
 
-  const options = (t: Track) => ({
+  const changesOf = (t: Track, w?: WaveformData): PhraseChange[] =>
+    w?.bands ? phraseChanges(w.bands, w.peaksPerSecond, w.duration, t.bpm, t.gridStart) : [];
+  const options = (t: Track, fillers: PhraseChange[]) => ({
     ...settings,
     bpm: t.bpm,
     gridStart: t.gridStart,
     colorOf: (k: keyof typeof SECTION_COLORS) => SECTION_COLORS[k],
     newId: () => uid('cue'),
+    fillers,
   });
-  const plan = useMemo(
-    () => planAutoCues(track.cues, sections, options(track)),
+  const fillers = useMemo(
+    () => changesOf(track, wave),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [track, sections, settings],
+    [wave, track.bpm, track.gridStart],
   );
+  const plan = useMemo(
+    () => planAutoCues(track.cues, sections, options(track, fillers)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [track, sections, settings, fillers],
+  );
+  const takenPads = track.cues.filter((c) => c.slot !== null).length;
 
   const set = activeSet(project);
   const setTrackIds = [...new Set(set.entries.map((e) => e.trackId))].filter((id) => project.library.tracks[id]);
@@ -83,18 +96,18 @@ export function AutoCuePanel({
       let noWave = 0;
       for (const id of setTrackIds) {
         const t = project.library.tracks[id];
-        const wave = id === track.id ? undefined : await getWaveform(id);
+        const w = id === track.id ? wave : await getWaveform(id);
         const secs =
           id === track.id
             ? sections
-            : wave?.bands
-              ? detectSections(wave.bands, wave.peaksPerSecond, wave.duration, t.bpm, t.gridStart)
+            : w?.bands
+              ? detectSections(w.bands, w.peaksPerSecond, w.duration, t.bpm, t.gridStart)
               : [];
         if (!secs.length) {
           noWave++;
           continue;
         }
-        const p = planAutoCues(t.cues, secs, options(t));
+        const p = planAutoCues(t.cues, secs, options(t, id === track.id ? fillers : changesOf(t, w)));
         if (!p.added.length) continue;
         patches[id] = { cues: p.cues };
         cues += p.added.length;
@@ -150,6 +163,15 @@ export function AutoCuePanel({
             </label>
           </div>
           <p className="muted small-text">{mode.hint}</p>
+          {settings.mode === 'fill' && takenPads > 0 && (
+            <p className="auto-hint">
+              {takenPads} of 8 pads already have your cues, so only {8 - takenPads} can be filled.{' '}
+              <button className="link" onClick={() => update({ mode: 'replace' })}>
+                Let auto cues pick all 8
+              </button>{' '}
+              (your cues are kept as memory cues).
+            </p>
+          )}
 
           <div className="auto-preview">
             <PadStrip label="Now" cues={track.cues} />

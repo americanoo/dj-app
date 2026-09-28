@@ -147,3 +147,60 @@ export function detectSections(
   }
   return sections;
 }
+
+/** How much the music changes at a phrase line, for picking cue points inside long sections. */
+export interface PhraseChange {
+  /** Seconds, on a 4-bar line of the beat grid. */
+  start: number;
+  /** Size of the change: 0 = none; about 1 = one band doubling or halving. */
+  score: number;
+  /** Overall energy after minus before: positive lifts, negative dips. */
+  lift: number;
+}
+
+/**
+ * Every 4-bar line (8 s without a BPM), compares the 8 bars before with the
+ * 8 bars after in each band. Big differences are where something happens even
+ * when the bass never stops: a vocal comes in, the hats drop out, the chorus
+ * lifts. Lines on 16- and 8-bar boundaries get a small boost, since that's
+ * where arrangements usually change.
+ */
+export function phraseChanges(
+  bands: WaveformBands,
+  peaksPerSecond: number,
+  duration: number,
+  bpm?: number,
+  gridStart = 0,
+): PhraseChange[] {
+  if (!(duration > 0) || !bands.low.length) return [];
+  const barLen = bpm && bpm > 0 ? (4 * 60) / bpm : 2;
+  const step = 4 * barLen;
+  const span = 8 * barLen;
+  const origin = bpm && bpm > 0 ? gridStart - Math.floor(gridStart / step) * step : 0;
+
+  // Each band relative to its own loud parts, so a quiet hi-hat change counts as much as a bass change.
+  const refs = [bands.low, bands.mid, bands.high].map((arr) => {
+    const perBar: number[] = [];
+    for (let t = 0; t < duration; t += barLen) perBar.push(mean(arr, t * peaksPerSecond, (t + barLen) * peaksPerSecond));
+    return Math.max(0.02, percentile(perBar, 0.9));
+  });
+  const level = (from: number, to: number) =>
+    [bands.low, bands.mid, bands.high].map((arr, i) => mean(arr, from * peaksPerSecond, to * peaksPerSecond) / refs[i]);
+
+  const out: PhraseChange[] = [];
+  for (let k = 1; origin + k * step < duration - barLen * 4; k++) {
+    const t = origin + k * step;
+    if (t < barLen * 2) continue;
+    const before = level(Math.max(0, t - span), t);
+    const after = level(t, Math.min(duration, t + span));
+    const eps = 0.05;
+    let score = 0;
+    for (let b = 0; b < 3; b++) score += Math.abs(Math.log((after[b] + eps) / (before[b] + eps)));
+    const beatsFromGrid = Math.round((t - gridStart) / (barLen / 4));
+    const bar = Math.round(beatsFromGrid / 4);
+    const boost = bpm && bpm > 0 ? (bar % 16 === 0 ? 1.15 : bar % 8 === 0 ? 1.05 : 1) : 1;
+    const lift = after.reduce((s, v) => s + v, 0) - before.reduce((s, v) => s + v, 0);
+    out.push({ start: t, score: score * boost, lift });
+  }
+  return out;
+}

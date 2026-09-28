@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { cueCandidates, planAutoCues, type AutoCueOptions } from '../autocues';
 import type { Cue } from '../model';
-import type { Section } from '../sections';
+import { phraseChanges, type PhraseChange, type Section } from '../sections';
 
 // 120 BPM: a bar is 2 s, 8 bars 16 s.
 const sections: Section[] = [
@@ -94,5 +94,50 @@ describe('auto cues', () => {
   it('does nothing when every pad is taken', () => {
     const full = Array.from({ length: 8 }, (_, i) => cue(`c${i}`, 300 + i, i));
     expect(planAutoCues(full, sections, opts()).added).toEqual([]);
+  });
+});
+
+describe('filling the pads when the sections are few', () => {
+  // A song whose bass never drops out: one long section.
+  const oneSection: Section[] = [{ kind: 'main', start: 0, end: 200 }];
+  const changes: PhraseChange[] = [16, 32, 40, 48, 64, 72, 96, 104, 128, 144, 160, 176].map((t, i) => ({
+    start: t,
+    score: [0.9, 1.4, 0.2, 0.3, 1.2, 0.1, 1.1, 0.4, 0.8, 0.5, 0.7, 0.6][i],
+    lift: i % 2 ? -0.5 : 0.5,
+  }));
+
+  it('fills all eight pads with the biggest changes, spread out', () => {
+    const plan = planAutoCues([], oneSection, opts({ fillers: changes }));
+    const got = pads(plan.cues);
+    expect(got).toHaveLength(8);
+    expect(got[0]).toBe('A:Start@0.2');
+    // at 120 BPM, 16 bars = 32 s apart where possible
+    const starts = plan.cues.filter((c) => c.slot !== null).map((c) => c.start).sort((a, b) => a - b);
+    const gaps = starts.slice(1).map((t, i) => t - starts[i]);
+    expect(Math.min(...gaps)).toBeGreaterThanOrEqual(8);
+    // repeated names are numbered
+    expect(plan.added.map((c) => c.name).filter((n) => n.startsWith('Lift')).length).toBeGreaterThan(1);
+    expect(new Set(plan.added.map((c) => c.name)).size).toBe(plan.added.length);
+  });
+
+  it('still fills only the free pads in fill mode', () => {
+    const mine = Array.from({ length: 5 }, (_, i) => cue(`m${i}`, 150 + i * 4, i));
+    const plan = planAutoCues(mine, oneSection, opts({ fillers: changes }));
+    expect(plan.added.map((c) => c.slot)).toEqual([5, 6, 7]);
+  });
+
+  it('finds the phrase where the music changes, even with steady bass', () => {
+    const pps = 10;
+    const seconds = 120;
+    const n = seconds * pps;
+    const low = new Float32Array(n).fill(0.8);
+    const mid = new Float32Array(n).fill(0.2);
+    const high = new Float32Array(n).fill(0.1);
+    // 120 BPM, grid at 0: bar 17 starts at 32 s. The mids (a vocal) come in there.
+    for (let i = 32 * pps; i < n; i++) mid[i] = 0.7;
+    const found = phraseChanges({ low, mid, high }, pps, seconds, 120, 0);
+    const top = [...found].sort((a, b) => b.score - a.score)[0];
+    expect(top.start).toBe(32);
+    expect(top.lift).toBeGreaterThan(0);
   });
 });

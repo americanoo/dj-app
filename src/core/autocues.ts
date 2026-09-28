@@ -4,11 +4,13 @@
  * Each section change is a candidate (the first downbeat, the drop, each
  * breakdown, the outro…). When there are more candidates than free pads, the
  * ones a DJ reaches for most win: the start, the first drop, the outro, the
- * first breakdown and build. Chosen cues go on the pads in time order, so A is
- * always the earliest. Optional 4-bar loops at the intro and outro help mixing.
+ * first breakdown and build. When the sections leave pads free (a song whose
+ * bass never drops out is one long section), the biggest phrase changes fill
+ * the rest, spread across the track. Chosen cues go on the pads in time order,
+ * so A is always the earliest. Optional 4-bar loops at the intro and outro help mixing.
  */
 import { MAX_HOT_CUES, type Cue } from './model';
-import { SECTION_LABELS, type Section, type SectionKind } from './sections';
+import { SECTION_LABELS, type PhraseChange, type Section, type SectionKind } from './sections';
 import { beatLength, round } from './time';
 
 export type AutoCueMode = 'fill' | 'replace' | 'memory';
@@ -26,6 +28,8 @@ export interface AutoCueOptions {
   gridStart?: number;
   colorOf: (kind: SectionKind) => string;
   newId: () => string;
+  /** Phrase changes (see phraseChanges) used to fill pads the sections leave free. */
+  fillers?: PhraseChange[];
 }
 
 export interface AutoCuePlan {
@@ -54,7 +58,8 @@ export function cueCandidates(sections: Section[], gridStart = 0): Candidate[] {
     const n = (seen[sec.kind] = (seen[sec.kind] ?? 0) + 1);
     // The first cue sits on the first downbeat rather than at 0:00 of the file.
     const start = i === 0 && sec.start < 0.5 && gridStart > 0 && gridStart < sec.end ? gridStart : sec.start;
-    const name = n === 1 ? SECTION_LABELS[sec.kind] : `${SECTION_LABELS[sec.kind]} ${n}`;
+    // A track that starts straight into the groove starts with "Start", not "Main".
+    const name = i === 0 && sec.kind === 'main' ? 'Start' : n === 1 ? SECTION_LABELS[sec.kind] : `${SECTION_LABELS[sec.kind]} ${n}`;
     let rank: number;
     if (i === 0) rank = 0;
     else if (n === 1) rank = FIRST_RANK[sec.kind] ?? 6;
@@ -90,13 +95,30 @@ export function planAutoCues(existing: Cue[], sections: Section[], o: AutoCueOpt
     const free = Array.from({ length: MAX_HOT_CUES }, (_, i) => i).filter((i) => !used.has(i));
     // Points already on a pad don't need another one.
     const wanted = candidates.filter((c) => !base.some((e) => e.slot !== null && Math.abs(e.start - c.start) < near));
-    const chosen = [...wanted]
-      .sort((a, b) => a.rank - b.rank)
-      .slice(0, free.length)
-      .sort((a, b) => a.start - b.start);
-    chosen.forEach((c, i) =>
-      added.push({ id: o.newId(), kind: 'cue', slot: free[i], start: c.start, name: c.name, color: o.colorOf(c.kind), origin: 'manual' }),
-    );
+    const chosen = [...wanted].sort((a, b) => a.rank - b.rank).slice(0, free.length);
+    // Pads still free: the biggest phrase changes, kept apart so they spread
+    // over the track (16 bars apart if possible, then 8, then 4).
+    const bar = beat ? beat * 4 : 2;
+    const taken = () => [...chosen.map((c) => c.start), ...base.filter((c) => c.slot !== null).map((c) => c.start)];
+    const fillers = [...(o.fillers ?? [])].sort((a, b) => b.score - a.score);
+    for (const gapBars of [16, 8, 4]) {
+      for (const f of fillers) {
+        if (chosen.length >= free.length) break;
+        if (taken().some((t) => Math.abs(t - f.start) < gapBars * bar - 0.01)) continue;
+        const kind: SectionKind = f.lift > 0.25 ? 'build' : f.lift < -0.25 ? 'breakdown' : 'main';
+        // Only call it a change if something really changes; otherwise it's just the next phrase.
+        const name = f.score < 0.2 ? 'Phrase' : f.lift > 0.25 ? 'Lift' : f.lift < -0.25 ? 'Dip' : 'Switch';
+        chosen.push({ start: round(f.start, 3), kind, name, rank: 100 });
+      }
+    }
+    chosen.sort((a, b) => a.start - b.start);
+    const count: Record<string, number> = {};
+    chosen.forEach((c, i) => {
+      // Phrase-change cues can repeat ("Lift", "Lift 2").
+      const n = c.rank === 100 ? (count[c.name] = (count[c.name] ?? 0) + 1) : 1;
+      const name = n > 1 ? `${c.name} ${n}` : c.name;
+      added.push({ id: o.newId(), kind: 'cue', slot: free[i], start: c.start, name, color: o.colorOf(c.kind), origin: 'manual' });
+    });
   }
 
   if (o.mixLoops && beat) {
@@ -104,7 +126,7 @@ export function planAutoCues(existing: Cue[], sections: Section[], o: AutoCueOpt
     const intro = candidates[0];
     const outro = candidates.find((c) => c.kind === 'outro');
     for (const [c, name] of [
-      [intro, 'Intro loop'],
+      [intro, intro?.kind === 'intro' ? 'Intro loop' : 'Start loop'],
       [outro, 'Outro loop'],
     ] as const) {
       if (!c) continue;
