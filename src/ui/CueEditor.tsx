@@ -10,6 +10,7 @@ import { Deck } from './deck';
 import { moveCueToSlot } from '../core/cues';
 import { useMusicFolder } from './musicFolder';
 import { useFitZoom } from './fit';
+import { AutoCuePanel } from './AutoCuePanel';
 import { LinkFolderButton } from './MusicFolderControl';
 import { activeSet, useStore } from './store';
 import { SECTION_COLORS, Waveform } from './Waveform';
@@ -76,17 +77,22 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [autoOpen, setAutoOpen] = useState(false);
   /** Playing, but the browser is holding the sound back (needs a click on the page). */
   const [soundBlocked, setSoundBlocked] = useState(false);
   const meterRef = useRef<HTMLSpanElement>(null);
   // The whole deck always fits its panel: the waveform stretches first, then everything scales down.
   const fitRef = useFitZoom<HTMLDivElement>(0.45);
   useEffect(() => {
-    if (!historyOpen) return;
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setHistoryOpen(false);
+    if (!historyOpen && !autoOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      setHistoryOpen(false);
+      setAutoOpen(false);
+    };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [historyOpen]);
+  }, [historyOpen, autoOpen]);
   const fileInput = useRef<HTMLInputElement>(null);
 
   // Show a remembered waveform straight away, then fetch the audio from the linked folder.
@@ -391,22 +397,6 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
     });
   };
 
-  const cueSections = () => {
-    const added = sections
-      .filter((sec) => sec.start > 0.5)
-      .map((sec) => ({ sec, start: round(q(sec.start), 3) }))
-      .filter(({ start }) => !track.cues.some((c) => Math.abs(c.start - start) < 0.25))
-      .map(({ sec, start }) => ({
-        id: uid('cue'),
-        kind: 'cue' as const,
-        slot: null,
-        start,
-        name: SECTION_LABELS[sec.kind],
-        color: SECTION_COLORS[sec.kind],
-      }));
-    if (added.length) setCues([...track.cues, ...added]);
-  };
-
   const addMemory = () =>
     addCue({ kind: 'cue', slot: null, start: round(q(now()), 3), name: '', color: CUE_COLORS[0] });
 
@@ -690,11 +680,11 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
               </button>
             ))}
             <button
-              className="small"
-              onClick={cueSections}
-              title="Add a memory cue, named after the section, at the start of each section (skips ones already cued)"
+              className="small auto-cue-btn"
+              onClick={() => setAutoOpen(true)}
+              title="Set cue points automatically from the song's sections (drop, breakdowns, build, outro…)"
             >
-              + Memory cues at sections
+              ✦ Auto cues…
             </button>
           </div>
         )}
@@ -879,6 +869,7 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
         </section>
       </div>
 
+      {autoOpen && <AutoCuePanel track={track} sections={sections} onApply={setCues} onClose={() => setAutoOpen(false)} />}
       {historyOpen &&
         // Portalled so the pop-up isn't scaled with the deck.
         createPortal(

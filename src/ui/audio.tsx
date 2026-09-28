@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { del, delMany, get, keys, set as idbSet } from 'idb-keyval';
 import { analyseBands, type BandPeaks } from '../core/analysis';
 import { decodeWaveform, encodeWaveform, type StoredWaveform, type WaveformData } from '../core/waveform';
@@ -37,6 +37,8 @@ interface AudioStore {
   attach: (trackId: string, file: File) => Promise<AttachedAudio>;
   /** Load a remembered waveform into `remembered`, if there is one. */
   loadRemembered: (trackId: string) => Promise<void>;
+  /** A track's waveform from memory or storage, without loading it into view. */
+  getWaveform: (trackId: string) => Promise<WaveformData | undefined>;
   forget: (trackId: string) => void;
   forgetAll: () => void;
   /** Decoded audio for playback (decodes again if another track was decoded since). */
@@ -180,6 +182,19 @@ export function AudioProvider({ children }: { children: ReactNode }) {
     if (w) setRemembered((r) => ({ ...r, [trackId]: w }));
   }, []);
 
+  const audioRef = useRef(audio);
+  audioRef.current = audio;
+  const rememberedRef = useRef(remembered);
+  rememberedRef.current = remembered;
+  const getWaveform = useCallback(async (trackId: string) => {
+    const live = audioRef.current[trackId] ?? rememberedRef.current[trackId];
+    if (live) return live;
+    const stored =
+      (await get<StoredWaveform>(waveformKey(trackId)).catch(() => undefined)) ??
+      (await get<StoredWaveform>(legacyKey(trackId)).catch(() => undefined));
+    return decodeWaveform(stored);
+  }, []);
+
   const forget = useCallback((trackId: string) => {
     del(waveformKey(trackId)).catch(() => undefined);
     del(legacyKey(trackId)).catch(() => undefined);
@@ -218,7 +233,7 @@ export function AudioProvider({ children }: { children: ReactNode }) {
   );
 
   return (
-    <Ctx.Provider value={{ audio, remembered, rememberedIds, outdatedIds, loading, attach, loadRemembered, forget, forgetAll, getBuffer }}>
+    <Ctx.Provider value={{ audio, remembered, rememberedIds, outdatedIds, loading, attach, loadRemembered, getWaveform, forget, forgetAll, getBuffer }}>
       {children}
     </Ctx.Provider>
   );

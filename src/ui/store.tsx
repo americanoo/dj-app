@@ -236,7 +236,7 @@ function actionLabel(a: Action): string {
       return 'Track edit';
     }
     case 'updateTracks':
-      return 'BPM fixes';
+      return Object.values(a.patches).some((p) => 'cues' in p) ? 'Auto cues' : 'BPM fixes';
     case 'setCues':
       return 'Cue change';
     case 'addTrack':

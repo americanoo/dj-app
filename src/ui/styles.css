@@ -2669,3 +2669,36 @@ button.play-btn:disabled {
   height: 28px;
   min-width: 28px;
 }
+
+/* auto cues */
+.modal.auto-cues {
+  width: min(720px, 100%);
+}
+.auto-options {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 4px 0 6px;
+}
+.auto-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 10px 0;
+}
+.auto-list td:first-child {
+  width: 64px;
+}
+.auto-result {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(46, 230, 160, 0.08);
+  color: var(--ok);
+  font-size: 12.5px;
+}
+button.auto-cue-btn {
+  color: var(--cyan);
+  border-color: rgba(34, 211, 238, 0.3);
+}

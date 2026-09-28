@@ -161,8 +161,13 @@ cues go straight through. Re-importing the same file changes nothing.
   the record and carries on from the new spot when you let go.
 - **Song sections** are detected automatically from the colour waveform: Intro, Main, Breakdown, Build, Drop and
   Outro, decided in 8-bar phrases from where the bass drops out and comes back. Each part is tinted and labelled on
-  both waveforms, with phrase lines every 16 bars. Section chips under the waveform jump to each part, and
-  *+ Memory cues at sections* drops a named memory cue at the start of each one.
+  both waveforms, with phrase lines every 16 bars. Section chips under the waveform jump to each part.
+- **Auto cues** (✦ next to the section chips) set cue points from those sections: the first downbeat, the drop,
+  breakdowns, the build and the outro, on the beat grid, named and coloured by section. When there are more
+  sections than pads, the most useful win (start, first drop, outro, first breakdown and build), and they go on
+  the pads in time order. Choose **Fill empty pads** (your cues stay put), **Replace pads** (your hot cues become
+  memory cues) or **Memory cues** (pads untouched), and optionally add 4-bar mix loops at the intro and outro.
+  Preview first, then apply to the track or to **every track in the set** that has a colour waveform. ⌘Z undoes it.
 - **Audio engine** on the Web Audio API: cue jumps are instant and sample-accurate, with short fades so they don't
   click. Tapping a filled pad plays from it, like a CDJ. **Loop pads really loop**: tap to engage, tap again (or
   *exit*) to release, and jumping outside the loop releases it too. Loops follow you live as you drag or resize
