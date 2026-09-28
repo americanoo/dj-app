@@ -26,6 +26,9 @@ interface Props {
   onSeek: (sec: number) => void;
   /** Free movement while scrubbing (drag or wheel); falls back to onSeek. */
   onScrub?: (sec: number) => void;
+  /** A drag or wheel scrub begins / ends (the deck holds playback in between). */
+  onScrubStart?: () => void;
+  onScrubEnd?: () => void;
   /** ⌘/Ctrl + wheel: 1 = zoom in, -1 = zoom out. */
   onZoom?: (dir: 1 | -1) => void;
   /** While playing, the waveform follows this at display rate instead of `playhead`. */
@@ -40,6 +43,23 @@ interface Props {
 
 /** Pixels the pointer must move before a press on a cue becomes a drag. */
 const DRAG_THRESHOLD = 3;
+
+/** How long after the last wheel event a wheel scrub counts as finished. */
+const WHEEL_IDLE_MS = 160;
+
+/**
+ * Waveform amplitudes per pixel column, cached for the current zoom. Columns
+ * sit at fixed points in the track (column k covers k·dt … (k+1)·dt), so as the
+ * view scrolls the shape just slides instead of being re-sampled differently
+ * every frame, which is what made peaks flicker.
+ */
+interface ColumnCache {
+  sources: Float32Array[];
+  dt: number;
+  gain: number;
+  height: number;
+  cols: Float32Array[]; // -1 = not computed yet
+}
 
 interface DragState {
   cueId: string;
@@ -81,6 +101,8 @@ export function Waveform(p: Props) {
   const [scrubbing, setScrubbing] = useState(false);
   const props = useRef(p);
   props.current = p;
+  const columns = useRef<ColumnCache | null>(null);
+  const wheelTimer = useRef(0);
 
   useEffect(() => {
     const c = canvas.current;
@@ -116,6 +138,8 @@ export function Waveform(p: Props) {
     const { from, to } = view(playhead);
     const span = to - from;
     const xOf = (s: number) => ((s - from) / span) * w;
+    // Line positions rounded to device pixels, so thin lines move smoothly with the waveform.
+    const px = (x: number) => Math.round(x * dpr) / dpr;
     const mid = h / 2;
 
     // Song sections: tinted backgrounds so intro / breakdown / drop read at a glance.
@@ -133,7 +157,7 @@ export function Waveform(p: Props) {
       const g0 = p.gridStart ?? 0;
       ctx.fillStyle = 'rgba(255,255,255,0.1)';
       for (let t = g0 - Math.floor(g0 / phrase) * phrase; t < to; t += phrase) {
-        if (t > 0) ctx.fillRect(Math.round(xOf(t)), 0, 1, h);
+        if (t > 0) ctx.fillRect(px(xOf(t)), 0, 1, h);
       }
     }
 
@@ -149,7 +173,7 @@ export function Waveform(p: Props) {
           const isBar = ((b % 4) + 4) % 4 === 0;
           const isPhrase = ((b % 64) + 64) % 64 === 0; // every 16 bars
           ctx.fillStyle = isPhrase ? COLORS.phrase : isBar ? COLORS.bar : COLORS.grid;
-          ctx.fillRect(Math.round(sx) - (isPhrase ? 1 : 0), 0, isPhrase ? 2 : 1, h);
+          ctx.fillRect(px(sx) - (isPhrase ? 1 : 0), 0, isPhrase ? 2 : 1, h);
           if (isBar && (b / 4) % 4 === 0) {
             ctx.fillStyle = 'rgba(255,255,255,0.4)';
             ctx.font = '10px system-ui';
@@ -175,7 +199,8 @@ export function Waveform(p: Props) {
       const height = mid - 3;
       // Close to linear, so quiet breakdowns stay visibly lower than drops.
       const scale = (v: number) => Math.pow(Math.min(1, v * gain), 0.95) * height;
-      const bucketsPerPx = (span / w) * pps;
+      const dt = span / w;
+      const bucketsPerPx = dt * pps;
       // Zoomed out: loudest bucket under the pixel. Zoomed in past the analysis
       // resolution: blend neighbours so the shape stays smooth.
       const valueAt = (arr: Float32Array, s0: number, s1: number) => {
@@ -195,26 +220,43 @@ export function Waveform(p: Props) {
           ]
         : [[peaks, COLORS.wave, 1]];
       const lastSec = peaks.length / pps;
-      const x0 = Math.max(0, Math.floor(xOf(0)));
-      const x1 = Math.min(w, Math.ceil(xOf(lastSec)));
+      const n = Math.ceil(lastSec / dt);
+      let cache = columns.current;
+      if (
+        !cache ||
+        cache.dt !== dt ||
+        cache.gain !== gain ||
+        cache.height !== height ||
+        cache.sources.length !== layers.length ||
+        cache.sources.some((a, i) => a !== layers[i][0])
+      ) {
+        cache = { sources: layers.map((l) => l[0]), dt, gain, height, cols: layers.map(() => new Float32Array(n).fill(-1)) };
+        columns.current = cache;
+      }
+      const k0 = Math.max(0, Math.floor(from / dt) - 1);
+      const k1 = Math.min(n - 1, Math.ceil(to / dt) + 1);
       const playX = Math.max(0, Math.min(w, xOf(playhead)));
-      for (const [arr, color, boost] of layers) {
-        // One amplitude per pixel column, lightly smoothed so the outline flows.
-        const cols = new Float32Array(Math.max(0, x1 - x0));
-        for (let px = x0; px < x1; px++) {
-          const s0 = from + (px / w) * span;
-          cols[px - x0] = scale(valueAt(arr, Math.max(0, s0), s0 + span / w) * boost);
-        }
-        const smooth = new Float32Array(cols.length);
-        for (let i = 0; i < cols.length; i++) {
-          const a = cols[i - 1] ?? cols[i];
-          const b = cols[i + 1] ?? cols[i];
-          smooth[i] = Math.max(cols[i] * 0.7, a * 0.25 + cols[i] * 0.5 + b * 0.25);
-        }
+      layers.forEach(([arr, color, boost], li) => {
+        const cols = cache.cols[li];
+        const amp = (k: number) => {
+          if (k < 0 || k >= n) return 0;
+          let v = cols[k];
+          if (v < 0) v = cols[k] = scale(valueAt(arr, k * dt, (k + 1) * dt) * boost);
+          return v;
+        };
+        if (k1 < k0) return;
+        // Lightly smoothed so the outline flows; peaks keep most of their height.
         const path = new Path2D();
-        path.moveTo(x0, mid);
-        for (let i = 0; i < smooth.length; i++) path.lineTo(x0 + i + 0.5, mid - smooth[i]);
-        for (let i = smooth.length - 1; i >= 0; i--) path.lineTo(x0 + i + 0.5, mid + smooth[i]);
+        const top: number[] = [];
+        for (let k = k0; k <= k1; k++) {
+          const a = amp(k);
+          top.push(Math.max(a * 0.7, amp(k - 1) * 0.25 + a * 0.5 + amp(k + 1) * 0.25));
+        }
+        const xk = (k: number) => xOf((k + 0.5) * dt);
+        path.moveTo(xOf(k0 * dt), mid);
+        for (let k = k0; k <= k1; k++) path.lineTo(xk(k), mid - top[k - k0]);
+        path.lineTo(xOf(Math.min(lastSec, (k1 + 1) * dt)), mid);
+        for (let k = k1; k >= k0; k--) path.lineTo(xk(k), mid + top[k - k0]);
         path.closePath();
         ctx.fillStyle = color;
         // Already-played audio is dimmed.
@@ -231,7 +273,7 @@ export function Waveform(p: Props) {
         ctx.clip();
         ctx.fill(path);
         ctx.restore();
-      }
+      });
       ctx.globalAlpha = 1;
     } else {
       ctx.fillStyle = 'rgba(255,255,255,0.08)';
@@ -255,7 +297,7 @@ export function Waveform(p: Props) {
       if (x1 < 0 || x0 > w) return;
       if (i > 0 && x0 >= 0) {
         ctx.fillStyle = hexA(color, 0.9);
-        ctx.fillRect(Math.round(x0), 0, 2, h);
+        ctx.fillRect(px(x0), 0, 2, h);
       }
       const label = SECTION_LABELS[sec.kind].toUpperCase();
       // Pin the name to the left edge while its section is on screen.
@@ -280,7 +322,7 @@ export function Waveform(p: Props) {
       if (cx < -20 || cx > w + 20) continue;
       const selected = cue.id === p.selectedCueId;
       ctx.fillStyle = cue.color;
-      ctx.fillRect(Math.round(cx) - (selected ? 1 : 0), 0, selected ? 3 : 2, h);
+      ctx.fillRect(px(cx) - (selected ? 1 : 0), 0, selected ? 3 : 2, h);
       const label = cue.slot !== null ? SLOT_LETTERS[cue.slot] : cue.kind === 'loop' ? '↻' : '▾';
       const tw = p.windowSeconds ? 16 : 12;
       ctx.fillRect(cx, 0, tw, tw);
@@ -300,13 +342,13 @@ export function Waveform(p: Props) {
       const ex = xOf(cue.end);
       if (ex < -10 || ex > w + 10) continue;
       ctx.fillStyle = cue.color;
-      ctx.fillRect(Math.round(ex) - 1, 0, 2, h);
-      ctx.fillRect(Math.round(ex) - 5, h - 12, 5, 12);
+      ctx.fillRect(px(ex) - 1, 0, 2, h);
+      ctx.fillRect(px(ex) - 5, h - 12, 5, 12);
     }
 
     // Playhead
     ctx.fillStyle = COLORS.playhead;
-    ctx.fillRect(Math.round(xOf(playhead)), 0, 1.5, h);
+    ctx.fillRect(px(xOf(playhead)) - 0.5, 0, 1.5, h);
     if (p.windowSeconds) {
       // soft glow either side of the playhead
       const gx = xOf(playhead);
@@ -374,10 +416,23 @@ export function Waveform(p: Props) {
       const { from, to } = view();
       const secPerPx = (to - from) / c.clientWidth;
       const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      if (!wheelTimer.current) q.onScrubStart?.();
+      window.clearTimeout(wheelTimer.current);
+      wheelTimer.current = window.setTimeout(() => {
+        wheelTimer.current = 0;
+        props.current.onScrubEnd?.();
+      }, WHEEL_IDLE_MS);
       (q.onScrub ?? q.onSeek)(Math.max(0, Math.min(q.duration, shownPlayhead.current + delta * secPerPx)));
     };
     c.addEventListener('wheel', onWheel, { passive: false });
-    return () => c.removeEventListener('wheel', onWheel);
+    return () => {
+      c.removeEventListener('wheel', onWheel);
+      if (wheelTimer.current) {
+        window.clearTimeout(wheelTimer.current);
+        wheelTimer.current = 0;
+        props.current.onScrubEnd?.();
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [p.windowSeconds, p.duration]);
 
@@ -440,6 +495,7 @@ export function Waveform(p: Props) {
           if (!sc.moved) {
             sc.moved = true;
             setScrubbing(true);
+            p.onScrubStart?.();
           }
           const scrubTo = p.onScrub ?? p.onSeek;
           if (p.windowSeconds) {
@@ -470,11 +526,13 @@ export function Waveform(p: Props) {
       onPointerUp={(e) => {
         const sc = scrub.current;
         if (sc && !sc.moved) p.onSeek(Math.max(0, Math.min(p.duration, secAt(e.clientX))));
+        if (sc?.moved) p.onScrubEnd?.();
         scrub.current = null;
         setScrubbing(false);
         endDrag();
       }}
       onPointerCancel={() => {
+        if (scrub.current?.moved) p.onScrubEnd?.();
         scrub.current = null;
         setScrubbing(false);
         endDrag();

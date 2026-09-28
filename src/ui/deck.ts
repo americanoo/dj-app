@@ -24,6 +24,11 @@ export class Deck {
   private pausedAt = 0;
   private loop: LoopRegion | null = null;
   private onEnded: () => void;
+  // Smooth clock: the audio clock only advances in blocks of a few milliseconds,
+  // which makes a scrolling waveform judder. We track the offset between it and
+  // the page's high-resolution clock and interpolate between blocks.
+  private clockOffset = -Infinity;
+  private clockSeenAt = 0;
 
   constructor(ctx: AudioContext, onEnded: () => void = () => undefined) {
     this.ctx = ctx;
@@ -48,13 +53,38 @@ export class Deck {
 
   /** Current track position in seconds, following loops. */
   position(): number {
+    return this.positionAt(this.audioNow());
+  }
+
+  private positionAt(time: number): number {
     if (!this.voice) return this.pausedAt;
-    const raw = this.offset + (this.ctx.currentTime - this.startedAt);
+    const raw = this.offset + Math.max(0, time - this.startedAt);
     const l = this.loop;
     if (l && this.offset < l.end && raw >= l.end) {
       return l.start + ((raw - l.start) % (l.end - l.start));
     }
     return Math.min(raw, this.duration);
+  }
+
+  /**
+   * The audio clock, interpolated between its block updates so it moves evenly
+   * from one screen frame to the next. Never behind the audio clock, and never
+   * more than a block or two ahead of it.
+   */
+  private audioNow(): number {
+    const ct = this.ctx.currentTime;
+    if (this.ctx.state !== 'running') return ct;
+    const pn = performance.now() / 1000;
+    const off = ct - pn;
+    if (off > this.clockOffset || off < this.clockOffset - 0.1) {
+      // The audio clock just stepped forward (or restarted after a suspend).
+      this.clockOffset = off;
+    } else {
+      // Let the estimate sink very slowly so the two clocks can't drift apart.
+      this.clockOffset -= (pn - this.clockSeenAt) * 0.002;
+    }
+    this.clockSeenAt = pn;
+    return Math.min(Math.max(ct, pn + this.clockOffset), ct + 0.03);
   }
 
   play(from = this.pausedAt) {
@@ -96,11 +126,12 @@ export class Deck {
   /** Engage (or with `null`, exit) a loop. Playback continues seamlessly. */
   setLoop(loop: LoopRegion | null) {
     // Read the position with the old loop still in force, before switching.
-    const pos = this.position();
+    const now = this.audioNow();
+    const pos = this.positionAt(now);
     this.loop = loop && loop.end > loop.start ? loop : null;
     if (!this.voice) return;
     // Re-anchor the timing, then let the running source loop (or stop looping) in place.
-    this.startedAt = this.ctx.currentTime;
+    this.startedAt = now;
     this.offset = pos;
     this.applyLoop(this.voice.src);
   }

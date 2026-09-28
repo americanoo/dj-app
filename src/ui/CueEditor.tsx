@@ -240,9 +240,35 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
     [activeLoop, exitLoop, startAt],
   );
 
+  // Scrubbing while playing holds the audio, like a hand on the record, and
+  // carries on from the new spot when you let go. (Restarting playback on every
+  // mouse move is what made scrubbing stutter.)
+  const hold = useRef<{ resume: boolean } | null>(null);
+  const scrubStart = useCallback(() => {
+    const d = deckRef.current;
+    if (hold.current || !d) return;
+    hold.current = { resume: d.playing };
+    if (d.playing) {
+      d.pause();
+      setPlayhead(d.position());
+    }
+  }, []);
+  const scrubEnd = useCallback(() => {
+    const h = hold.current;
+    hold.current = null;
+    const d = deckRef.current;
+    if (h?.resume && d && !d.playing) d.play(d.position());
+  }, []);
+
   const togglePlay = useCallback(() => {
     const d = deckRef.current;
     if (!d || !deckReady) return;
+    if (hold.current) {
+      // Space while scrubbing: decide whether playback resumes on release.
+      hold.current.resume = !hold.current.resume;
+      setPlaying(hold.current.resume);
+      return;
+    }
     if (d.playing) {
       d.pause();
       setPlaying(false);
@@ -529,6 +555,8 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
           height={118}
           onSeek={(s) => seek(q(s))}
           onScrub={seek}
+          onScrubStart={scrubStart}
+          onScrubEnd={scrubEnd}
           onZoom={(dir) =>
             setZoomBars((z) => ZOOM_BARS[Math.max(0, Math.min(ZOOM_BARS.length - 1, ZOOM_BARS.indexOf(z) - dir))])
           }
@@ -554,6 +582,8 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
           height={42}
           onSeek={(s) => seek(q(s))}
           onScrub={seek}
+          onScrubStart={scrubStart}
+          onScrubEnd={scrubEnd}
           livePlayhead={livePlayhead}
           playing={playing}
           snap={dragSnap}

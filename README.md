@@ -145,11 +145,12 @@ cues go straight through. Re-importing the same file changes nothing.
 
 - **Waveforms** in rekordbox-style three-band colour (bass blue, mids amber, highs white), normalised so quiet
   masters still fill the view and smooth at every zoom level. There's a detail view with the beat grid and bar
-  numbers, and an overview below it for navigating. Both redraw every frame while playing, so the playhead glides
-  instead of stepping. Analysis runs in a background worker so the page stays responsive.
+  numbers, and an overview below it for navigating. Both redraw every frame while playing from an interpolated
+  audio clock, and the shape is sampled at fixed points in the track, so it glides without flickering. Analysis runs in a background worker so the page stays responsive.
 - **Easy navigation.** Grab the zoomed waveform and pull it like a record (drag left to go forward), or drag along
   the overview. Scroll the wheel/trackpad over the waveform to move through the track, and **⌘/Ctrl + scroll**
-  to zoom from 2 to 32 bars. A plain click jumps there.
+  to zoom from 2 to 32 bars. A plain click jumps there. Scrubbing while playing holds the audio like a hand on
+  the record and carries on from the new spot when you let go.
 - **Song sections** are detected automatically from the colour waveform: Intro, Main, Breakdown, Build, Drop and
   Outro, decided in 8-bar phrases from where the bass drops out and comes back. Each part is tinted and labelled on
   both waveforms, with phrase lines every 16 bars. Section chips under the waveform jump to each part, and
