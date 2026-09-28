@@ -6,6 +6,7 @@ import { formatTime } from '../core/time';
 import { activeSet, useStore } from './store';
 import { useAudio } from './audio';
 import { LinkFolderButton, MusicFolderPanel } from './MusicFolderControl';
+import { useOddBpmIds } from './BpmFixPanel';
 
 type SortKey = 'order' | 'artist' | 'title' | 'bpm' | 'key' | 'duration';
 
@@ -17,10 +18,12 @@ export function LibraryView({
   selectedTrackId,
   onSelectTrack,
   onImport,
+  onFixBpms,
 }: {
   selectedTrackId: string | null;
   onSelectTrack: (id: string) => void;
   onImport: () => void;
+  onFixBpms: () => void;
 }) {
   const { project, dispatch } = useStore();
   const { audio, rememberedIds, outdatedIds, forgetAll } = useAudio();
@@ -32,6 +35,8 @@ export function LibraryView({
   const [chapterId, setChapterId] = useState(set.chapters[0]?.id ?? '');
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
+  const oddIds = useOddBpmIds();
+  const oddBpms = oddIds.size;
   const inSet = useMemo(() => new Set(set.entries.map((e) => e.trackId)), [set.entries]);
   const playlist = library.playlists.find((p) => p.id === playlistId);
 
@@ -200,6 +205,13 @@ export function LibraryView({
           {playlist && (
             <button onClick={() => add(playlist.trackIds.filter((id) => library.tracks[id]))}>Add whole playlist</button>
           )}
+          <button
+            className={oddBpms ? 'fix-bpms has' : 'fix-bpms'}
+            onClick={onFixBpms}
+            title="Find and fix BPMs read at half or double speed (62 → 124, 192 → 96)"
+          >
+            Fix BPMs{oddBpms > 0 && <span className="count-pill">{oddBpms}</span>}
+          </button>
         </div>
 
         <div className="table-wrap" ref={wrapRef} onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}>
@@ -240,6 +252,7 @@ export function LibraryView({
                   selected={selected.has(t.id)}
                   loaded={t.id === selectedTrackId}
                   inSet={inSet.has(t.id)}
+                  oddBpm={oddIds.has(t.id)}
                   wave={audio[t.id] ? 'ok' : rememberedIds.has(t.id) ? (outdatedIds.has(t.id) ? 'outdated' : 'ok') : 'none'}
                   onSelect={onSelectTrack}
                   onAdd={addOne}
@@ -263,6 +276,7 @@ const TrackRow = memo(function TrackRow({
   selected,
   loaded,
   inSet,
+  oddBpm,
   wave,
   onSelect,
   onAdd,
@@ -272,6 +286,7 @@ const TrackRow = memo(function TrackRow({
   selected: boolean;
   loaded: boolean;
   inSet: boolean;
+  oddBpm: boolean;
   wave: 'none' | 'ok' | 'outdated';
   onSelect: (id: string) => void;
   onAdd: (id: string) => void;
@@ -305,7 +320,9 @@ const TrackRow = memo(function TrackRow({
           </span>
         )}
       </td>
-      <td className="num">{t.bpm ? t.bpm.toFixed(1) : ''}</td>
+      <td className={oddBpm ? 'num bpm-odd' : 'num'} title={oddBpm ? 'Looks like half or double speed: see Fix BPMs' : undefined}>
+        {t.bpm ? t.bpm.toFixed(1) : ''}
+      </td>
       <td>
         {t.key && (
           <span className="key-pill" style={{ background: keyColor(t.key) }} title={t.key}>

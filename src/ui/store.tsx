@@ -22,6 +22,7 @@ export type Action =
   | { type: 'load'; project: Project }
   | { type: 'import'; result: ImportResult; choices?: MergeChoices }
   | { type: 'updateTrack'; id: string; patch: Partial<Track> }
+  | { type: 'updateTracks'; patches: Record<string, Partial<Track>> }
   | { type: 'setCues'; trackId: string; cues: Cue[] }
   | { type: 'addTrack'; track: Track }
   | { type: 'addSet' }
@@ -62,6 +63,11 @@ export function reducer(p: Project, a: Action): Project {
       const t = p.library.tracks[a.id];
       if (!t) return p;
       return { ...p, library: { ...p.library, tracks: { ...p.library.tracks, [a.id]: { ...t, ...a.patch } } } };
+    }
+    case 'updateTracks': {
+      const tracks = { ...p.library.tracks };
+      for (const [id, patch] of Object.entries(a.patches)) if (tracks[id]) tracks[id] = { ...tracks[id], ...patch };
+      return { ...p, library: { ...p.library, tracks } };
     }
     case 'setCues': {
       const prev = p.library.tracks[a.trackId]?.cues ?? [];

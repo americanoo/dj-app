@@ -32,6 +32,7 @@ import {
   type Track,
 } from './model';
 import type { ImportResult } from './formats/types';
+import { keepTempoFix } from './tempo';
 import { beatLength, formatTime, round } from './time';
 
 export type MergeStrategy = 'smart' | 'keep' | 'replace';
@@ -352,6 +353,10 @@ export function smartResult(plan: TrackMergePlan, remove: readonly string[] = []
 
 /** The merged track for a given strategy. `remove` lists missing cues to delete (smart only). */
 export function applyTrackMerge(plan: TrackMergePlan, strategy: MergeStrategy, remove: readonly string[] = []): Track {
+  return keepTempoFix(plan.existing, mergeTrack(plan, strategy, remove), plan.incoming.bpm);
+}
+
+function mergeTrack(plan: TrackMergePlan, strategy: MergeStrategy, remove: readonly string[]): Track {
   const { existing, incoming, source } = plan;
   // Metadata: newest non-empty wins. Grid and cues are handled per strategy.
   const {

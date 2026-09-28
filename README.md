@@ -181,6 +181,12 @@ cues go straight through. Re-importing the same file changes nothing.
 - Editing a track's BPM, key, grid start or file location here fixes that track's details before export.
   **×½ / ×2** next to BPM fix half- or double-time readings (e.g. a 96 BPM reggaeton track read as 192)
   without moving the downbeat. On the timeline, half/double-time mixes (96 → 192) aren't flagged as BPM jumps.
+- **Fix BPMs** (library toolbar) checks the whole library at once. Set the slowest and fastest tempo your music
+  really has (default 80–160): anything slower is doubled (62 → 124, or ×4 if needed), anything faster is halved
+  (192 → 96). Tracks tagged drum & bass, jungle, footwork or hardcore use 100–200, so 174 stays and a half-time
+  87 becomes 174. Suspicious BPMs show in amber in the library and are counted on the button. You review the list
+  and untick any that are right; those are remembered and stop being flagged. A version is saved first so it can
+  be undone, and fixes survive re-importing the collection with the old reading.
 
 ### 4. Export
 

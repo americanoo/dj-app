@@ -4,6 +4,8 @@ import { planMerge, type MergeChoices, type MergePlan } from '../core/merge';
 import { uid, type Project } from '../core/model';
 import { fileName, guessFromFileName } from '../core/xml';
 import { AUDIO_EXTENSIONS, useAudio } from './audio';
+import { findTempoFixes } from '../core/tempo';
+import { BpmFixPanel, loadTempoRange } from './BpmFixPanel';
 import { CueEditor } from './CueEditor';
 import { ExportPanel } from './ExportPanel';
 import { LibraryView } from './LibraryView';
@@ -13,7 +15,7 @@ import { useVersions } from './versions';
 import { defaultVersionName, VersionsPanel } from './VersionsPanel';
 import { StoryPanel } from './StoryPanel';
 import { Timeline } from './Timeline';
-import { activeSet, useStore } from './store';
+import { activeSet, reducer, useStore } from './store';
 
 
 interface PendingMerge {
@@ -36,6 +38,7 @@ export function App() {
   const [loadedTrackId, setLoadedTrackId] = useState<string | null>(null);
   const [storyOpen, setStoryOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [bpmFixOpen, setBpmFixOpen] = useState(false);
   const [layout, setLayout] = useState(loadLayout);
   useEffect(() => {
     try {
@@ -89,13 +92,19 @@ export function App() {
           if (plan.matches.some((m) => m.changed)) {
             await saveVersion(projectRef.current, `Before importing ${file.name}`, true).catch(() => undefined);
           }
-          dispatch({ type: 'import', result, choices });
+          const action = { type: 'import' as const, result, choices };
+          // What the library looks like after this merge, for the BPM check below.
+          const merged = reducer(projectRef.current, action).library.tracks;
+          dispatch(action);
           // Let the store update before the next file is planned against it.
           await new Promise((r) => setTimeout(r, 0));
           const cues = result.tracks.reduce((n, t) => n + t.cues.length, 0);
           toast(
             `Imported ${result.tracks.length} tracks, ${cues} cues and ${result.playlists.length} playlists from ${file.name} (${result.format}).`,
           );
+          // Checked after merging, so BPMs already fixed (or kept) here aren't reported again.
+          const odd = findTempoFixes(Object.values(merged), loadTempoRange()).length;
+          if (odd) toast(`${odd} BPM${odd === 1 ? ' looks' : 's look'} half or double speed. Use “Fix BPMs” in the library to check them.`);
           for (const w of result.warnings.slice(0, 3)) toast(w, 'info');
           if (result.warnings.length > 3) toast(`…and ${result.warnings.length - 3} more warnings`);
         } catch (e) {
@@ -132,16 +141,17 @@ export function App() {
 
   // Esc closes the pop-up panels.
   useEffect(() => {
-    if (!storyOpen && !exportOpen && !versionsOpen) return;
+    if (!storyOpen && !exportOpen && !versionsOpen && !bpmFixOpen) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       setStoryOpen(false);
       setExportOpen(false);
       setVersionsOpen(false);
+      setBpmFixOpen(false);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [storyOpen, exportOpen, versionsOpen]);
+  }, [storyOpen, exportOpen, versionsOpen, bpmFixOpen]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -254,10 +264,12 @@ export function App() {
             selectedTrackId={loadedTrackId}
             onSelectTrack={setLoadedTrackId}
             onImport={() => fileInput.current?.click()}
+            onFixBpms={() => setBpmFixOpen(true)}
           />
         </section>
       </main>
 
+      {bpmFixOpen && <BpmFixPanel onClose={() => setBpmFixOpen(false)} toast={toast} />}
       {versionsOpen && <VersionsPanel onClose={() => setVersionsOpen(false)} toast={toast} />}
       {storyOpen && <StoryPanel onClose={() => setStoryOpen(false)} />}
       {exportOpen && (

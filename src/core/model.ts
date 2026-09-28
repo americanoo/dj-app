@@ -43,6 +43,13 @@ export interface Track {
   /** Musical key in standard notation, e.g. "Am", "F#", "Bbm". */
   key?: string;
   bpm?: number;
+  /**
+   * Half / double-time correction made in Setcraft (2 = doubled, 0.5 = halved),
+   * so re-importing the DJ software's original reading doesn't undo it.
+   */
+  tempoFix?: number;
+  /** The DJ checked this BPM and it's right, even though it's outside their usual range. */
+  bpmConfirmed?: boolean;
   /** Seconds. */
   duration?: number;
   /** Absolute path on the DJ's machine, POSIX or Windows style. */

@@ -2286,3 +2286,162 @@ canvas.wave.detail {
 canvas.wave.dragging {
   cursor: grabbing;
 }
+
+/* Fix BPMs */
+.modal.bpm-fix {
+  width: min(760px, 100%);
+}
+.bpm-range {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 6px 0 12px;
+}
+.bpm-range label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-3);
+}
+.bpm-range input {
+  width: 86px;
+  font-family: var(--mono);
+}
+.bpm-range .muted {
+  font-size: 11.5px;
+  padding-bottom: 7px;
+  flex: 1;
+  min-width: 200px;
+}
+.bpm-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  color: var(--text-2);
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+.bpm-summary b {
+  color: var(--warn);
+}
+.bpm-summary .grow {
+  flex: 1;
+}
+.bpm-list {
+  display: flex;
+  flex-direction: column;
+}
+.bpm-row {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) minmax(0, 150px) 170px;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 0 6px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 12.5px;
+}
+.bpm-row:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+.bpm-row.off {
+  opacity: 0.4;
+}
+.bpm-track,
+.bpm-genre {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bpm-genre {
+  font-size: 11.5px;
+}
+.bpm-genre .badge {
+  margin-left: 6px;
+}
+.bpm-change {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  font-family: var(--mono);
+}
+.bpm-from {
+  color: var(--text-3);
+  text-decoration: line-through;
+}
+.bpm-row.off .bpm-from {
+  text-decoration: none;
+}
+.bpm-to {
+  color: var(--text);
+  font-weight: 700;
+  min-width: 48px;
+  text-align: right;
+}
+.bpm-factor {
+  font-size: 10.5px;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 20px;
+}
+.bpm-factor.up {
+  color: var(--cyan);
+  background: rgba(34, 211, 238, 0.1);
+}
+.bpm-factor.down {
+  color: var(--pink);
+  background: rgba(255, 61, 154, 0.1);
+}
+.bpm-none {
+  padding: 18px 0;
+  color: var(--ok);
+}
+.fix-bpms .count-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 16px;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 800;
+  color: #07070a;
+  background: var(--warn);
+}
+table.tracks td.bpm-odd {
+  color: var(--warn);
+}
+@media (max-width: 640px) {
+  .bpm-row {
+    grid-template-columns: 22px minmax(0, 1fr) 150px;
+  }
+  .bpm-genre {
+    display: none;
+  }
+}
+.modal.bpm-fix label.bpm-row {
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: 12.5px;
+  font-weight: 400;
+  color: var(--text);
+  margin: 0;
+}
+.bpm-row .bpm-track b {
+  font-weight: 600;
+}
+.bpm-tick-all {
+  display: inline-flex;
+  gap: 6px;
+}
