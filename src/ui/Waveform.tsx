@@ -26,7 +26,7 @@ interface Props {
   onSeek: (sec: number) => void;
   /** Free movement while scrubbing (drag or wheel); falls back to onSeek. */
   onScrub?: (sec: number) => void;
-  /** A drag or wheel scrub begins / ends (the deck holds playback in between). */
+  /** A scrub (drag or wheel) or a cue drag begins / ends: the deck holds playback in between. */
   onScrubStart?: () => void;
   onScrubEnd?: () => void;
   /** ⌘/Ctrl + wheel: 1 = zoom in, -1 = zoom out. */
@@ -67,6 +67,8 @@ interface DragState {
   original: Cue;
   startX: number;
   active: boolean;
+  /** Where on the cue it was grabbed (seconds from the dragged edge), so it doesn't jump to the pointer. */
+  grabOffset: number;
 }
 
 const BAND_COLORS = { low: '#2f6bff', mid: '#f59b23', high: '#f2efe8' };
@@ -102,6 +104,19 @@ export function Waveform(p: Props) {
   const props = useRef(p);
   props.current = p;
   const columns = useRef<ColumnCache | null>(null);
+  /** Cue handle under the pointer, highlighted so it's clear what a press will grab. */
+  const hover = useRef<{ cueId: string; edge: CueEdge } | null>(null);
+  /** While a cue is pressed, the view stays where it was so the cue stays under the pointer. */
+  const frozenView = useRef<number | null>(null);
+  /** Cue moves are passed on at most once per frame; fast mice send several per frame. */
+  const pendingMove = useRef<{ id: string; change: Pick<Cue, 'start' | 'end'>; raf: number } | null>(null);
+  const flushMove = () => {
+    const m = pendingMove.current;
+    if (!m) return;
+    cancelAnimationFrame(m.raf);
+    pendingMove.current = null;
+    props.current.onCueDrag?.(m.id, m.change);
+  };
   const wheelTimer = useRef(0);
 
   useEffect(() => {
@@ -112,7 +127,7 @@ export function Waveform(p: Props) {
     return () => ro.disconnect();
   }, []);
 
-  const view = (playhead = shownPlayhead.current) => {
+  const view = (playhead = frozenView.current ?? shownPlayhead.current) => {
     if (!p.windowSeconds) return { from: 0, to: Math.max(p.duration, 1) };
     const half = p.windowSeconds / 2;
     return { from: playhead - half, to: playhead + half };
@@ -135,7 +150,7 @@ export function Waveform(p: Props) {
     ctx.fillStyle = COLORS.bg;
     ctx.fillRect(0, 0, w, h);
 
-    const { from, to } = view(playhead);
+    const { from, to } = view(frozenView.current ?? playhead);
     const span = to - from;
     const xOf = (s: number) => ((s - from) / span) * w;
     // Line positions rounded to device pixels, so thin lines move smoothly with the waveform.
@@ -320,7 +335,8 @@ export function Waveform(p: Props) {
     for (const cue of p.cues) {
       const cx = xOf(cue.start);
       if (cx < -20 || cx > w + 20) continue;
-      const selected = cue.id === p.selectedCueId;
+      const hovered = hover.current?.cueId === cue.id && hover.current.edge === 'start';
+      const selected = cue.id === p.selectedCueId || hovered || dragging?.cueId === cue.id;
       ctx.fillStyle = cue.color;
       ctx.fillRect(px(cx) - (selected ? 1 : 0), 0, selected ? 3 : 2, h);
       const label = cue.slot !== null ? SLOT_LETTERS[cue.slot] : cue.kind === 'loop' ? '↻' : '▾';
@@ -442,15 +458,31 @@ export function Waveform(p: Props) {
     return from + ((clientX - rect.left) / rect.width) * (to - from);
   };
 
-  const handleAt = (clientX: number) => {
+  const handleAt = (clientX: number, clientY: number) => {
     const rect = canvas.current!.getBoundingClientRect();
     const { from, to } = view();
-    return findCueHandle(p.cues, secAt(clientX), rect.width / (to - from));
+    // The letter flag at the top of each marker can be grabbed as well as the line.
+    const flag = p.windowSeconds ? 16 : 12;
+    const onFlagRow = clientY - rect.top <= flag + 3;
+    return findCueHandle(p.cues, secAt(clientX), rect.width / (to - from), 7, onFlagRow ? flag : 0);
+  };
+
+  const setHover = (h: { cueId: string; edge: CueEdge } | null) => {
+    const cur = hover.current;
+    if (cur?.cueId === h?.cueId && cur?.edge === h?.edge) return;
+    hover.current = h;
+    drawRef.current(shownPlayhead.current);
   };
 
   const endDrag = () => {
+    flushMove();
+    if (drag.current?.active) p.onScrubEnd?.();
     drag.current = null;
     setDragging(null);
+    if (frozenView.current !== null) {
+      frozenView.current = null;
+      drawRef.current(shownPlayhead.current);
+    }
   };
 
   // Esc cancels a drag and puts the cue back.
@@ -459,6 +491,7 @@ export function Waveform(p: Props) {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || !drag.current) return;
       const { original } = drag.current;
+      pendingMove.current = null;
       p.onCueDrag?.(original.id, { start: original.start, end: original.end });
       endDrag();
     };
@@ -473,11 +506,20 @@ export function Waveform(p: Props) {
       className={`${p.windowSeconds ? 'wave detail' : 'wave overview'}${dragging || scrubbing ? ' dragging' : ''}`}
       style={{ height: p.height }}
       onPointerDown={(e) => {
-        const hit = handleAt(e.clientX);
+        const hit = handleAt(e.clientX, e.clientY);
         if (hit) {
           p.onSelectCue?.(hit.cue.id);
           if (p.onCueDrag) {
-            drag.current = { cueId: hit.cue.id, edge: hit.edge, original: hit.cue, startX: e.clientX, active: false };
+            if (p.windowSeconds) frozenView.current = shownPlayhead.current;
+            const at = hit.edge === 'end' && hit.cue.end !== undefined ? hit.cue.end : hit.cue.start;
+            drag.current = {
+              cueId: hit.cue.id,
+              edge: hit.edge,
+              original: hit.cue,
+              startX: e.clientX,
+              active: false,
+              grabOffset: secAt(e.clientX) - at,
+            };
             (e.target as HTMLElement).setPointerCapture(e.pointerId);
           }
           return;
@@ -508,10 +550,12 @@ export function Waveform(p: Props) {
           return;
         }
         if (!d) {
-          // Hover feedback: hand over cues, resize arrows over loop ends.
+          // Hover feedback: the cue under the pointer lights up, with a sideways-move
+          // cursor (resize over loop ends); empty space shows the grab hand for scrubbing.
           if (p.onCueDrag) {
-            const hit = handleAt(e.clientX);
-            e.currentTarget.style.cursor = hit ? (hit.edge === 'end' ? 'ew-resize' : 'grab') : '';
+            const hit = handleAt(e.clientX, e.clientY);
+            e.currentTarget.style.cursor = hit ? (hit.edge === 'end' ? 'col-resize' : 'ew-resize') : '';
+            setHover(hit ? { cueId: hit.cue.id, edge: hit.edge } : null);
           }
           return;
         }
@@ -519,9 +563,13 @@ export function Waveform(p: Props) {
           if (Math.abs(e.clientX - d.startX) < DRAG_THRESHOLD) return;
           d.active = true;
           setDragging({ cueId: d.cueId, edge: d.edge });
+          // Hold playback while a cue is moved, so the waveform stays still under the pointer.
+          p.onScrubStart?.();
         }
         const snap = e.shiftKey ? undefined : p.snap;
-        p.onCueDrag?.(d.cueId, dragCue(d.original, d.edge, secAt(e.clientX), p.duration, snap));
+        const change = dragCue(d.original, d.edge, secAt(e.clientX) - d.grabOffset, p.duration, snap);
+        if (pendingMove.current) pendingMove.current.change = change;
+        else pendingMove.current = { id: d.cueId, change, raf: requestAnimationFrame(flushMove) };
       }}
       onPointerUp={(e) => {
         const sc = scrub.current;
@@ -530,6 +578,9 @@ export function Waveform(p: Props) {
         scrub.current = null;
         setScrubbing(false);
         endDrag();
+      }}
+      onPointerLeave={() => {
+        if (!drag.current) setHover(null);
       }}
       onPointerCancel={() => {
         if (scrub.current?.moved) p.onScrubEnd?.();

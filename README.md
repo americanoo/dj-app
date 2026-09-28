@@ -10,7 +10,8 @@ Everything runs locally in the browser. Your library and audio files are never u
 
 ```
 npm install
-npm run dev      # http://localhost:5173
+npm start        # fast, optimised build at http://localhost:4173 (use this for real sessions)
+npm run dev      # development mode with live reload, http://localhost:5173 (slower)
 npm test         # format converters, key maths, set planning
 npm run build    # static site in dist/ – host anywhere
 ```
@@ -166,9 +167,11 @@ cues go straight through. Re-importing the same file changes nothing.
   Pads fire the moment you press them (not on release) and use the exact audio position, so the marker lands
   where you heard it, even with a large library loaded.
 - **Loops** from 1 beat to 8 bars, either on a pad or saved as memory loops. **Memory cues** too.
-- **Drag cues anywhere.** Grab a marker on either waveform and drop it somewhere else. It follows the snap
-  setting (hold **Shift** for free placement), a readout shows the time and bar while you drag, and **Esc** cancels. Drag a
-  loop's right edge to resize it.
+- **Drag cues anywhere.** Grab a marker (its line or its letter flag) on either waveform and drop it somewhere
+  else. The marker lights up and the cursor changes when you're on it; anywhere else, dragging scrubs. It follows
+  the snap setting (hold **Shift** for free placement), a readout shows the time and bar while you drag, and
+  **Esc** cancels. While playing, the audio holds during the drag and carries on when you let go. Drag a loop's
+  right edge to resize it.
 - **Drag between pads.** Drop a pad onto another pad to move it; if that pad is taken, the two swap. Drop a pad
   on *make it a memory cue*, or drag a memory cue from the list onto a pad.
 - Markers can also be moved precisely in the cue form. Each cue can be edited by name, colour, pad, start time (typed or

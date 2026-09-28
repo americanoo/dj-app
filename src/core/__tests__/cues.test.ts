@@ -30,6 +30,16 @@ describe('grabbing cues on the waveform', () => {
     // Tiny loop at low zoom: both edges in range, the end wins so it can still grow.
     expect(findCueHandle([loop('t', 5, 5.01)], 5.005, 100)).toMatchObject({ edge: 'end' });
   });
+
+  it('lets the letter flag to the right of a marker be grabbed', () => {
+    const one = [cue('a', 10, 0)];
+    // 12 px right of the line: outside the line's reach, but on a 16 px flag.
+    expect(findCueHandle(one, 10.12, 100)).toBeUndefined();
+    expect(findCueHandle(one, 10.12, 100, 7, 16)?.cue.id).toBe('a');
+    // The flag only reaches right; left of the line keeps the normal tolerance.
+    expect(findCueHandle(one, 9.88, 100, 7, 16)).toBeUndefined();
+    expect(findCueHandle(one, 10.2, 100, 7, 16)).toBeUndefined();
+  });
 });
 
 describe('dragging', () => {

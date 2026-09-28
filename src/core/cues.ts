@@ -9,17 +9,22 @@ export const MIN_LOOP = 0.02;
 
 /**
  * The cue handle under a position, if any. `pxPerSec` converts the distance to
- * screen pixels. Loops also expose their end edge, for resizing.
+ * screen pixels. `flagPx` is the width of the letter flag drawn to the right of
+ * each marker, which can be grabbed too. Loops also expose their end edge, for
+ * resizing.
  */
 export function findCueHandle(
   cues: Cue[],
   sec: number,
   pxPerSec: number,
   tolerancePx = 7,
+  flagPx = 0,
 ): { cue: Cue; edge: CueEdge } | undefined {
   let best: { cue: Cue; edge: CueEdge; d: number } | undefined;
   for (const cue of cues) {
-    const dStart = Math.abs(cue.start - sec) * pxPerSec;
+    const offset = (sec - cue.start) * pxPerSec; // + = right of the marker
+    const onFlag = offset >= 0 && offset <= flagPx;
+    const dStart = onFlag ? 0 : Math.abs(offset);
     if (dStart <= tolerancePx && (!best || dStart < best.d)) best = { cue, edge: 'start', d: dStart };
     if (cue.kind === 'loop' && cue.end !== undefined) {
       const dEnd = Math.abs(cue.end - sec) * pxPerSec;
