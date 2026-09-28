@@ -2549,3 +2549,123 @@ table.tracks td.bpm-odd {
 .library-pane .sidebar-footer {
   margin-top: 6px;
 }
+
+/* output level meter beside the volume: shows sound is really going out */
+.level-meter {
+  --level: 0;
+  display: inline-block;
+  width: 5px;
+  height: 18px;
+  border-radius: 2px;
+  background:
+    linear-gradient(to top, transparent calc(var(--level) * 100%), rgba(255, 255, 255, 0.07) 0),
+    linear-gradient(to top, var(--ok), var(--warn) 72%, var(--danger));
+}
+.hint-line button {
+  margin-left: 4px;
+  vertical-align: middle;
+}
+.error-line button {
+  margin-left: 6px;
+}
+
+/* the "make it a memory cue" target covers the loop row while dragging, instead of pushing the deck taller */
+.deck-pane .cue-columns > .card:first-child {
+  position: relative;
+}
+.deck-pane .cue-columns > .card:first-child > .memory-drop {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  margin: 0;
+  padding: 7px;
+  z-index: 3;
+  background: rgba(10, 10, 15, 0.94);
+}
+
+/* deck bar: info left, transport centred, output right */
+.deck-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+.deck-left,
+.deck-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.deck-right {
+  justify-content: flex-end;
+}
+.transport {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+button.play-btn {
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: radial-gradient(circle at 30% 25%, rgba(255, 255, 255, 0.18), transparent 60%), var(--grad);
+  border: 0;
+  box-shadow:
+    0 6px 22px -6px rgba(255, 61, 154, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  transition:
+    transform 0.08s var(--ease),
+    box-shadow 0.2s;
+}
+button.play-btn svg {
+  width: 22px;
+  height: 22px;
+  fill: currentColor;
+}
+button.play-btn:hover:not(:disabled) {
+  transform: scale(1.05);
+}
+button.play-btn:active:not(:disabled) {
+  transform: scale(0.95);
+}
+button.play-btn.playing {
+  box-shadow:
+    0 0 0 3px rgba(34, 211, 238, 0.35),
+    0 6px 26px -4px rgba(34, 211, 238, 0.6);
+}
+button.play-btn:disabled {
+  opacity: 0.35;
+  box-shadow: none;
+}
+.deck-bar .volume {
+  gap: 6px;
+}
+@media (max-width: 900px) {
+  .deck-bar {
+    grid-template-columns: 1fr;
+    justify-items: center;
+  }
+  .deck-left,
+  .deck-right {
+    justify-content: center;
+  }
+}
+
+/* undo / redo in the top bar */
+.undo-redo {
+  display: inline-flex;
+  gap: 2px;
+  margin-right: 4px;
+}
+.undo-redo button.icon {
+  font-size: 16px;
+  height: 28px;
+  min-width: 28px;
+}

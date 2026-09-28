@@ -115,6 +115,10 @@ cues go straight through. Re-importing the same file changes nothing.
 
 - **Duplicate a set.** Use *Duplicate set* in the Narrative tab, or *⧉ Duplicate* in the set picker. The copy is a
   separate set you can reorder and re-plan, and the original stays as it was.
+- **Undo / redo.** **⌘Z** (Ctrl+Z) undoes the last change anywhere in the app: cue moves, pads, loops, BPM and
+  key edits, timeline moves, imports, BPM fixes and more; **⇧⌘Z** (Ctrl+Y) redoes. A whole drag or a typed value
+  undoes as one step. The ↶ ↷ buttons in the top bar do the same and show what they'll undo. Inside a text field,
+  ⌘Z undoes your typing as usual.
 - **Save versions.** Open *Versions* in the top bar, or press **⌘/Ctrl+S** anywhere. A version is a named snapshot
   of the whole project: library, cues and sets.
 - **Use an old version** in one of three ways:
@@ -162,7 +166,10 @@ cues go straight through. Re-importing the same file changes nothing.
 - **Audio engine** on the Web Audio API: cue jumps are instant and sample-accurate, with short fades so they don't
   click. Tapping a filled pad plays from it, like a CDJ. **Loop pads really loop**: tap to engage, tap again (or
   *exit*) to release, and jumping outside the loop releases it too. Loops follow you live as you drag or resize
-  them. There's also a preview volume control. Without audio
+  them. The round **play / pause** button sits in the middle of the deck bar with −1 / +1 bar either side;
+  **Vol** on the right sets the preview volume, and the little meter beside it shows the level actually going to
+  your speakers. If the browser holds sound back until you click the page, the deck says so and offers
+  *Turn sound on*. Without audio
   you still get the timeline, grid and cue markers.
 - **Snap: Free / Beat / Bar.** Choose where cues, loops and clicks land: exactly where you put them (*Free*),
   on the nearest beat, or on the nearest bar. `Q` cycles through the three, and the choice is remembered.

@@ -17,6 +17,8 @@ export interface LoopRegion {
 export class Deck {
   private ctx: AudioContext;
   private out: GainNode;
+  private meter: AnalyserNode;
+  private meterData: Float32Array<ArrayBuffer>;
   private buffer: AudioBuffer | null = null;
   private voice: { src: AudioBufferSourceNode; gain: GainNode } | null = null;
   private startedAt = 0; // ctx time when the current voice started
@@ -34,11 +36,30 @@ export class Deck {
     this.ctx = ctx;
     this.out = ctx.createGain();
     this.out.connect(ctx.destination);
+    // Level meter on what actually goes to the speakers (after the volume).
+    this.meter = ctx.createAnalyser();
+    this.meter.fftSize = 1024;
+    this.meterData = new Float32Array(this.meter.fftSize);
+    this.out.connect(this.meter);
     this.onEnded = onEnded;
   }
 
   get playing(): boolean {
     return this.voice !== null;
+  }
+
+  /** Peak output level right now, 0–1. */
+  level(): number {
+    if (!this.voice) return 0;
+    this.meter.getFloatTimeDomainData(this.meterData);
+    let peak = 0;
+    for (const v of this.meterData) if (Math.abs(v) > peak) peak = Math.abs(v);
+    return Math.min(1, peak);
+  }
+
+  /** Whether the browser is letting the audio run (it can hold it back until a click). */
+  get audible(): boolean {
+    return this.ctx.state === 'running';
   }
 
   get duration(): number {
@@ -137,12 +158,14 @@ export class Deck {
   }
 
   setVolume(v: number) {
+    if (!Number.isFinite(v)) return;
     this.out.gain.setTargetAtTime(Math.max(0, Math.min(1, v)), this.ctx.currentTime, 0.01);
   }
 
   dispose() {
     this.stopVoice();
     this.out.disconnect();
+    this.meter.disconnect();
   }
 
   private applyLoop(src: AudioBufferSourceNode) {

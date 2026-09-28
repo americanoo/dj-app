@@ -129,6 +129,9 @@ export function Waveform(p: Props) {
     if (!c) return;
     const ro = new ResizeObserver(() => {
       zoom.current = zoomOf(c);
+      // Redraw right away, before the frame is painted, so a resized canvas is
+      // never shown stretched while React catches up.
+      drawRef.current(shownPlayhead.current);
       setSize({ w: c.clientWidth, h: c.clientHeight });
     });
     ro.observe(c);

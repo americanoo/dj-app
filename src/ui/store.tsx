@@ -14,12 +14,14 @@ import {
 import type { ImportResult } from '../core/formats';
 import { mergeIntoLibrary, type MergeChoices } from '../core/merge';
 import { copySet } from '../core/versions';
+import { initHistory, record, redo, undo, type History } from '../core/history';
 import { playLength, setEnd, withTimes } from '../core/setplan';
 
 const STORAGE_KEY = 'setcraft-project-v1';
 
 export type Action =
-  | { type: 'load'; project: Project }
+  /** `fresh`: the saved project opened at start-up, which starts a new undo history. */
+  | { type: 'load'; project: Project; fresh?: boolean }
   | { type: 'import'; result: ImportResult; choices?: MergeChoices }
   | { type: 'updateTrack'; id: string; patch: Partial<Track> }
   | { type: 'updateTracks'; patches: Record<string, Partial<Track>> }
@@ -206,23 +208,115 @@ export function chapterAt(s: SetPlan, t: number): string {
   return before?.chapterId ?? s.entries[0]?.chapterId ?? s.chapters[0]?.id ?? '';
 }
 
+export type StoreAction = Action | { type: 'undo' } | { type: 'redo' };
+
 interface Store {
   project: Project;
-  dispatch: (a: Action) => void;
+  dispatch: (a: StoreAction) => void;
   loaded: boolean;
+  /** What ⌘Z / ⇧⌘Z would undo / redo, if anything. */
+  undoLabel?: string;
+  redoLabel?: string;
+}
+
+/** A short name for each kind of change, shown when it's undone. */
+function actionLabel(a: Action): string {
+  switch (a.type) {
+    case 'load':
+      return 'Restore';
+    case 'import':
+      return 'Import';
+    case 'updateTrack': {
+      const k = Object.keys(a.patch);
+      if (k.includes('bpm')) return 'BPM change';
+      if (k.includes('key')) return 'Key change';
+      if (k.includes('gridStart')) return 'Grid change';
+      if (k.includes('path')) return 'File location change';
+      if (k.includes('cues')) return 'Cue change';
+      return 'Track edit';
+    }
+    case 'updateTracks':
+      return 'BPM fixes';
+    case 'setCues':
+      return 'Cue change';
+    case 'addTrack':
+      return 'Add track';
+    case 'addSet':
+      return 'New set';
+    case 'selectSet':
+      return 'Switch set';
+    case 'updateSet':
+      return 'Set details';
+    case 'deleteSet':
+      return 'Delete set';
+    case 'duplicateSet':
+    case 'addSetCopy':
+      return 'Copy set';
+    case 'addEntries':
+      return 'Add to set';
+    case 'placeTrack':
+      return 'Place track';
+    case 'setEntryTime':
+      return 'Move track';
+    case 'updateEntry':
+      return 'Track in set';
+    case 'removeEntry':
+      return 'Remove from set';
+    case 'addChapter':
+      return 'Add chapter';
+    case 'updateChapter':
+      return 'Chapter edit';
+    case 'removeChapter':
+      return 'Remove chapter';
+    case 'moveChapter':
+      return 'Reorder chapters';
+    case 'clearLibrary':
+      return 'Clear library';
+  }
+}
+
+/** Continuous edits (drags, typing, sliders) share a key so they undo as one step. */
+function mergeKey(a: Action): string | undefined {
+  switch (a.type) {
+    case 'setCues':
+      return `cues:${a.trackId}`;
+    case 'setEntryTime':
+      return `time:${a.id}`;
+    case 'updateTrack':
+      return `track:${a.id}:${Object.keys(a.patch).sort().join()}`;
+    case 'updateEntry':
+      return `entry:${a.id}:${Object.keys(a.patch).sort().join()}`;
+    case 'updateSet':
+      return `set:${Object.keys(a.patch).sort().join()}`;
+    case 'updateChapter':
+      return `chapter:${a.id}:${Object.keys(a.patch).sort().join()}`;
+    default:
+      return undefined;
+  }
+}
+
+function historyReducer(h: History<Project>, a: StoreAction): History<Project> {
+  if (a.type === 'undo') return undo(h);
+  if (a.type === 'redo') return redo(h);
+  const next = reducer(h.present, a);
+  if (a.type === 'load' && a.fresh) return initHistory(next);
+  // Switching between sets is navigation, not an edit.
+  if (a.type === 'selectSet') return { ...h, present: next };
+  return record(h, next, actionLabel(a), mergeKey(a), Date.now());
 }
 
 const Ctx = createContext<Store | null>(null);
 
 export function StoreProvider({ children }: { children: ReactNode }) {
-  const [project, dispatch] = useReducer(reducer, undefined, emptyProject);
+  const [history, dispatch] = useReducer(historyReducer, undefined, () => initHistory(emptyProject()));
+  const project = history.present;
   const [loaded, setLoaded] = useState(false);
   const saveTimer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     get<Project>(STORAGE_KEY)
       .then((saved) => {
-        if (saved?.version === 1) dispatch({ type: 'load', project: saved });
+        if (saved?.version === 1) dispatch({ type: 'load', project: saved, fresh: true });
       })
       .catch(() => {
         // IndexedDB unavailable (private mode) – run in-memory.
@@ -242,7 +336,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }, 600);
   }, [project, loaded]);
 
-  return <Ctx.Provider value={{ project, dispatch, loaded }}>{children}</Ctx.Provider>;
+  return (
+    <Ctx.Provider
+      value={{ project, dispatch, loaded, undoLabel: history.past.at(-1)?.label, redoLabel: history.future[0]?.label }}
+    >
+      {children}
+    </Ctx.Provider>
+  );
 }
 
 export function useStore(): Store {

@@ -53,6 +53,19 @@ export function audioContext(): AudioContext {
   return sharedContext;
 }
 
+// Browsers (Safari especially) keep audio switched off until the page is
+// clicked or a key is pressed, and can suspend it again later (after sleep, or
+// when another app takes the output). Switch it back on at every interaction.
+function unlockAudio() {
+  const c = sharedContext;
+  if (c && c.state !== 'running' && c.state !== 'closed') void c.resume().catch(() => undefined);
+}
+if (typeof window !== 'undefined') {
+  for (const type of ['pointerdown', 'keydown', 'touchend', 'click']) {
+    window.addEventListener(type, unlockAudio, { capture: true, passive: true });
+  }
+}
+
 let worker: Worker | null | undefined;
 let nextJob = 0;
 const jobs = new Map<number, (r: BandPeaks) => void>();

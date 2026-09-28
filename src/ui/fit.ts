@@ -39,9 +39,49 @@ export function useFitZoom<T extends HTMLElement>(minZoom = 0.5, enabled = true)
       parent.style.overflowY = overflow ? 'auto' : 'hidden';
       el.dataset.zoom = z.toFixed(3);
     };
+    // Never rescale under the pointer: while something inside is pressed or
+    // dragged (a pad, a cue, a slider), refitting waits until it's let go.
+    let pointerHold = false;
+    let dragHold = false;
+    let pending = false;
     const schedule = () => {
-      if (!raf) raf = requestAnimationFrame(fit);
+      if (pointerHold || dragHold) pending = true;
+      else if (!raf) raf = requestAnimationFrame(fit);
     };
+    const inside = (e: Event) => e.target instanceof Node && el.contains(e.target);
+    const release = () => {
+      if (pointerHold || dragHold || !pending) return;
+      pending = false;
+      schedule();
+    };
+    const onDown = (e: Event) => {
+      if (inside(e)) pointerHold = true;
+    };
+    const onUp = () => {
+      pointerHold = false;
+      release();
+    };
+    const onDragStart = (e: Event) => {
+      if (inside(e)) dragHold = true;
+    };
+    const onDragEnd = () => {
+      dragHold = false;
+      release();
+    };
+    const onBlur = () => {
+      pointerHold = dragHold = false;
+      release();
+    };
+    const listeners: [string, (e: Event) => void][] = [
+      ['pointerdown', onDown],
+      ['pointerup', onUp],
+      ['pointercancel', onUp],
+      ['dragstart', onDragStart],
+      ['dragend', onDragEnd],
+      ['drop', onDragEnd],
+      ['blur', onBlur],
+    ];
+    for (const [type, fn] of listeners) window.addEventListener(type, fn, true);
 
     fit();
     // Refit when the panel is resized or anything inside changes size.
@@ -55,6 +95,7 @@ export function useFitZoom<T extends HTMLElement>(minZoom = 0.5, enabled = true)
     for (const child of Array.from(el.children)) ro.observe(child);
 
     return () => {
+      for (const [type, fn] of listeners) window.removeEventListener(type, fn, true);
       ro.disconnect();
       mo.disconnect();
       cancelAnimationFrame(raf);

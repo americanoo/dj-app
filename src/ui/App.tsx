@@ -31,7 +31,7 @@ interface Toast {
 }
 
 export function App() {
-  const { project, dispatch } = useStore();
+  const { project, dispatch, undoLabel, redoLabel } = useStore();
   const { attach } = useAudio();
   const { save: saveVersion } = useVersions();
   const [versionsOpen, setVersionsOpen] = useState(false);
@@ -59,6 +59,18 @@ export function App() {
     setToasts((t) => [...t, { id, text, kind }]);
     window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), kind === 'error' ? 9000 : 5000);
   }, []);
+
+  const undoRef = useRef({ undoLabel, redoLabel });
+  undoRef.current = { undoLabel, redoLabel };
+  const undoOrRedo = useCallback(
+    (which: 'undo' | 'redo') => {
+      const label = which === 'undo' ? undoRef.current.undoLabel : undoRef.current.redoLabel;
+      if (!label) return;
+      dispatch({ type: which });
+      toast(`${which === 'undo' ? 'Undid' : 'Redid'}: ${label}`);
+    },
+    [dispatch, toast],
+  );
 
   const openCues = useCallback((trackId: string) => setLoadedTrackId(trackId), []);
 
@@ -155,7 +167,21 @@ export function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+      const mod = e.metaKey || e.ctrlKey;
+      const key = e.key.toLowerCase();
+      if (mod && (key === 'z' || key === 'y')) {
+        // Typing in a text field keeps the field's own undo.
+        const t = e.target as HTMLElement;
+        const typing =
+          t.isContentEditable ||
+          t.tagName === 'TEXTAREA' ||
+          (t.tagName === 'INPUT' && !['range', 'checkbox', 'radio', 'button', 'file'].includes((t as HTMLInputElement).type));
+        if (typing) return;
+        e.preventDefault();
+        undoOrRedo(key === 'y' || e.shiftKey ? 'redo' : 'undo');
+        return;
+      }
+      if (mod && key === 's') {
         e.preventDefault();
         const name = defaultVersionName();
         saveVersion(projectRef.current, name)
@@ -165,7 +191,7 @@ export function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [saveVersion, toast]);
+  }, [saveVersion, toast, undoOrRedo]);
 
   useEffect(() => {
     const over = (e: DragEvent) => {
@@ -204,6 +230,26 @@ export function App() {
           Setcraft
         </div>
         <div className="topbar-right">
+          <div className="undo-redo">
+            <button
+              className="icon"
+              onClick={() => undoOrRedo('undo')}
+              disabled={!undoLabel}
+              title={undoLabel ? `Undo ${undoLabel} (⌘Z / Ctrl+Z)` : 'Nothing to undo'}
+              aria-label="Undo"
+            >
+              ↶
+            </button>
+            <button
+              className="icon"
+              onClick={() => undoOrRedo('redo')}
+              disabled={!redoLabel}
+              title={redoLabel ? `Redo ${redoLabel} (⇧⌘Z / Ctrl+Y)` : 'Nothing to redo'}
+              aria-label="Redo"
+            >
+              ↷
+            </button>
+          </div>
           <select
             aria-label="Active set"
             value={set.id}
@@ -254,11 +300,11 @@ export function App() {
         <section className="pane deck-pane" style={{ height: layout.deck }}>
           <CueEditor trackId={loadedTrackId} onSelectTrack={setLoadedTrackId} />
         </section>
-        <Splitter onDrag={(dy) => setLayout((l) => ({ ...l, deck: clamp(l.deck + dy, 200, 900) }))} />
+        <Splitter value={layout.deck} min={200} max={900} onChange={(deck) => setLayout((l) => ({ ...l, deck }))} />
         <section className="pane timeline-host" style={{ height: layout.timeline }}>
           <Timeline selectedTrackId={loadedTrackId} onSelectTrack={setLoadedTrackId} onOpenStory={() => setStoryOpen(true)} />
         </section>
-        <Splitter onDrag={(dy) => setLayout((l) => ({ ...l, timeline: clamp(l.timeline + dy, 150, 700) }))} />
+        <Splitter value={layout.timeline} min={150} max={700} onChange={(timeline) => setLayout((l) => ({ ...l, timeline }))} />
         <section className="pane library-pane">
           <LibraryView
             selectedTrackId={loadedTrackId}
@@ -334,8 +380,10 @@ function clamp(v: number, min: number, max: number): number {
 }
 
 /** Drag handle between two stacked panes. */
-function Splitter({ onDrag }: { onDrag: (dy: number) => void }) {
-  const last = useRef<number | null>(null);
+function Splitter({ value, min, max, onChange }: { value: number; min: number; max: number; onChange: (v: number) => void }) {
+  // Sizes follow the pointer's position from where the drag started, so the
+  // handle stays under the pointer even after hitting the smallest or largest size.
+  const start = useRef<{ y: number; value: number } | null>(null);
   return (
     <div
       className="splitter"
@@ -343,16 +391,18 @@ function Splitter({ onDrag }: { onDrag: (dy: number) => void }) {
       aria-orientation="horizontal"
       title="Drag to resize"
       onPointerDown={(e) => {
-        last.current = e.clientY;
+        start.current = { y: e.clientY, value };
         e.currentTarget.setPointerCapture(e.pointerId);
       }}
       onPointerMove={(e) => {
-        if (last.current === null) return;
-        onDrag(e.clientY - last.current);
-        last.current = e.clientY;
+        const s = start.current;
+        if (s) onChange(clamp(s.value + e.clientY - s.y, min, max));
       }}
       onPointerUp={() => {
-        last.current = null;
+        start.current = null;
+      }}
+      onPointerCancel={() => {
+        start.current = null;
       }}
     />
   );

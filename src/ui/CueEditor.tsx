@@ -48,7 +48,8 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
   const [activeLoopId, setActiveLoopId] = useState<string | null>(null);
   const [volume, setVolume] = useState(() => {
     try {
-      return Number(localStorage.getItem('setcraft-volume') ?? '0.9');
+      const v = Number(localStorage.getItem('setcraft-volume') ?? '0.9');
+      return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0.9;
     } catch {
       return 0.9;
     }
@@ -75,6 +76,9 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  /** Playing, but the browser is holding the sound back (needs a click on the page). */
+  const [soundBlocked, setSoundBlocked] = useState(false);
+  const meterRef = useRef<HTMLSpanElement>(null);
   // The whole deck always fits its panel: the waveform stretches first, then everything scales down.
   const fitRef = useFitZoom<HTMLDivElement>(0.45);
   useEffect(() => {
@@ -180,20 +184,44 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
 
   // Follow the deck while playing. The waveforms read the deck themselves every
   // frame; the clock and the rest of the deck only need ~12 updates a second.
+  // The level meter is updated directly, every frame.
   useEffect(() => {
-    if (!playing) return;
+    const meter = meterRef.current;
+    if (!playing) {
+      meter?.style.setProperty('--level', '0');
+      return;
+    }
     let raf = 0;
     let last = 0;
+    let shown = 0;
     const tick = (t: number) => {
-      if (deckRef.current && t - last > 80) {
+      const d = deckRef.current;
+      if (d && t - last > 80) {
         last = t;
-        setPlayhead(deckRef.current.position());
+        setPlayhead(d.position());
+      }
+      if (d && meter) {
+        // Fast attack, slow release, like a hardware meter.
+        const lv = d.level();
+        shown = lv > shown ? lv : shown * 0.9;
+        meter.style.setProperty('--level', shown.toFixed(3));
       }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    // If the browser is holding the sound back, say so instead of playing silently.
+    const check = window.setTimeout(() => setSoundBlocked(!!deckRef.current?.playing && !deckRef.current.audible), 700);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.clearTimeout(check);
+    };
   }, [playing]);
+  useEffect(() => {
+    const c = audioContext();
+    const onState = () => c.state === 'running' && setSoundBlocked(false);
+    c.addEventListener('statechange', onState);
+    return () => c.removeEventListener('statechange', onState);
+  }, []);
 
   /** Exact position right now: the live deck while playing, else the playhead. */
   const now = useCallback(() => {
@@ -450,52 +478,74 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
 
       <section className="card deck">
         <div className="deck-bar">
-          <button className={`primary ${playing ? 'playing' : ''}`} onClick={togglePlay} disabled={!deckReady} title="Space">
-            {playing ? '❚❚ Pause' : '▶ Play'}
-          </button>
-          {activeLoop && (
-            <button className="small looping-btn" onClick={exitLoop} title="Release the loop and play on">
-              ↻ {activeLoop.name || 'Loop'} · exit
-            </button>
-          )}
-          <span className="clock">
-            {formatTime(playhead)}
-            {bpm && <span className="muted"> · bar {barBeatLabel(playhead, bpm, gridStart)}</span>}
-          </span>
-          <button className="small" onClick={() => seek(q(now() - (beat ?? 0.5) * 4))} title="Back one bar (Shift+←)">
-            −1 bar
-          </button>
-          <button className="small" onClick={() => seek(q(now() + (beat ?? 0.5) * 4))} title="Forward one bar (Shift+→)">
-            +1 bar
-          </button>
-          <div className="snap-control" role="radiogroup" aria-label="Snap" title="Where cues, loops and clicks land (Q cycles; hold Shift while dragging to place freely)">
-            <span className="snap-label">Snap</span>
-            {SNAP_MODES.map((m) => (
-              <button
-                key={m}
-                role="radio"
-                aria-checked={snapMode === m}
-                className={snapMode === m ? 'on' : ''}
-                disabled={m !== 'off' && !bpm}
-                onClick={() => setSnapMode(m)}
-              >
-                {m === 'off' ? 'Free' : m === 'beat' ? 'Beat' : 'Bar'}
+          <div className="deck-left">
+            <span className="clock">
+              {formatTime(playhead)}
+              {bpm && <span className="muted"> · bar {barBeatLabel(playhead, bpm, gridStart)}</span>}
+            </span>
+            {activeLoop && (
+              <button className="small looping-btn" onClick={exitLoop} title="Release the loop and play on">
+                ↻ {activeLoop.name || 'Loop'} · exit
               </button>
-            ))}
-          </div>
-          <label className="inline">
-            Zoom
-            <select value={zoomBars} onChange={(e) => setZoomBars(Number(e.target.value))}>
-              {ZOOM_BARS.map((b) => (
-                <option key={b} value={b}>
-                  {b} bars
-                </option>
+            )}
+            <div className="snap-control" role="radiogroup" aria-label="Snap" title="Where cues, loops and clicks land (Q cycles; hold Shift while dragging to place freely)">
+              <span className="snap-label">Snap</span>
+              {SNAP_MODES.map((m) => (
+                <button
+                  key={m}
+                  role="radio"
+                  aria-checked={snapMode === m}
+                  className={snapMode === m ? 'on' : ''}
+                  disabled={m !== 'off' && !bpm}
+                  onClick={() => setSnapMode(m)}
+                >
+                  {m === 'off' ? 'Free' : m === 'beat' ? 'Beat' : 'Bar'}
+                </button>
               ))}
-            </select>
-          </label>
-          <span className="grow" />
-          <label className="inline volume" title="Preview volume">
-            🔈
+            </div>
+            <label className="inline">
+              Zoom
+              <select value={zoomBars} onChange={(e) => setZoomBars(Number(e.target.value))}>
+                {ZOOM_BARS.map((b) => (
+                  <option key={b} value={b}>
+                    {b} bars
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="transport">
+            <button className="small" onClick={() => seek(q(now() - (beat ?? 0.5) * 4))} title="Back one bar (Shift+←)">
+              −1 bar
+            </button>
+            <button
+              className={`play-btn ${playing ? 'playing' : ''}`}
+              onClick={togglePlay}
+              disabled={!deckReady}
+              title={playing ? 'Pause (Space)' : 'Play (Space)'}
+              aria-label={playing ? 'Pause' : 'Play'}
+            >
+              {playing ? (
+                <svg viewBox="0 0 24 24" aria-hidden>
+                  <rect x="6" y="5" width="4.2" height="14" rx="1" />
+                  <rect x="13.8" y="5" width="4.2" height="14" rx="1" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" aria-hidden>
+                  <path d="M8.5 5.2v13.6a.8.8 0 0 0 1.2.7l10.6-6.8a.8.8 0 0 0 0-1.4L9.7 4.5a.8.8 0 0 0-1.2.7z" />
+                </svg>
+              )}
+            </button>
+            <button className="small" onClick={() => seek(q(now() + (beat ?? 0.5) * 4))} title="Forward one bar (Shift+→)">
+              +1 bar
+            </button>
+          </div>
+
+          <div className="deck-right">
+          <label className="inline volume" title="Preview volume · the bar shows the level going to your speakers">
+            Vol
+            <span className="level-meter" ref={meterRef} aria-hidden />
             <input
               type="range"
               min={0}
@@ -525,8 +575,17 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
               e.target.value = '';
             }}
           />
+          </div>
         </div>
         {error && <div className="error-line">{error}</div>}
+        {soundBlocked && (
+          <div className="error-line">
+            Your browser is holding the sound back.{' '}
+            <button className="small primary" onClick={() => void audioContext().resume()}>
+              Turn sound on
+            </button>
+          </div>
+        )}
         {wave && !wave.bands && !loading[track.id] && (
           <div className="hint-line">
             This waveform was saved by an earlier version, in one colour. It turns into the colour waveform as soon as
@@ -536,7 +595,16 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
         {!audioInfo && !loading[track.id] && remembered[track.id]?.bands && (
           <div className="hint-line info">
             Showing the remembered waveform of “{remembered[track.id].fileName}”. Attach the audio file
-            {folder.status === 'ready' ? '' : ' or link your music folder'} to play it.
+            {folder.status === 'ready' ? '' : ' or link your music folder'} to play it.{' '}
+            {folder.status !== 'ready' && <LinkFolderButton />}
+          </div>
+        )}
+        {!audioInfo && !loading[track.id] && !remembered[track.id] && !wave && folder.status !== 'ready' && (
+          <div className="hint-line info">
+            {folder.status === 'needs-permission'
+              ? `Your browser needs one click to open “${folder.folderName}” again before this track can play.`
+              : 'No audio for this track yet. Link the folder your music lives in, or attach the file, to see and hear it.'}{' '}
+            <LinkFolderButton />
           </div>
         )}
         {!audioInfo && !loading[track.id] && folder.status === 'ready' && folderMiss && (
