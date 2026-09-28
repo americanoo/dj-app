@@ -254,7 +254,7 @@ export function App() {
         <section className="pane deck-pane" style={{ height: layout.deck }}>
           <CueEditor trackId={loadedTrackId} onSelectTrack={setLoadedTrackId} />
         </section>
-        <Splitter onDrag={(dy) => setLayout((l) => ({ ...l, deck: clamp(l.deck + dy, 170, 900) }))} />
+        <Splitter onDrag={(dy) => setLayout((l) => ({ ...l, deck: clamp(l.deck + dy, 200, 900) }))} />
         <section className="pane timeline-host" style={{ height: layout.timeline }}>
           <Timeline selectedTrackId={loadedTrackId} onSelectTrack={setLoadedTrackId} onOpenStory={() => setStoryOpen(true)} />
         </section>

@@ -4,14 +4,20 @@ import { SLOT_LETTERS, type SetEntry } from '../core/model';
 import { buildTimeline, formatSetTime, parseClock, totalSeconds, type TimelineItem } from '../core/setplan';
 import { formatTime, parseTime } from '../core/time';
 import { activeSet, useStore } from './store';
+import { useFitZoom, zoomOf } from './fit';
 
 /** Drag payload type for library rows. */
 export const TRACK_DRAG_TYPE = 'application/x-setcraft-track';
 
-const LANE_H = 46;
+// Lanes stretch with the panel's height, between these limits.
+const MIN_LANE_H = 24;
+const MAX_LANE_H = 64;
 const RULER_H = 22;
 const CHAPTER_H = 18;
 const ENERGY_H = 34;
+const SMALL_ENERGY_H = 20;
+/** Smallest the lanes area can be before the panel is scaled down instead. */
+const MIN_CANVAS_H = RULER_H + CHAPTER_H + SMALL_ENERGY_H + MIN_LANE_H * 2 + 12;
 const MAGNET_PX = 10;
 const MAX_PX_PER_SEC = 40; // zoomed all the way in: seconds are easy to hit
 const TICK_STEPS = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600];
@@ -41,6 +47,8 @@ export function Timeline({ selectedTrackId, onSelectTrack, onOpenStory }: Props)
 
   const scroller = useRef<HTMLDivElement>(null);
   const [viewWidth, setViewWidth] = useState(800);
+  const [viewHeight, setViewHeight] = useState(200);
+  const fitRef = useFitZoom<HTMLDivElement>(0.5);
   const [zoom, setZoom] = useState<number | 'fit'>('fit');
   const fitPx = Math.max(0.02, (viewWidth - 24) / length);
   const pxps = zoom === 'fit' ? fitPx : zoom;
@@ -52,10 +60,20 @@ export function Timeline({ selectedTrackId, onSelectTrack, onOpenStory }: Props)
 
   const selected = items.find((it) => it.entry.id === selectedId);
 
+  // Fill the panel's height: the energy line slims down on short panels and the lanes take the rest.
+  const energyH = viewHeight >= 170 ? ENERGY_H : SMALL_ENERGY_H;
+  const laneH = Math.max(
+    MIN_LANE_H,
+    Math.min(MAX_LANE_H, Math.floor((viewHeight - RULER_H - CHAPTER_H - energyH - 12) / 2)),
+  );
+
   useEffect(() => {
     const el = scroller.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => setViewWidth(el.clientWidth));
+    const ro = new ResizeObserver(() => {
+      setViewWidth(el.clientWidth);
+      setViewHeight(el.clientHeight);
+    });
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
@@ -88,7 +106,7 @@ export function Timeline({ selectedTrackId, onSelectTrack, onOpenStory }: Props)
     const clamped = Math.min(MAX_PX_PER_SEC, Math.max(fitPx, next));
     if (el) {
       const rect = el.getBoundingClientRect();
-      const x = (aroundClientX ?? rect.left + rect.width / 2) - rect.left;
+      const x = ((aroundClientX ?? rect.left + rect.width / 2) - rect.left) / zoomOf(el);
       anchor.current = { t: (el.scrollLeft + x) / pxps, x };
     }
     setZoom(clamped <= fitPx * 1.001 ? 'fit' : clamped);
@@ -97,7 +115,7 @@ export function Timeline({ selectedTrackId, onSelectTrack, onOpenStory }: Props)
   const timeAt = (clientX: number) => {
     const el = scroller.current!;
     const rect = el.getBoundingClientRect();
-    return Math.max(0, (clientX - rect.left + el.scrollLeft) / pxps);
+    return Math.max(0, ((clientX - rect.left) / zoomOf(el) + el.scrollLeft) / pxps);
   };
 
   /** Whole seconds, pulled onto a neighbouring track's start or end when close. */
@@ -146,14 +164,14 @@ export function Timeline({ selectedTrackId, onSelectTrack, onOpenStory }: Props)
   }
 
   const energyPoints = items
-    .map((it) => `${(it.startsAt + it.playFor / 2) * pxps},${ENERGY_H - 4 - ((it.entry.energy - 1) / 9) * (ENERGY_H - 8)}`)
+    .map((it) => `${(it.startsAt + it.playFor / 2) * pxps},${energyH - 4 - ((it.entry.energy - 1) / 9) * (energyH - 8)}`)
     .join(' ');
 
   const width = Math.max(viewWidth, length * pxps + 24);
-  const lanesTop = RULER_H + CHAPTER_H + ENERGY_H;
+  const lanesTop = RULER_H + CHAPTER_H + energyH;
 
   return (
-    <div className="timeline-pane" data-keys-own onKeyDown={onKeyDown} tabIndex={-1}>
+    <div className="timeline-pane" ref={fitRef} data-keys-own onKeyDown={onKeyDown} tabIndex={-1}>
       <div className="pane-head">
         <h3>Journey of the night</h3>
         <span className="muted small-text">
@@ -183,6 +201,7 @@ export function Timeline({ selectedTrackId, onSelectTrack, onOpenStory }: Props)
       <div
         ref={scroller}
         className="timeline-scroll"
+        style={{ minHeight: MIN_CANVAS_H + 4 }}
         onDragOver={(e) => {
           if (!e.dataTransfer.types.includes(TRACK_DRAG_TYPE)) return;
           e.preventDefault();
@@ -204,7 +223,7 @@ export function Timeline({ selectedTrackId, onSelectTrack, onOpenStory }: Props)
           if (e.target === e.currentTarget || (e.target as HTMLElement).classList.contains('tl-lanes')) setSelectedId(null);
         }}
       >
-        <div className="timeline-canvas" style={{ width, height: lanesTop + LANE_H * 2 + 8 }}>
+        <div className="timeline-canvas" style={{ width, height: lanesTop + laneH * 2 + 8 }}>
           <div className="tl-ruler" style={{ height: RULER_H }}>
             {ticks.map((t) => (
               <span key={t} className="tl-tick" style={{ left: t * pxps }}>
@@ -224,25 +243,26 @@ export function Timeline({ selectedTrackId, onSelectTrack, onOpenStory }: Props)
               </span>
             ))}
           </div>
-          <svg className="tl-energy" style={{ top: RULER_H + CHAPTER_H, height: ENERGY_H }} width={width} height={ENERGY_H}>
+          <svg className="tl-energy" style={{ top: RULER_H + CHAPTER_H, height: energyH }} width={width} height={energyH}>
             {items.length > 1 && <polyline points={energyPoints} />}
             {items.map((it) => (
               <circle
                 key={it.entry.id}
                 cx={(it.startsAt + it.playFor / 2) * pxps}
-                cy={ENERGY_H - 4 - ((it.entry.energy - 1) / 9) * (ENERGY_H - 8)}
+                cy={energyH - 4 - ((it.entry.energy - 1) / 9) * (energyH - 8)}
                 r={3}
               >
                 <title>Energy {it.entry.energy}/10</title>
               </circle>
             ))}
           </svg>
-          <div className="tl-lanes" style={{ top: lanesTop, height: LANE_H * 2 + 4 }}>
+          <div className="tl-lanes" style={{ top: lanesTop, height: laneH * 2 + 4 }}>
             {items.map((it, i) => (
               <TrackBlock
                 key={it.entry.id}
                 item={it}
                 lane={i % 2}
+                laneH={laneH}
                 pxps={pxps}
                 selected={it.entry.id === selectedId}
                 loaded={it.entry.trackId === selectedTrackId}
@@ -258,7 +278,7 @@ export function Timeline({ selectedTrackId, onSelectTrack, onOpenStory }: Props)
                 }}
                 onPointerMove={(e) => {
                   if (!drag || drag.id !== it.entry.id) return;
-                  const dx = e.clientX - drag.startX;
+                  const dx = (e.clientX - drag.startX) / zoomOf(e.currentTarget as HTMLElement);
                   if (!drag.active && Math.abs(dx) < 4) return;
                   if (!drag.active) setDrag({ ...drag, active: true });
                   dispatch({ type: 'setEntryTime', id: it.entry.id, at: snap(drag.origAt + dx / pxps, it.entry.id, e.shiftKey) });
@@ -289,6 +309,7 @@ export function Timeline({ selectedTrackId, onSelectTrack, onOpenStory }: Props)
 function TrackBlock(props: {
   item: TimelineItem;
   lane: number;
+  laneH: number;
   pxps: number;
   selected: boolean;
   loaded: boolean;
@@ -305,8 +326,10 @@ function TrackBlock(props: {
   const kc = keyColor(t?.key);
   return (
     <div
-      className={`tl-block ${props.selected ? 'selected' : ''} ${props.loaded ? 'loaded' : ''} ${props.dragging ? 'dragging' : ''}`}
-      style={{ left: item.startsAt * pxps, width: w, top: props.lane * (LANE_H + 4), height: LANE_H, borderLeftColor: props.chapterColor }}
+      className={`tl-block ${props.selected ? 'selected' : ''} ${props.loaded ? 'loaded' : ''} ${props.dragging ? 'dragging' : ''} ${
+        props.laneH < 38 ? 'compact' : ''
+      }`}
+      style={{ left: item.startsAt * pxps, width: w, top: props.lane * (props.laneH + 4), height: props.laneH, borderLeftColor: props.chapterColor }}
       onPointerDown={props.onPointerDown}
       onPointerMove={props.onPointerMove}
       onPointerUp={props.onPointerUp}

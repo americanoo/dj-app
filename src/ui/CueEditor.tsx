@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { keyColor, toCamelot, normaliseKey } from '../core/keys';
 import { withTimes } from '../core/setplan';
 import { scaleTempo } from '../core/tempo';
@@ -8,6 +9,7 @@ import { audioContext, useAudio } from './audio';
 import { Deck } from './deck';
 import { moveCueToSlot } from '../core/cues';
 import { useMusicFolder } from './musicFolder';
+import { useFitZoom } from './fit';
 import { LinkFolderButton } from './MusicFolderControl';
 import { activeSet, useStore } from './store';
 import { SECTION_COLORS, Waveform } from './Waveform';
@@ -72,6 +74,15 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
   const [hotLoops, setHotLoops] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  // The whole deck always fits its panel: the waveform stretches first, then everything scales down.
+  const fitRef = useFitZoom<HTMLDivElement>(0.45);
+  useEffect(() => {
+    if (!historyOpen) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setHistoryOpen(false);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [historyOpen]);
   const fileInput = useRef<HTMLInputElement>(null);
 
   // Show a remembered waveform straight away, then fetch the audio from the linked folder.
@@ -420,7 +431,7 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
   };
 
   return (
-    <div className="workspace">
+    <div className="workspace" ref={fitRef}>
       <section className="card track-head">
         <NightStepper trackId={track.id} onSelectTrack={onSelectTrack} />
         <div className="track-title">
@@ -552,7 +563,7 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
           gridStart={gridStart}
           selectedCueId={selectedId}
           windowSeconds={beat ? zoomBars * 4 * beat : zoomBars * 2}
-          height={118}
+          fill
           onSeek={(s) => seek(q(s))}
           onScrub={seek}
           onScrubStart={scrubStart}
@@ -721,6 +732,11 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
         <section className="card">
           <div className="card-head">
             <h3>{selected ? 'Edit cue' : 'All cues & loops'}</h3>
+            {!selected && (
+              <button className="small" onClick={() => setHistoryOpen(true)} title="Earlier versions of these cues, from your saved versions">
+                History
+              </button>
+            )}
             {selected && (
               <button className="small" onClick={() => setSelectedId(null)}>
                 Show all
@@ -756,6 +772,7 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
               }}
             />
           ) : sortedCues.length ? (
+            <div className="cue-list-slot">
             <table className="cue-table">
               <tbody>
                 {sortedCues.map((c) => (
@@ -787,19 +804,34 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
                 ))}
               </tbody>
             </table>
+            </div>
           ) : (
             <p className="muted">No cues yet. Set pads, loops or memory cues on the left.</p>
           )}
         </section>
       </div>
 
-      <CueHistory track={track} />
+      {historyOpen &&
+        // Portalled so the pop-up isn't scaled with the deck.
+        createPortal(
+          <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Cue history" onClick={() => setHistoryOpen(false)}>
+            <div className="modal cue-history-modal" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-body">
+                <CueHistory track={track} autoLoad />
+              </div>
+              <footer className="modal-foot">
+                <button onClick={() => setHistoryOpen(false)}>Close</button>
+              </footer>
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
 
 /** Earlier states of this track's cues from saved versions, with one-click restore. */
-function CueHistory({ track }: { track: Track }) {
+function CueHistory({ track, autoLoad = false }: { track: Track; autoLoad?: boolean }) {
   const { project, dispatch } = useStore();
   const { versions, load, save } = useVersions();
   const [entries, setEntries] = useState<CueHistoryEntry[] | null>(null);
@@ -822,6 +854,11 @@ function CueHistory({ track }: { track: Track }) {
       setLoadingHistory(false);
     }
   };
+
+  useEffect(() => {
+    if (autoLoad && versions.length) void show();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Refresh when the track's cues change (e.g. after a restore).
   useEffect(() => {

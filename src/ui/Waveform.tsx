@@ -5,6 +5,7 @@ import { SLOT_LETTERS, type Cue } from '../core/model';
 import { barBeatLabel, beatLength, formatTime } from '../core/time';
 import type { WaveformBands } from '../core/waveform';
 import { SECTION_LABELS, type Section, type SectionKind } from '../core/sections';
+import { zoomOf } from './fit';
 
 interface Props {
   duration: number;
@@ -21,7 +22,9 @@ interface Props {
   selectedCueId: string | null;
   /** Detail view: visible window in seconds, centred on the playhead. Omit for overview. */
   windowSeconds?: number;
-  height: number;
+  /** Fixed height in px; or `fill` to stretch to the space the layout gives it. */
+  height?: number;
+  fill?: boolean;
   /** Click to jump (the parent applies beat / bar snapping). */
   onSeek: (sec: number) => void;
   /** Free movement while scrubbing (drag or wheel); falls back to onSeek. */
@@ -95,7 +98,9 @@ export function Waveform(p: Props) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const drag = useRef<DragState | null>(null);
   const [dragging, setDragging] = useState<{ cueId: string; edge: CueEdge } | null>(null);
-  const [width, setWidth] = useState(0);
+  const [size, setSize] = useState({ w: 0, h: 0 });
+  /** Scale from `zoom` on the panel, so the canvas stays sharp when the deck is scaled down. */
+  const zoom = useRef(1);
   const peakMax = useMemo(() => (p.peaks ? maxPeak(p.peaks) : 1), [p.peaks]);
   /** The playhead the canvas last drew; pointer maths uses it so it matches what you see. */
   const shownPlayhead = useRef(p.playhead);
@@ -122,7 +127,10 @@ export function Waveform(p: Props) {
   useEffect(() => {
     const c = canvas.current;
     if (!c) return;
-    const ro = new ResizeObserver(() => setWidth(c.clientWidth));
+    const ro = new ResizeObserver(() => {
+      zoom.current = zoomOf(c);
+      setSize({ w: c.clientWidth, h: c.clientHeight });
+    });
     ro.observe(c);
     return () => ro.disconnect();
   }, []);
@@ -137,9 +145,10 @@ export function Waveform(p: Props) {
     shownPlayhead.current = playhead;
     const c = canvas.current;
     if (!c) return;
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = (window.devicePixelRatio || 1) * zoom.current;
     const w = c.clientWidth;
-    const h = p.height;
+    const h = p.fill ? c.clientHeight : (p.height ?? 60);
+    if (!w || !h) return;
     if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) {
       c.width = Math.round(w * dpr);
       c.height = Math.round(h * dpr);
@@ -416,7 +425,7 @@ export function Waveform(p: Props) {
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [p.playing, dragging, width, peakMax, p.sections, p.bands, p.duration, p.peaks, p.peaksPerSecond, p.cues, p.playhead, p.bpm, p.gridStart, p.selectedCueId, p.windowSeconds, p.height]);
+  }, [p.playing, dragging, size, peakMax, p.sections, p.bands, p.duration, p.peaks, p.peaksPerSecond, p.cues, p.playhead, p.bpm, p.gridStart, p.selectedCueId, p.windowSeconds, p.height]);
 
   // Wheel / trackpad scrolls through the track; ⌘/Ctrl + wheel zooms.
   useEffect(() => {
@@ -503,8 +512,8 @@ export function Waveform(p: Props) {
   return (
     <canvas
       ref={canvas}
-      className={`${p.windowSeconds ? 'wave detail' : 'wave overview'}${dragging || scrubbing ? ' dragging' : ''}`}
-      style={{ height: p.height }}
+      className={`${p.windowSeconds ? 'wave detail' : 'wave overview'}${p.fill ? ' fill' : ''}${dragging || scrubbing ? ' dragging' : ''}`}
+      style={p.fill ? undefined : { height: p.height }}
       onPointerDown={(e) => {
         const hit = handleAt(e.clientX, e.clientY);
         if (hit) {
@@ -542,7 +551,7 @@ export function Waveform(p: Props) {
           const scrubTo = p.onScrub ?? p.onSeek;
           if (p.windowSeconds) {
             // Pull the waveform like a record: drag left to move forward.
-            const secPerPx = p.windowSeconds / e.currentTarget.clientWidth;
+            const secPerPx = p.windowSeconds / e.currentTarget.getBoundingClientRect().width;
             scrubTo(Math.max(0, Math.min(p.duration, sc.startPlay - dx * secPerPx)));
           } else {
             scrubTo(Math.max(0, Math.min(p.duration, secAt(e.clientX))));

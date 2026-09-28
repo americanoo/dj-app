@@ -2445,3 +2445,107 @@ table.tracks td.bpm-odd {
   display: inline-flex;
   gap: 6px;
 }
+
+/* ==========================================================================
+   Panels always fit: nothing inside a panel needs scrolling. Stretchy parts
+   (waveform, lanes, list slots) give way first; then the panel's content is
+   scaled down as a whole (see useFitZoom).
+   ========================================================================== */
+
+.deck-pane {
+  overflow: hidden;
+}
+.deck-pane .workspace {
+  grid-template-rows: auto minmax(min-content, 1fr) auto;
+  align-items: stretch;
+  row-gap: 10px;
+}
+.deck-pane .workspace > .deck {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.deck-pane .workspace > .deck > * {
+  flex: none;
+}
+/* the zoomed-in waveform takes whatever height the deck has */
+.deck-pane canvas.wave.fill {
+  flex: 1 1 0;
+  min-height: 56px;
+  height: auto;
+}
+.deck-pane .cue-columns > .card:last-child {
+  max-height: none;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+/* the cue list uses the height beside the pads without making the row taller */
+.cue-list-slot {
+  flex: 1 1 0;
+  min-height: 78px;
+  contain: size;
+  overflow-y: auto;
+}
+.cue-history-modal {
+  width: min(900px, 100%);
+}
+
+/* timeline: short lanes show one line per track */
+.tl-block.compact {
+  justify-content: center;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.tl-block.compact .tl-meta {
+  display: none;
+}
+
+/* library sidebar: playlists scroll within their slot, everything else stays in view */
+.library-pane .sidebar {
+  overflow: hidden;
+  padding: 10px 8px;
+}
+.sidebar-fit {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.sidebar-fit > * {
+  flex: none;
+}
+.sidebar-fit > .sources-list {
+  flex: 1 1 0;
+  min-height: 60px;
+  contain: size;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.sources-list > * {
+  flex: none;
+}
+/* compact sidebar blocks, so the sidebar rarely needs scaling */
+.library-pane .sidebar h3 {
+  margin: 0 6px 4px;
+}
+.library-pane .folder-panel {
+  margin-top: 8px;
+  padding-top: 8px;
+  gap: 4px;
+}
+.library-pane .folder-panel .row {
+  margin: 0;
+  gap: 6px;
+}
+.folder-waves {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.library-pane .sidebar-footer {
+  margin-top: 6px;
+}

@@ -119,13 +119,13 @@ export function MusicFolderPanel() {
         )}
       </div>
       {setTracks.length > 0 && (
-        <div className="small-text">
-          <span className="muted">
-            Colour waveforms for “{set.name}”: {withWave} of {setTracks.length}
+        <div className="small-text folder-waves">
+          <span className="muted" title={`Colour waveforms for the tracks in “${set.name}”`}>
+            Waveforms {withWave}/{setTracks.length} in set
           </span>
           {folder.status === 'ready' && todo.length > 0 && !progress && (
-            <button className="small wide" onClick={() => void analyseSet()}>
-              Analyse {todo.length} track{todo.length === 1 ? '' : 's'}
+            <button className="small" onClick={() => void analyseSet()}>
+              Analyse {todo.length}
             </button>
           )}
           {progress && (

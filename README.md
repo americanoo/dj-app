@@ -21,7 +21,10 @@ npm run build    # static site in dist/ – host anywhere
 ## One-page workspace
 
 Everything happens on one page, in three stacked panels. Drag the handles between them to resize; the sizes
-are remembered.
+are remembered. Every panel always shows all of its controls without scrolling: a taller deck gets a taller
+waveform and a taller timeline gets taller lanes, and when a panel gets too small for everything at full size,
+its contents scale down to fit. Only long lists (library tracks, playlists, a track's cue list) scroll within
+their own space. Earlier versions of a track's cues open from **History** in the cue list.
 
 | Panel | What it's for |
 |-------|---------------|

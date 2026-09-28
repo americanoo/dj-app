@@ -7,6 +7,7 @@ import { activeSet, useStore } from './store';
 import { useAudio } from './audio';
 import { LinkFolderButton, MusicFolderPanel } from './MusicFolderControl';
 import { useOddBpmIds } from './BpmFixPanel';
+import { useFitZoom } from './fit';
 
 type SortKey = 'order' | 'artist' | 'title' | 'bpm' | 'key' | 'duration';
 
@@ -36,6 +37,8 @@ export function LibraryView({
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const oddIds = useOddBpmIds();
+  // The sidebar always fits: the playlist list gives way first, then it scales down.
+  const sidebarFit = useFitZoom<HTMLDivElement>(0.5, Object.keys(library.tracks).length > 0);
   const oddBpms = oddIds.size;
   const inSet = useMemo(() => new Set(set.entries.map((e) => e.trackId)), [set.entries]);
   const playlist = library.playlists.find((p) => p.id === playlistId);
@@ -151,7 +154,9 @@ export function LibraryView({
   return (
     <div className="library">
       <aside className="sidebar">
+        <div className="sidebar-fit" ref={sidebarFit}>
         <h3>Sources</h3>
+        <div className="sources-list">
         <button className={playlistId === 'all' ? 'side-item active' : 'side-item'} onClick={() => setPlaylistId('all')}>
           All tracks <span className="count">{Object.keys(library.tracks).length}</span>
         </button>
@@ -166,6 +171,7 @@ export function LibraryView({
             {p.name} <span className="count">{p.trackIds.length}</span>
           </button>
         ))}
+        </div>
         <MusicFolderPanel />
         <div className="sidebar-footer">
           <button
@@ -178,6 +184,7 @@ export function LibraryView({
           >
             Clear library
           </button>
+        </div>
         </div>
       </aside>
 
