@@ -8,6 +8,8 @@ import { findTempoFixes } from '../core/tempo';
 import { BpmFixPanel, loadTempoRange } from './BpmFixPanel';
 import { CueEditor } from './CueEditor';
 import { FoundingPanel } from './FoundingPanel';
+import { ControllerPanel } from './ControllerPanel';
+import { useMidi } from './midi';
 import { useLicense } from './license';
 import { ExportPanel } from './ExportPanel';
 import { LibraryView } from './LibraryView';
@@ -38,6 +40,8 @@ export function App() {
   const { save: saveVersion } = useVersions();
   const [versionsOpen, setVersionsOpen] = useState(false);
   const [foundingOpen, setFoundingOpen] = useState(false);
+  const [controllerOpen, setControllerOpen] = useState(false);
+  const midi = useMidi();
   const { founding } = useLicense();
   const [loadedTrackId, setLoadedTrackId] = useState<string | null>(null);
   const [storyOpen, setStoryOpen] = useState(false);
@@ -157,7 +161,7 @@ export function App() {
 
   // Esc closes the pop-up panels.
   useEffect(() => {
-    if (!storyOpen && !exportOpen && !versionsOpen && !bpmFixOpen && !foundingOpen) return;
+    if (!storyOpen && !exportOpen && !versionsOpen && !bpmFixOpen && !foundingOpen && !controllerOpen) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       setStoryOpen(false);
@@ -165,10 +169,11 @@ export function App() {
       setVersionsOpen(false);
       setBpmFixOpen(false);
       setFoundingOpen(false);
+      setControllerOpen(false);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [storyOpen, exportOpen, versionsOpen, bpmFixOpen, foundingOpen]);
+  }, [storyOpen, exportOpen, versionsOpen, bpmFixOpen, foundingOpen, controllerOpen]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -278,6 +283,12 @@ export function App() {
             Story &amp; chapters
           </button>
           <LinkFolderButton topbar />
+          <button
+            onClick={() => setControllerOpen(true)}
+            title={midi.status === 'on' && midi.devices.length ? `Controller: ${midi.devices.join(', ')}` : 'Connect and map a DJ controller'}
+          >
+            <span className={`status-dot ${midi.status === 'on' && midi.devices.length ? 'ok' : ''}`} /> Controller
+          </button>
           <button onClick={() => setVersionsOpen(true)} title="Save and restore versions (⌘/Ctrl+S saves one)">
             Versions
           </button>
@@ -328,6 +339,7 @@ export function App() {
       </main>
 
       {bpmFixOpen && <BpmFixPanel onClose={() => setBpmFixOpen(false)} toast={toast} />}
+      {controllerOpen && <ControllerPanel onClose={() => setControllerOpen(false)} />}
       {foundingOpen && <FoundingPanel onClose={() => setFoundingOpen(false)} toast={toast} />}
       {versionsOpen && <VersionsPanel onClose={() => setVersionsOpen(false)} toast={toast} />}
       {storyOpen && <StoryPanel onClose={() => setStoryOpen(false)} />}

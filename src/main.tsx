@@ -6,6 +6,7 @@ import { MusicFolderProvider } from './ui/musicFolder';
 import { StoreProvider } from './ui/store';
 import { VersionsProvider } from './ui/versions';
 import { LicenseProvider } from './ui/license';
+import { MidiProvider } from './ui/midi';
 import '@fontsource-variable/inter';
 import '@fontsource-variable/jetbrains-mono';
 import './ui/styles.css';
@@ -17,7 +18,9 @@ createRoot(document.getElementById('root')!).render(
         <AudioProvider>
           <MusicFolderProvider>
             <LicenseProvider>
-              <App />
+              <MidiProvider>
+                <App />
+              </MidiProvider>
             </LicenseProvider>
           </MusicFolderProvider>
         </AudioProvider>

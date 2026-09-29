@@ -9,6 +9,12 @@
 
 const FADE = 0.004; // seconds
 
+/** Ways to play a track out, like a DJ would into the next one. */
+export type OutFx = 'echo' | 'reverb' | 'spin';
+
+/** Beat lengths offered for the effects. */
+export const FX_BEATS = [0.25, 0.5, 0.75, 1, 2, 4] as const;
+
 export interface LoopRegion {
   start: number;
   end: number;
@@ -31,6 +37,9 @@ export class Deck {
   // the page's high-resolution clock and interpolate between blocks.
   private clockOffset = -Infinity;
   private clockSeenAt = 0;
+  /** An out-effect has scheduled the track to stop: when (audio clock) and where it ends up. */
+  private fxStop: { at: number; pos: number } | null = null;
+  private static impulses = new WeakMap<BaseAudioContext, AudioBuffer>();
 
   constructor(ctx: AudioContext, onEnded: () => void = () => undefined) {
     this.ctx = ctx;
@@ -50,7 +59,6 @@ export class Deck {
 
   /** Peak output level right now, 0–1. */
   level(): number {
-    if (!this.voice) return 0;
     this.meter.getFloatTimeDomainData(this.meterData);
     let peak = 0;
     for (const v of this.meterData) if (Math.abs(v) > peak) peak = Math.abs(v);
@@ -79,6 +87,7 @@ export class Deck {
 
   private positionAt(time: number): number {
     if (!this.voice) return this.pausedAt;
+    if (this.fxStop && time >= this.fxStop.at) return this.fxStop.pos;
     const raw = this.offset + Math.max(0, time - this.startedAt);
     const l = this.loop;
     if (l && this.offset < l.end && raw >= l.end) {
@@ -124,7 +133,9 @@ export class Deck {
     src.onended = () => {
       if (this.voice?.src !== src) return; // replaced by a jump, not a real end
       this.voice = null;
-      this.pausedAt = this.duration;
+      // Stopped by an out-effect: park where it cut, not at the end of the track.
+      this.pausedAt = this.fxStop ? this.fxStop.pos : this.duration;
+      this.fxStop = null;
       this.onEnded();
     };
     src.start(now, at);
@@ -157,6 +168,138 @@ export class Deck {
     this.applyLoop(this.voice.src);
   }
 
+  /**
+   * Play the track out with an effect. The track stops (after a beat for echo
+   * and reverb, straight away for a backspin) and the effect's tail rings on;
+   * `onEnded` fires when the track itself has stopped. Beat-synced to `bpm`;
+   * `beats` sets the echo time, the reverb swell, or the length of the spin.
+   */
+  outFx(kind: OutFx, bpm?: number, beats = 1) {
+    const v = this.voice;
+    if (!v || !this.buffer || this.fxStop) return;
+    const ctx = this.ctx;
+    const beat = bpm && bpm > 0 ? 60 / bpm : 0.5;
+    const now = ctx.currentTime;
+    const pos = this.positionAt(this.audioNow());
+    const nodes: AudioNode[] = [];
+    const keep = <T extends AudioNode>(n: T) => (nodes.push(n), n);
+    let cutAt: number;
+    let stopPos: number;
+    let tail: number;
+
+    if (kind === 'echo') {
+      // Classic echo out: 3/4-beat repeats, darker each time, then the track cuts on the beat.
+      const send = keep(ctx.createGain());
+      const delay = keep(ctx.createDelay(4));
+      const fb = keep(ctx.createGain());
+      const hp = keep(ctx.createBiquadFilter());
+      const lp = keep(ctx.createBiquadFilter());
+      const wet = keep(ctx.createGain());
+      delay.delayTime.value = Math.min(3.9, Math.max(0.03, beat * beats));
+      hp.type = 'highpass';
+      hp.frequency.value = 280;
+      lp.type = 'lowpass';
+      lp.frequency.value = 4200;
+      fb.gain.value = 0.62;
+      send.gain.setValueAtTime(0, now);
+      send.gain.linearRampToValueAtTime(1, now + 0.03);
+      v.gain.connect(send).connect(delay).connect(hp).connect(lp);
+      lp.connect(fb).connect(delay);
+      lp.connect(wet).connect(this.out);
+      // The track cuts on the first repeat (at least half a beat in, so the echo has something to repeat).
+      cutAt = now + Math.max(beat * 0.5, delay.delayTime.value);
+      stopPos = this.positionAt(cutAt);
+      tail = 9 * delay.delayTime.value + 1;
+      wet.gain.setValueAtTime(0.9, cutAt);
+      wet.gain.linearRampToValueAtTime(0, cutAt + tail);
+    } else if (kind === 'reverb') {
+      // Reverb out: the track swells into a big hall over a beat, cuts, and the hall rings out.
+      const send = keep(ctx.createGain());
+      const hp = keep(ctx.createBiquadFilter());
+      const verb = keep(ctx.createConvolver());
+      const wet = keep(ctx.createGain());
+      hp.type = 'highpass';
+      hp.frequency.value = 200;
+      verb.buffer = Deck.impulse(ctx);
+      const swell = Math.max(0.1, beat * beats);
+      send.gain.setValueAtTime(0.15, now);
+      send.gain.linearRampToValueAtTime(1.3, now + swell);
+      v.gain.connect(send).connect(hp).connect(verb).connect(wet).connect(this.out);
+      wet.gain.setValueAtTime(2.4, now);
+      cutAt = now + swell;
+      stopPos = this.positionAt(cutAt);
+      tail = 5;
+      wet.gain.setValueAtTime(2.4, cutAt + 2);
+      wet.gain.linearRampToValueAtTime(0, cutAt + tail);
+    } else {
+      // Backspin: the record is whipped backwards and winds down over half a bar.
+      const r0 = 3.2;
+      const r1 = 0.2;
+      const T = Math.max(0.25, Math.min(4, beat * beats));
+      const distance = (T * (r0 - r1)) / Math.log(r0 / r1); // seconds of track travelled backwards
+      const span = Math.min(pos, distance + 0.05);
+      const rev = Deck.reversed(ctx, this.buffer, pos - span, pos);
+      const spin = keep(ctx.createBufferSource());
+      const g = keep(ctx.createGain());
+      spin.buffer = rev;
+      spin.playbackRate.setValueAtTime(r0, now);
+      spin.playbackRate.exponentialRampToValueAtTime(r1, now + T);
+      g.gain.setValueAtTime(0.0001, now);
+      g.gain.exponentialRampToValueAtTime(1, now + 0.02);
+      g.gain.setValueAtTime(1, now + T * 0.6);
+      g.gain.linearRampToValueAtTime(0, now + T);
+      spin.connect(g).connect(this.out);
+      spin.start(now);
+      spin.stop(now + T + 0.05);
+      cutAt = now + 0.02;
+      stopPos = Math.max(0, pos - span);
+      tail = T + 0.2;
+    }
+
+    // Cut the track itself.
+    this.fxStop = { at: cutAt, pos: stopPos };
+    v.gain.gain.cancelScheduledValues(now);
+    v.gain.gain.setValueAtTime(1, Math.max(now, cutAt - 0.02));
+    v.gain.gain.linearRampToValueAtTime(0, cutAt);
+    try {
+      v.src.stop(cutAt + 0.01);
+    } catch {
+      // already scheduled to stop
+    }
+    // Tidy up the effect once its tail has died away.
+    window.setTimeout(() => nodes.forEach((n) => n.disconnect()), (cutAt - now + tail + 0.5) * 1000);
+  }
+
+  /** A 4-second hall: stereo noise with an exponential decay. Made once per audio context. */
+  private static impulse(ctx: BaseAudioContext): AudioBuffer {
+    let ir = Deck.impulses.get(ctx);
+    if (ir) return ir;
+    const len = Math.floor(ctx.sampleRate * 4);
+    ir = ctx.createBuffer(2, len, ctx.sampleRate);
+    for (let ch = 0; ch < 2; ch++) {
+      const d = ir.getChannelData(ch);
+      for (let i = 0; i < len; i++) {
+        const t = i / ctx.sampleRate;
+        d[i] = (Math.random() * 2 - 1) * Math.exp((-6.9 * t) / 4) * (t < 0.01 ? t / 0.01 : 1);
+      }
+    }
+    Deck.impulses.set(ctx, ir);
+    return ir;
+  }
+
+  /** `from`–`to` of the track, reversed, so playing it forwards sounds like spinning back. */
+  private static reversed(ctx: BaseAudioContext, buf: AudioBuffer, from: number, to: number): AudioBuffer {
+    const a = Math.max(0, Math.floor(from * buf.sampleRate));
+    const b = Math.max(a + 1, Math.min(buf.length, Math.floor(to * buf.sampleRate)));
+    const out = ctx.createBuffer(buf.numberOfChannels, b - a, buf.sampleRate);
+    for (let ch = 0; ch < buf.numberOfChannels; ch++) {
+      const src = buf.getChannelData(ch);
+      const dst = out.getChannelData(ch);
+      for (let i = 0; i < b - a; i++) dst[i] = src[b - 1 - i];
+    }
+    return out;
+  }
+
   setVolume(v: number) {
     if (!Number.isFinite(v)) return;
     this.out.gain.setTargetAtTime(Math.max(0, Math.min(1, v)), this.ctx.currentTime, 0.01);
@@ -182,10 +325,15 @@ export class Deck {
     const v = this.voice;
     if (!v) return;
     this.voice = null;
+    this.fxStop = null;
     const now = this.ctx.currentTime;
     v.gain.gain.cancelScheduledValues(now);
     v.gain.gain.setValueAtTime(v.gain.gain.value, now);
     v.gain.gain.linearRampToValueAtTime(0, now + FADE);
-    v.src.stop(now + FADE + 0.001);
+    try {
+      v.src.stop(now + FADE + 0.001);
+    } catch {
+      // an out-effect already scheduled the stop
+    }
   }
 }

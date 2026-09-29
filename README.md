@@ -195,8 +195,14 @@ cues go straight through. Re-importing the same file changes nothing.
   on *make it a memory cue*, or drag a memory cue from the list onto a pad.
 - Markers can also be moved precisely in the cue form. Each cue can be edited by name, colour, pad, start time (typed or
   nudged by bar, beat or 10 ms), type, and loop length in beats.
+- **Out FX** to hear how a track leaves (deck bar, *FX*): **Echo** (beat-synced echoes; the track cuts on the first
+  echo and the echoes ring out), **Reverb** (the track swells into a big reverb, cuts, and the reverb tail rings)
+  and **Spin** (a backspin that winds the record down). **Beats** sets the echo time, the reverb swell or the
+  length of the spin (1/4 to 4 beats). When the deck is stopped, an FX plays one bar from the playhead first, so you
+  can park on your mix-out point and hear it.
 - Keyboard: `Space` play/pause · `1`–`8` pads · `M` memory cue · `Q` snap Free/Beat/Bar · `←/→` beat
-  (`Shift`: bar) · `[` / `]` previous/next cue · `Delete` removes the selected cue.
+  (`Shift`: bar) · `[` / `]` previous/next cue · `E` echo out · `R` reverb out · `B` backspin · `Delete` removes the
+  selected cue.
 - Editing a track's BPM, key, grid start or file location here fixes that track's details before export.
   **×½ / ×2** next to BPM fix half- or double-time readings (e.g. a 96 BPM reggaeton track read as 192)
   without moving the downbeat. On the timeline, half/double-time mixes (96 → 192) aren't flagged as BPM jumps.
@@ -239,6 +245,15 @@ Export has two modes:
 - A **project backup** (JSON). Import it to restore everything on another browser or computer.
 
 ---
+
+## DJ controllers
+
+Plug a MIDI DJ controller in over USB, open **Controller** in the top bar and click *Connect controller* (Chrome or
+Edge; Safari has no MIDI support). Map it by learning: click **Learn** next to an action and press the button,
+move the fader or turn the jog wheel. You can map play/pause, hot cues A–H, the jog wheel (holds the track and
+scrubs, playing on when you let go; its encoding is detected while learning, and there's a sensitivity setting),
+volume, ±1 bar, a 4-beat loop, loop exit, memory cue, the three out FX, previous/next track in the night and the
+snap mode. Mappings are saved in the browser, and the controller reconnects on your next visit.
 
 ## Founding DJ pass
 

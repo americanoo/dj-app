@@ -2831,3 +2831,78 @@ button.founding-btn.is-founder {
   color: #ffd76a;
   background: rgba(255, 215, 106, 0.06);
 }
+
+/* out effects */
+.fx-group button.on {
+  background: var(--pink);
+  color: #fff;
+}
+.fx-group select.fx-beats {
+  height: 22px;
+  padding: 0 4px;
+  font-size: 11px;
+  margin-left: 2px;
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-2);
+}
+
+/* DJ controller */
+.status-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-3);
+  vertical-align: middle;
+}
+.status-dot.ok {
+  background: var(--ok);
+  box-shadow: 0 0 8px rgba(46, 230, 160, 0.7);
+}
+.status-dot.bad {
+  background: var(--danger);
+}
+.modal.controller {
+  width: min(640px, 100%);
+}
+.controller-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.025);
+  font-size: 13px;
+}
+.controller-status .grow {
+  flex: 1;
+}
+.midi-last {
+  font-family: var(--mono);
+}
+table.midi-map {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+table.midi-map td {
+  padding: 5px 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+table.midi-map td.actions {
+  text-align: right;
+  white-space: nowrap;
+}
+table.midi-map td.actions button + button {
+  margin-left: 4px;
+}
+table.midi-map tr.learning td {
+  background: rgba(34, 211, 238, 0.07);
+  color: var(--cyan);
+}
+.jog-speed {
+  margin-bottom: 8px;
+}
