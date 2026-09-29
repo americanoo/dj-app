@@ -4,6 +4,8 @@ import { safeName } from '../core/formats/rekordbox';
 import { setPlanMarkdown } from '../core/setplan';
 import { isChangedInSetcraft, type Track } from '../core/model';
 import { activeSet, useStore } from './store';
+import { useLicense } from './license';
+import { FOUNDING } from '../config';
 
 type Scope = 'set' | 'edited' | 'playlist' | 'library';
 
@@ -38,8 +40,15 @@ function download(fileName: string, data: string | Uint8Array, mime: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function ExportPanel({ toast }: { toast: (text: string, kind?: 'info' | 'error') => void }) {
+export function ExportPanel({
+  toast,
+  onUpgrade,
+}: {
+  toast: (text: string, kind?: 'info' | 'error') => void;
+  onUpgrade: () => void;
+}) {
   const { project } = useStore();
+  const { unlocked } = useLicense();
   const set = activeSet(project);
   const lib = project.library;
   /** collection: the tracks themselves with their cues (the main job). playlist: just an ordered list. */
@@ -112,19 +121,25 @@ export function ExportPanel({ toast }: { toast: (text: string, kind?: 'info' | '
     applyLearnedOffsets: learned,
   };
 
-  const run = () => {
+  // Without a Founding DJ pass an export holds a few tracks: enough to try it in your own software.
+  const limited = !unlocked && tracks.length > FOUNDING.freeExportTracks;
+
+  const run = (onlyFirst?: number) => {
+    const allowed = onlyFirst ? new Set(tracks.slice(0, onlyFirst).map((t) => t.id)) : undefined;
+    const keep = (ids: string[]) => (allowed ? ids.filter((id) => allowed.has(id)) : ids);
+    const tracks_ = allowed ? tracks.filter((t) => allowed.has(t.id)) : tracks;
     try {
       let result: { file: { fileName: string; data: string | Uint8Array; mime: string }; notes: string[] };
       if (mode === 'collection') {
         const lists: { name: string; trackIds: string[] }[] = [];
-        if (withUpdatesList && which === 'changed') lists.push({ name: 'Setcraft updates', trackIds: changedIds });
-        if (withSet && setTrackIds.length) lists.push({ name: set.name, trackIds: set.entries.map((e) => e.trackId) });
-        result = exportCollection(effectiveTarget as CollectionTarget, tracks, lists, {
+        if (withUpdatesList && which === 'changed') lists.push({ name: 'Setcraft updates', trackIds: keep(changedIds) });
+        if (withSet && setTrackIds.length) lists.push({ name: set.name, trackIds: keep(set.entries.map((e) => e.trackId)) });
+        result = exportCollection(effectiveTarget as CollectionTarget, tracks_, lists, {
           ...common,
           playlistName: which === 'changed' ? 'Setcraft updated tracks' : 'Setcraft collection',
         });
       } else {
-        result = exportFor(effectiveTarget, tracks, playlistTrackIds, { ...common, playlistName: name || defaultName });
+        result = exportFor(effectiveTarget, tracks_, keep(playlistTrackIds), { ...common, playlistName: name || defaultName });
       }
       download(result.file.fileName, result.file.data, result.file.mime);
       setNotes(result.notes);
@@ -267,10 +282,27 @@ export function ExportPanel({ toast }: { toast: (text: string, kind?: 'info' | '
             {cueCount === 1 ? '' : 's'} &amp; loops
             {withoutPath > 0 && <span className="warn"> · {withoutPath} without a file location will be skipped</span>}
           </span>
-          <button className="primary big" disabled={!tracks.length} onClick={run}>
-            Download {info.label}
-          </button>
+          {limited ? (
+            <span className="export-actions">
+              <button onClick={() => run(FOUNDING.freeExportTracks)} title="Export the first few tracks to check it works in your software">
+                Try it: first {FOUNDING.freeExportTracks} tracks
+              </button>
+              <button className="primary big" onClick={onUpgrade}>
+                ★ Unlock all {tracks.length.toLocaleString()}: Founding DJ
+              </button>
+            </span>
+          ) : (
+            <button className="primary big" disabled={!tracks.length} onClick={() => run()}>
+              Download {info.label}
+            </button>
+          )}
         </div>
+        {limited && (
+          <div className="export-limit">
+            The free version exports up to {FOUNDING.freeExportTracks} tracks at a time, so you can check your cues land right in
+            your DJ software. The Founding DJ pass ({FOUNDING.price}, {FOUNDING.priceNote}) exports everything.
+          </div>
+        )}
         {mode === 'collection' && which === 'changed' && !changedIds.length && (
           <div className="hint-line">Nothing has been changed in Setcraft yet. Set some cues, or export the whole collection.</div>
         )}

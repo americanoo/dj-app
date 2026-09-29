@@ -240,6 +240,13 @@ Export has two modes:
 
 ---
 
+## Founding DJ pass
+
+Everything is free except full export: without a pass, an export holds up to 3 tracks (enough to check it works
+with your DJ software). The **Founding DJ pass** is a one-time purchase that unlocks it, activated by pasting a key
+(★ Founding DJ in the top bar). Keys are signed and checked offline. Selling is off until it's set up: see
+[SELLING.md](SELLING.md).
+
 ## Architecture
 
 ```

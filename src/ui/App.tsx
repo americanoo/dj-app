@@ -7,6 +7,8 @@ import { AUDIO_EXTENSIONS, useAudio } from './audio';
 import { findTempoFixes } from '../core/tempo';
 import { BpmFixPanel, loadTempoRange } from './BpmFixPanel';
 import { CueEditor } from './CueEditor';
+import { FoundingPanel } from './FoundingPanel';
+import { useLicense } from './license';
 import { ExportPanel } from './ExportPanel';
 import { LibraryView } from './LibraryView';
 import { MergeReview } from './MergeReview';
@@ -35,6 +37,8 @@ export function App() {
   const { attach } = useAudio();
   const { save: saveVersion } = useVersions();
   const [versionsOpen, setVersionsOpen] = useState(false);
+  const [foundingOpen, setFoundingOpen] = useState(false);
+  const { founding } = useLicense();
   const [loadedTrackId, setLoadedTrackId] = useState<string | null>(null);
   const [storyOpen, setStoryOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -153,17 +157,18 @@ export function App() {
 
   // Esc closes the pop-up panels.
   useEffect(() => {
-    if (!storyOpen && !exportOpen && !versionsOpen && !bpmFixOpen) return;
+    if (!storyOpen && !exportOpen && !versionsOpen && !bpmFixOpen && !foundingOpen) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
       setStoryOpen(false);
       setExportOpen(false);
       setVersionsOpen(false);
       setBpmFixOpen(false);
+      setFoundingOpen(false);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [storyOpen, exportOpen, versionsOpen, bpmFixOpen]);
+  }, [storyOpen, exportOpen, versionsOpen, bpmFixOpen, foundingOpen]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -279,6 +284,13 @@ export function App() {
           <button onClick={() => setExportOpen(true)} title="Export to rekordbox, Traktor, Serato, djay Pro or M3U8">
             Export
           </button>
+          <button
+            className={`founding-btn ${founding ? 'is-founder' : ''}`}
+            onClick={() => setFoundingOpen(true)}
+            title={founding ? `Founding DJ${founding.no ? ` #${founding.no}` : ''}: ${founding.n}` : 'Become a Founding DJ'}
+          >
+            ★ {founding ? `Founding DJ${founding.no ? ` #${founding.no}` : ''}` : 'Founding DJ'}
+          </button>
           <button className="primary" onClick={() => fileInput.current?.click()}>
             Import
           </button>
@@ -316,13 +328,20 @@ export function App() {
       </main>
 
       {bpmFixOpen && <BpmFixPanel onClose={() => setBpmFixOpen(false)} toast={toast} />}
+      {foundingOpen && <FoundingPanel onClose={() => setFoundingOpen(false)} toast={toast} />}
       {versionsOpen && <VersionsPanel onClose={() => setVersionsOpen(false)} toast={toast} />}
       {storyOpen && <StoryPanel onClose={() => setStoryOpen(false)} />}
       {exportOpen && (
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Export" onClick={() => setExportOpen(false)}>
           <div className="modal export-modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-body">
-              <ExportPanel toast={toast} />
+              <ExportPanel
+                toast={toast}
+                onUpgrade={() => {
+                  setExportOpen(false);
+                  setFoundingOpen(true);
+                }}
+              />
             </div>
             <footer className="modal-foot">
               <button onClick={() => setExportOpen(false)}>Close</button>
