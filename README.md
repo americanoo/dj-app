@@ -209,10 +209,16 @@ cues go straight through. Re-importing the same file changes nothing.
 
 ### 4. Export
 
-Choose what to export: the **current set** (the tracks on the timeline), **tracks changed in Setcraft** (any
-track whose cues or BPM you set or edited here — the usual choice when taking cue work back to your DJ
-software), an **imported playlist**, or the **whole library**. Each option shows how many tracks it holds, and
-if the set has only one track the panel says so and offers the other two.
+Export has two modes:
+
+- **Collection with your cues** (the default): your tracks with the hot cues, memory cues, loops and grids set
+  in Setcraft, to update your DJ software's own collection, whether or not a track is on the timeline. Choose
+  the tracks **changed in Setcraft** (any cue, loop, BPM, key or grid you set or edited here, including deleted
+  cues; this survives re-imports) or the **whole collection**. A *Setcraft updates* playlist lists the changed
+  tracks so they're easy to find, and you can **also add the set** as a playlist in timeline order. For rekordbox,
+  Traktor and djay Pro.
+- **Playlist only**: an ordered list (the set, an imported playlist, the changed tracks or the library), for any
+  target including Serato crates and M3U8.
 
 | Target                  | File           | Carries                                 | How to load it |
 |-------------------------|----------------|-----------------------------------------|----------------|

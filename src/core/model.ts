@@ -50,6 +50,8 @@ export interface Track {
   tempoFix?: number;
   /** The DJ checked this BPM and it's right, even though it's outside their usual range. */
   bpmConfirmed?: boolean;
+  /** Cues, loops, tempo, grid, key or details were changed in Setcraft: exported with the collection. */
+  modified?: boolean;
   /** Seconds. */
   duration?: number;
   /** Absolute path on the DJ's machine, POSIX or Windows style. */
@@ -199,4 +201,26 @@ export function trackIdentity(t: Pick<Track, 'path' | 'artist' | 'title'>): stri
 
 export function normalisePath(p: string): string {
   return p.replace(/\\/g, '/');
+}
+
+/** Track fields a DJ edits; changing any of them marks the track as changed in Setcraft. */
+export const EDITABLE_TRACK_FIELDS: readonly (keyof Track)[] = [
+  'cues',
+  'bpm',
+  'beatGrid',
+  'gridStart',
+  'key',
+  'tempoFix',
+  'path',
+  'title',
+  'artist',
+  'album',
+  'genre',
+  'label',
+  'comment',
+];
+
+/** Whether a track has changes made in Setcraft that the DJ software doesn't have yet. */
+export function isChangedInSetcraft(t: Track): boolean {
+  return !!t.modified || t.tempoFix !== undefined || t.cues.some((c) => c.origin === 'manual' || c.edited);
 }

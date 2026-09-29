@@ -154,3 +154,43 @@ export function exportFor(
       return { file: exportM3u(ordered, opts), notes };
   }
 }
+
+export type CollectionTarget = 'rekordbox' | 'traktor' | 'djay';
+
+/**
+ * The collection itself: every given track with its cues, loops and grid, plus
+ * any playlists (none is fine). This is what updates the DJ software's own
+ * library, rather than adding one playlist to it.
+ */
+export function exportCollection(
+  target: CollectionTarget,
+  tracks: Track[],
+  playlists: { name: string; trackIds: string[] }[],
+  opts: ExportOptions & { offsetMs?: number; applyLearnedOffsets?: boolean },
+): { file: ExportFile; notes: string[] } {
+  const timebase = opts.applyLearnedOffsets === false ? undefined : TARGET_TIMEBASE[target];
+  const shifted = tracks.map((t) =>
+    shiftTrack(t, (opts.offsetMs ?? 0) + (timebase ? (t.sourceOffsets?.[timebase] ?? 0) : 0)),
+  );
+  const notes: string[] = [];
+  const missingPath = shifted.filter((t) => !t.path);
+  if (missingPath.length) {
+    notes.push(
+      `${missingPath.length} track(s) have no file location and were left out: ` +
+        missingPath
+          .slice(0, 5)
+          .map((t) => `${t.artist} - ${t.title}`)
+          .join(', ') +
+        (missingPath.length > 5 ? '…' : ''),
+    );
+  }
+  const withPath = shifted.filter((t) => t.path);
+  const keep = new Set(withPath.map((t) => t.id));
+  const lists = playlists.map((p) => ({ ...p, trackIds: p.trackIds.filter((id) => keep.has(id)) }));
+  if (target === 'traktor') return { file: exportTraktor(withPath, lists, opts), notes };
+  const file = exportRekordbox(withPath, lists, opts);
+  return {
+    file: target === 'djay' ? { ...file, fileName: file.fileName.replace('.rekordbox.xml', '.djay-rekordbox.xml') } : file,
+    notes,
+  };
+}

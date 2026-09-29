@@ -10,6 +10,7 @@ import {
   type SetEntry,
   type SetPlan,
   type Track,
+  EDITABLE_TRACK_FIELDS,
 } from '../core/model';
 import type { ImportResult } from '../core/formats';
 import { mergeIntoLibrary, type MergeChoices } from '../core/merge';
@@ -53,6 +54,12 @@ function mapActive(p: Project, fn: (s: SetPlan) => SetPlan): Project {
   return { ...p, sets: p.sets.map((s) => (s.id === a.id ? fn(s) : s)) };
 }
 
+/** Apply a patch, marking the track changed in Setcraft when the DJ edited something that gets exported. */
+function withEdit(t: Track, patch: Partial<Track>): Track {
+  const edited = EDITABLE_TRACK_FIELDS.some((k) => k in patch);
+  return { ...t, ...patch, ...(edited ? { modified: true } : {}) };
+}
+
 export function reducer(p: Project, a: Action): Project {
   switch (a.type) {
     case 'load':
@@ -64,11 +71,11 @@ export function reducer(p: Project, a: Action): Project {
     case 'updateTrack': {
       const t = p.library.tracks[a.id];
       if (!t) return p;
-      return { ...p, library: { ...p.library, tracks: { ...p.library.tracks, [a.id]: { ...t, ...a.patch } } } };
+      return { ...p, library: { ...p.library, tracks: { ...p.library.tracks, [a.id]: withEdit(t, a.patch) } } };
     }
     case 'updateTracks': {
       const tracks = { ...p.library.tracks };
-      for (const [id, patch] of Object.entries(a.patches)) if (tracks[id]) tracks[id] = { ...tracks[id], ...patch };
+      for (const [id, patch] of Object.entries(a.patches)) if (tracks[id]) tracks[id] = withEdit(tracks[id], patch);
       return { ...p, library: { ...p.library, tracks } };
     }
     case 'setCues': {
