@@ -209,6 +209,11 @@ cues go straight through. Re-importing the same file changes nothing.
 
 ### 4. Export
 
+Choose what to export: the **current set** (the tracks on the timeline), **tracks changed in Setcraft** (any
+track whose cues or BPM you set or edited here — the usual choice when taking cue work back to your DJ
+software), an **imported playlist**, or the **whole library**. Each option shows how many tracks it holds, and
+if the set has only one track the panel says so and offers the other two.
+
 | Target                  | File           | Carries                                 | How to load it |
 |-------------------------|----------------|-----------------------------------------|----------------|
 | rekordbox               | `.xml`         | playlist, hot cues + colours, memory cues, loops, grid | Preferences → Advanced → *rekordbox xml* → import the playlist from the *rekordbox xml* tree |

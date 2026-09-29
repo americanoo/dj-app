@@ -5,7 +5,12 @@ import { setPlanMarkdown } from '../core/setplan';
 import type { Track } from '../core/model';
 import { activeSet, useStore } from './store';
 
-type Scope = 'set' | 'playlist' | 'library';
+type Scope = 'set' | 'edited' | 'playlist' | 'library';
+
+/** Tracks whose cues or tempo were set or changed in Setcraft: the work to take back to the DJ software. */
+function changedHere(t: Track): boolean {
+  return t.tempoFix !== undefined || t.cues.some((c) => c.origin === 'manual' || c.edited);
+}
 
 function download(fileName: string, data: string | Uint8Array, mime: string) {
   const blob = new Blob([data as BlobPart], { type: mime });
@@ -23,7 +28,16 @@ export function ExportPanel({ toast }: { toast: (text: string, kind?: 'info' | '
   const { project } = useStore();
   const set = activeSet(project);
   const [target, setTarget] = useState<ExportTarget>('rekordbox');
-  const [scope, setScope] = useState<Scope>('set');
+  const setTrackIds = useMemo(() => [...new Set(set.entries.map((e) => e.trackId))].filter((id) => project.library.tracks[id]), [set.entries, project.library.tracks]);
+  const editedIds = useMemo(
+    () => Object.values(project.library.tracks).filter(changedHere).map((t) => t.id),
+    [project.library.tracks],
+  );
+  const libraryCount = Object.keys(project.library.tracks).length;
+  // Start with what's most likely wanted: the set if it's a real set, otherwise the tracks worked on here.
+  const [scope, setScope] = useState<Scope>(() =>
+    setTrackIds.length >= 2 ? 'set' : editedIds.length ? 'edited' : setTrackIds.length ? 'set' : 'library',
+  );
   const [playlistId, setPlaylistId] = useState(project.library.playlists[0]?.id ?? '');
   const [name, setName] = useState('');
   const [pathFrom, setPathFrom] = useState('');
@@ -37,9 +51,10 @@ export function ExportPanel({ toast }: { toast: (text: string, kind?: 'info' | '
 
   const trackIds = useMemo(() => {
     if (scope === 'set') return set.entries.map((e) => e.trackId);
+    if (scope === 'edited') return editedIds;
     if (scope === 'playlist') return project.library.playlists.find((p) => p.id === playlistId)?.trackIds ?? [];
     return Object.keys(project.library.tracks);
-  }, [scope, set.entries, project.library, playlistId]);
+  }, [scope, set.entries, project.library, playlistId, editedIds]);
 
   const tracks = useMemo(() => {
     const seen = new Set<string>();
@@ -59,10 +74,14 @@ export function ExportPanel({ toast }: { toast: (text: string, kind?: 'info' | '
   const withLearned = timebase ? tracks.filter((t) => t.sourceOffsets?.[timebase]).length : 0;
   const withoutPath = tracks.filter((t) => !t.path).length;
 
+  const playlist = project.library.playlists.find((p) => p.id === playlistId);
+  const defaultName =
+    scope === 'set' ? set.name : scope === 'edited' ? 'Setcraft edits' : scope === 'playlist' ? (playlist?.name ?? set.name) : 'Setcraft library';
+
   const run = () => {
     try {
       const { file, notes } = exportFor(target, tracks, trackIds, {
-        playlistName: name || set.name,
+        playlistName: name || defaultName,
         pathFrom: pathFrom || undefined,
         pathTo,
         macVolumeName: macVolume || undefined,
@@ -96,11 +115,16 @@ export function ExportPanel({ toast }: { toast: (text: string, kind?: 'info' | '
           <label>
             What to export
             <select value={scope} onChange={(e) => setScope(e.target.value as Scope)}>
-              <option value="set">Current set: {set.name}</option>
+              <option value="set">
+                Current set: {set.name} ({setTrackIds.length} track{setTrackIds.length === 1 ? '' : 's'})
+              </option>
+              <option value="edited" disabled={!editedIds.length}>
+                Tracks changed in Setcraft ({editedIds.length})
+              </option>
               <option value="playlist" disabled={!project.library.playlists.length}>
                 An imported playlist
               </option>
-              <option value="library">Whole library</option>
+              <option value="library">Whole library ({libraryCount.toLocaleString()})</option>
             </select>
           </label>
           {scope === 'playlist' && (
@@ -117,9 +141,22 @@ export function ExportPanel({ toast }: { toast: (text: string, kind?: 'info' | '
           )}
           <label className="grow">
             Playlist name in the export
-            <input value={name} placeholder={set.name} onChange={(e) => setName(e.target.value)} />
+            <input value={name} placeholder={defaultName} onChange={(e) => setName(e.target.value)} />
           </label>
         </div>
+        {scope === 'set' && setTrackIds.length <= 1 && (editedIds.length > setTrackIds.length || libraryCount > 1) && (
+          <div className="export-scope-warn">
+            Your set “{set.name}” has {setTrackIds.length === 1 ? 'only 1 track' : 'no tracks'}, so that's all this exports.
+            {editedIds.length > 0 && (
+              <button className="small" onClick={() => setScope('edited')}>
+                Export the {editedIds.length} track{editedIds.length === 1 ? '' : 's'} changed in Setcraft
+              </button>
+            )}
+            <button className="small" onClick={() => setScope('library')}>
+              Export the whole library ({libraryCount.toLocaleString()})
+            </button>
+          </div>
+        )}
 
         <details className="advanced">
           <summary>Advanced: moving between computers, drives and decoders</summary>
