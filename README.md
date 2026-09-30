@@ -35,6 +35,10 @@ track at the matching spot (during a blend, the incoming track). Dragging within
 dragging onto another track shows where you'll land and loads it when you let go, playing if the deck was. Chapter bands and the energy line sit above, and the dot on each track shows its key compatibility with the previous one. Click a track to load it into the deck and edit its start time, chapter, energy, transition, notes and mix points; **Delete** removes it. |
 | **Library** (bottom) | Your imported collection and playlists. Click a row to load it into the deck, drag it onto the timeline, or double-click to add it at the end of the night. |
 
+A **player bar** floats along the bottom of the whole app: the loaded track with a big clock on the left, a large
+play / pause with −1 / +1 bar in the middle, and the out FX strip over the volume and level meter on the right. The
+panels keep room for it, and on a short window the deck and timeline give way so the library stays usable.
+
 The top bar holds **Story & chapters** (story, venue, start time, target length, chapters and the energy arc),
 the music folder, **Versions**, **Export** and **Import**. Keys are colour-coded on the Camelot wheel everywhere:
 neighbouring (compatible) keys get neighbouring colours, and minor keys are deeper than major ones.
@@ -198,7 +202,7 @@ cues go straight through. Re-importing the same file changes nothing.
   on *make it a memory cue*, or drag a memory cue from the list onto a pad.
 - Markers can also be moved precisely in the cue form. Each cue can be edited by name, colour, pad, start time (typed or
   nudged by bar, beat or 10 ms), type, and loop length in beats.
-- **Out FX** to hear how a track leaves (the *FX* strip under the waveforms): **Echo** (beat-synced echoes; the
+- **Out FX** to hear how a track leaves (the *FX* strip in the player bar): **Echo** (beat-synced echoes; the
   track cuts on the first echo and the echoes ring out), **Reverb** (the track swells into a big reverb, cuts, and
   the reverb tail rings), **Loop** (a loop roll that fades over two bars while a filter sweeps up) and **Spin** (a
   backspin that winds the record down). **Beats** sets the echo time, the reverb swell, the loop length or the

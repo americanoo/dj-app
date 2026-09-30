@@ -2994,3 +2994,164 @@ table.midi-map tr.learning td {
 .deck-strip .section-chips {
   margin: 0;
 }
+
+/* ==========================================================================
+   Player bar: transport, clock, FX and volume, floating along the bottom of
+   the whole app. The workspace keeps room for it so nothing hides behind it.
+   ========================================================================== */
+:root {
+  --tb-h: 78px;
+}
+.workspace-layout {
+  padding-bottom: calc(var(--tb-h) + 18px);
+}
+.deck-bar {
+  display: flex;
+  justify-content: space-between;
+}
+.transport-bar {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: 10px;
+  height: var(--tb-h);
+  z-index: 60;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 16px;
+  padding: 0 18px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(22, 22, 32, 0.82), rgba(10, 10, 15, 0.9));
+  backdrop-filter: blur(18px) saturate(1.3);
+  -webkit-backdrop-filter: blur(18px) saturate(1.3);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow:
+    0 20px 50px -12px rgba(0, 0, 0, 0.85),
+    0 0 0 1px rgba(166, 107, 255, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+.transport-bar::before {
+  content: '';
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  top: -1px;
+  height: 1px;
+  background: var(--grad);
+  opacity: 0.55;
+}
+.tb-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+.tb-track {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-width: 220px;
+}
+.tb-track b {
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tb-track span {
+  font-size: 12px;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tb-track .key-pill {
+  font-style: normal;
+  height: 16px;
+  font-size: 10px;
+  margin-left: 6px;
+}
+.transport-bar .clock {
+  font-size: 26px;
+  white-space: nowrap;
+}
+.transport-bar .transport {
+  gap: 14px;
+}
+.transport-bar button.play-btn {
+  width: 58px;
+  height: 58px;
+}
+.transport-bar button.play-btn svg {
+  width: 26px;
+  height: 26px;
+}
+.transport-bar .transport button.small {
+  height: 32px;
+  padding: 0 12px;
+}
+.tb-right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+  min-width: 0;
+}
+.transport-bar .volume {
+  gap: 8px;
+}
+.transport-bar .volume input[type='range'] {
+  width: 110px;
+}
+.transport-bar .level-meter {
+  height: 28px;
+  width: 6px;
+}
+.transport-bar.empty .tb-left {
+  font-size: 13px;
+}
+/* toasts sit above the player bar */
+.toasts {
+  bottom: calc(var(--tb-h) + 22px) !important;
+  z-index: 65 !important;
+}
+@media (max-width: 1180px) {
+  .tb-track {
+    display: none;
+  }
+  .transport-bar .clock {
+    font-size: 20px;
+  }
+}
+@media (max-width: 900px) {
+  :root {
+    --tb-h: 128px;
+  }
+  .transport-bar {
+    grid-template-columns: 1fr auto;
+    grid-template-rows: auto auto;
+    padding: 8px 14px;
+  }
+  .tb-right {
+    grid-column: 1 / -1;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+}
+/* right side of the player bar: FX strip over the volume, so the transport stays centred */
+.tb-right {
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 5px;
+}
+.transport-bar .fx-group {
+  flex-wrap: nowrap;
+}
+.transport-bar .volume input[type='range'] {
+  width: 150px;
+}
+.transport-bar .level-meter {
+  height: 16px;
+}

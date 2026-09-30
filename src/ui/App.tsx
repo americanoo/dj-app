@@ -48,6 +48,26 @@ export function App() {
   const [exportOpen, setExportOpen] = useState(false);
   const [bpmFixOpen, setBpmFixOpen] = useState(false);
   const [layout, setLayout] = useState(loadLayout);
+  // The library always keeps a usable height: on a short window (or with the player bar
+  // taking room) the deck and timeline give way proportionally. Saved sizes are kept.
+  const mainRef = useRef<HTMLElement>(null);
+  const [room, setRoom] = useState(0);
+  useEffect(() => {
+    const el = mainRef.current;
+    if (!el) return;
+    const measure = () => {
+      const cs = getComputedStyle(el);
+      setRoom(el.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom) - 20); // two splitters
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const LIBRARY_MIN = 200;
+  const squeeze = room > 0 && layout.deck + layout.timeline > room - LIBRARY_MIN ? Math.max(0.3, (room - LIBRARY_MIN) / (layout.deck + layout.timeline)) : 1;
+  const deckH = Math.round(layout.deck * squeeze);
+  const timelineH = Math.round(layout.timeline * squeeze);
   useEffect(() => {
     try {
       localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout));
@@ -319,15 +339,15 @@ export function App() {
         </div>
       </header>
 
-      <main className="workspace-layout">
-        <section className="pane deck-pane" style={{ height: layout.deck }}>
+      <main ref={mainRef} className="workspace-layout">
+        <section className="pane deck-pane" style={{ height: deckH }}>
           <CueEditor trackId={loadedTrackId} onSelectTrack={setLoadedTrackId} />
         </section>
-        <Splitter value={layout.deck} min={200} max={900} onChange={(deck) => setLayout((l) => ({ ...l, deck }))} />
-        <section className="pane timeline-host" style={{ height: layout.timeline }}>
+        <Splitter value={deckH} min={200} max={900} onChange={(deck) => setLayout({ deck, timeline: timelineH })} />
+        <section className="pane timeline-host" style={{ height: timelineH }}>
           <Timeline selectedTrackId={loadedTrackId} onSelectTrack={setLoadedTrackId} onOpenStory={() => setStoryOpen(true)} />
         </section>
-        <Splitter value={layout.timeline} min={150} max={700} onChange={(timeline) => setLayout((l) => ({ ...l, timeline }))} />
+        <Splitter value={timelineH} min={150} max={700} onChange={(timeline) => setLayout({ deck: deckH, timeline })} />
         <section className="pane library-pane">
           <LibraryView
             selectedTrackId={loadedTrackId}

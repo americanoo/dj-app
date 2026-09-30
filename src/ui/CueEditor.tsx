@@ -46,9 +46,25 @@ export function CueEditor({ trackId, onSelectTrack }: { trackId: string | null; 
   }, [track]);
   if (!track) {
     return (
-      <div className="deck-empty">
-        <b>No track loaded.</b> Click a track in the library or on the timeline to load it here and set its cues.
-      </div>
+      <>
+        <div className="deck-empty">
+          <b>No track loaded.</b> Click a track in the library or on the timeline to load it here and set its cues.
+        </div>
+        {createPortal(
+          <div className="transport-bar empty" role="region" aria-label="Player">
+            <div className="tb-left muted">No track loaded</div>
+            <div className="transport">
+              <button className="play-btn" disabled aria-label="Play">
+                <svg viewBox="0 0 24 24" aria-hidden>
+                  <path d="M8.5 5.2v13.6a.8.8 0 0 0 1.2.7l10.6-6.8a.8.8 0 0 0 0-1.4L9.7 4.5a.8.8 0 0 0-1.2.7z" />
+                </svg>
+              </button>
+            </div>
+            <div className="tb-right" />
+          </div>,
+          document.body,
+        )}
+      </>
     );
   }
   return (
@@ -739,15 +755,6 @@ function TrackCueWorkspace({
       <section className="card deck">
         <div className="deck-bar">
           <div className="deck-left">
-            <span className="clock">
-              {formatTime(playhead)}
-              {bpm && <span className="muted"> · bar {barBeatLabel(playhead, bpm, gridStart)}</span>}
-            </span>
-            {activeLoop && (
-              <button className="small looping-btn" onClick={exitLoop} title="Release the loop and play on">
-                ↻ {activeLoop.name || 'Loop'} · exit
-              </button>
-            )}
             <div className="snap-control" role="radiogroup" aria-label="Snap" title="Where cues, loops and clicks land (Q cycles; hold Shift while dragging to place freely)">
               <span className="snap-label">Snap</span>
               {SNAP_MODES.map((m) => (
@@ -775,47 +782,8 @@ function TrackCueWorkspace({
             </label>
           </div>
 
-          <div className="transport">
-            <button className="small" onClick={() => seek(q(now() - (beat ?? 0.5) * 4))} title="Back one bar (Shift+←)">
-              −1 bar
-            </button>
-            <button
-              className={`play-btn ${playing ? 'playing' : ''}`}
-              onClick={togglePlay}
-              disabled={!deckReady}
-              title={playing ? 'Pause (Space)' : 'Play (Space)'}
-              aria-label={playing ? 'Pause' : 'Play'}
-            >
-              {playing ? (
-                <svg viewBox="0 0 24 24" aria-hidden>
-                  <rect x="6" y="5" width="4.2" height="14" rx="1" />
-                  <rect x="13.8" y="5" width="4.2" height="14" rx="1" />
-                </svg>
-              ) : (
-                <svg viewBox="0 0 24 24" aria-hidden>
-                  <path d="M8.5 5.2v13.6a.8.8 0 0 0 1.2.7l10.6-6.8a.8.8 0 0 0 0-1.4L9.7 4.5a.8.8 0 0 0-1.2.7z" />
-                </svg>
-              )}
-            </button>
-            <button className="small" onClick={() => seek(q(now() + (beat ?? 0.5) * 4))} title="Forward one bar (Shift+→)">
-              +1 bar
-            </button>
-          </div>
 
           <div className="deck-right">
-          <label className="inline volume" title="Preview volume · the bar shows the level going to your speakers">
-            Vol
-            <span className="level-meter" ref={meterRef} aria-hidden />
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.01}
-              value={volume}
-              onChange={(e) => setVolume(Number(e.target.value))}
-              aria-label="Volume"
-            />
-          </label>
           {audioInfo && !deckReady && !loading[track.id] && <span className="muted small-text">Loading audio…</span>}
           {loading[track.id] ? (
             <span className="muted">Analysing audio…</span>
@@ -959,59 +927,6 @@ function TrackCueWorkspace({
               </button>
             </div>
           )}
-          <span className="grow" />
-            <div className="snap-control fx-group" role="group" aria-label="Out effects">
-              <span className="snap-label">FX</span>
-              {(
-                [
-                  ['echo', 'Echo', 'E', 'Echo out: beat-synced echoes; the track cuts on the first echo and the echoes fade'],
-                  ['reverb', 'Reverb', 'R', 'Reverb out: the track swells into a big reverb, cuts, and the reverb rings out'],
-                  ['loop', 'Loop', 'L', 'Loop out: the next beats repeat as a loop roll that fades over two bars while a filter sweeps up'],
-                  ['spin', 'Spin', 'B', 'Backspin: whips the record backwards and winds it down'],
-                ] as [OutFx, string, string, string][]
-              ).map(([kind, label, key, hint]) => (
-                <button
-                  key={kind}
-                  className={fxActive === kind ? 'on' : ''}
-                  disabled={!deckReady}
-                  onClick={() => fireFx(kind)}
-                  title={`${hint}. Key ${key}. Stopped? It plays a bar from the playhead first.`}
-                >
-                  {label}
-                </button>
-              ))}
-              <select
-                className="fx-beats"
-                value={fxBeats}
-                onChange={(e) => setFxBeats(Number(e.target.value))}
-                aria-label="FX beats"
-                title="Beats: the echo time, how long the reverb swells, the loop length, or how long the backspin lasts"
-              >
-                {FX_BEATS.map((b) => (
-                  <option key={b} value={b}>
-                    {b === 0.25 ? '1/4' : b === 0.5 ? '1/2' : b === 0.75 ? '3/4' : b} {b > 1 ? 'beats' : 'beat'}
-                  </option>
-                ))}
-              </select>
-              <Knob
-                value={fxMix}
-                onChange={setFxMix}
-                label="D/W"
-                title="Dry/wet: left mostly the track, middle both, right only the effect (on the loop out, how far the filter sweeps)"
-              />
-              <button
-                className={`then-next ${playOn ? 'on' : ''}`}
-                aria-pressed={playOn}
-                onClick={() => setPlayOn((v) => !v)}
-                title={
-                  next
-                    ? `Then play on into the next track of the night, “${project.library.tracks[next.trackId]?.title}”, from ${formatTime(next.at, false)}, while the FX tail rings (also when a track ends). ${playOn ? 'On' : 'Off'}.`
-                    : 'Then play on into the next track of the night (this track has none after it in the set).'
-                }
-              >
-                ▸ Next
-              </button>
-            </div>
         </div>
       </section>
 
@@ -1194,6 +1109,127 @@ function TrackCueWorkspace({
         </section>
       </div>
 
+      {createPortal(
+        // The player bar floats along the bottom of the whole app.
+        <div className="transport-bar" role="region" aria-label="Player">
+          <div className="tb-left">
+            <div className="tb-track">
+              <b>{track.title}</b>
+              <span>
+                {track.artist}
+                {track.key && (
+                  <i className="key-pill" style={{ background: keyColor(track.key) }}>
+                    {toCamelot(track.key)}
+                  </i>
+                )}
+              </span>
+            </div>
+            <span className="clock">
+              {formatTime(playhead)}
+              {bpm && <span className="muted"> · bar {barBeatLabel(playhead, bpm, gridStart)}</span>}
+            </span>
+            {activeLoop && (
+              <button className="small looping-btn" onClick={exitLoop} title="Release the loop and play on">
+                ↻ {activeLoop.name || 'Loop'} · exit
+              </button>
+            )}
+          </div>
+          <div className="transport">
+            <button className="small" onClick={() => seek(q(now() - (beat ?? 0.5) * 4))} title="Back one bar (Shift+←)">
+              −1 bar
+            </button>
+            <button
+              className={`play-btn ${playing ? 'playing' : ''}`}
+              onClick={togglePlay}
+              disabled={!deckReady}
+              title={playing ? 'Pause (Space)' : 'Play (Space)'}
+              aria-label={playing ? 'Pause' : 'Play'}
+            >
+              {playing ? (
+                <svg viewBox="0 0 24 24" aria-hidden>
+                  <rect x="6" y="5" width="4.2" height="14" rx="1" />
+                  <rect x="13.8" y="5" width="4.2" height="14" rx="1" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" aria-hidden>
+                  <path d="M8.5 5.2v13.6a.8.8 0 0 0 1.2.7l10.6-6.8a.8.8 0 0 0 0-1.4L9.7 4.5a.8.8 0 0 0-1.2.7z" />
+                </svg>
+              )}
+            </button>
+            <button className="small" onClick={() => seek(q(now() + (beat ?? 0.5) * 4))} title="Forward one bar (Shift+→)">
+              +1 bar
+            </button>
+          </div>
+          <div className="tb-right">
+            <div className="snap-control fx-group" role="group" aria-label="Out effects">
+              <span className="snap-label">FX</span>
+              {(
+                [
+                  ['echo', 'Echo', 'E', 'Echo out: beat-synced echoes; the track cuts on the first echo and the echoes fade'],
+                  ['reverb', 'Reverb', 'R', 'Reverb out: the track swells into a big reverb, cuts, and the reverb rings out'],
+                  ['loop', 'Loop', 'L', 'Loop out: the next beats repeat as a loop roll that fades over two bars while a filter sweeps up'],
+                  ['spin', 'Spin', 'B', 'Backspin: whips the record backwards and winds it down'],
+                ] as [OutFx, string, string, string][]
+              ).map(([kind, label, key, hint]) => (
+                <button
+                  key={kind}
+                  className={fxActive === kind ? 'on' : ''}
+                  disabled={!deckReady}
+                  onClick={() => fireFx(kind)}
+                  title={`${hint}. Key ${key}. Stopped? It plays a bar from the playhead first.`}
+                >
+                  {label}
+                </button>
+              ))}
+              <select
+                className="fx-beats"
+                value={fxBeats}
+                onChange={(e) => setFxBeats(Number(e.target.value))}
+                aria-label="FX beats"
+                title="Beats: the echo time, how long the reverb swells, the loop length, or how long the backspin lasts"
+              >
+                {FX_BEATS.map((b) => (
+                  <option key={b} value={b}>
+                    {b === 0.25 ? '1/4' : b === 0.5 ? '1/2' : b === 0.75 ? '3/4' : b} {b > 1 ? 'beats' : 'beat'}
+                  </option>
+                ))}
+              </select>
+              <Knob
+                value={fxMix}
+                onChange={setFxMix}
+                label="D/W"
+                title="Dry/wet: left mostly the track, middle both, right only the effect (on the loop out, how far the filter sweeps)"
+              />
+              <button
+                className={`then-next ${playOn ? 'on' : ''}`}
+                aria-pressed={playOn}
+                onClick={() => setPlayOn((v) => !v)}
+                title={
+                  next
+                    ? `Then play on into the next track of the night, “${project.library.tracks[next.trackId]?.title}”, from ${formatTime(next.at, false)}, while the FX tail rings (also when a track ends). ${playOn ? 'On' : 'Off'}.`
+                    : 'Then play on into the next track of the night (this track has none after it in the set).'
+                }
+              >
+                ▸ Next
+              </button>
+            </div>
+            <label className="inline volume" title="Preview volume · the bar shows the level going to your speakers">
+              Vol
+              <span className="level-meter" ref={meterRef} aria-hidden />
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.01}
+                value={volume}
+                onChange={(e) => setVolume(Number(e.target.value))}
+                aria-label="Volume"
+              />
+            </label>
+          </div>
+        </div>,
+        document.body,
+      )}
       {autoOpen && <AutoCuePanel track={track} sections={sections} wave={wave} onApply={setCues} onClose={() => setAutoOpen(false)} />}
       {historyOpen &&
         // Portalled so the pop-up isn't scaled with the deck.
