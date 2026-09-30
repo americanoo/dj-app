@@ -5,3 +5,8 @@ dist
 *.tsbuildinfo
 *.pem
 .setcraft/
+
+# browser tests
+e2e/.audio/
+test-results/
+playwright-report/

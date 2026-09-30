@@ -3717,3 +3717,8 @@ button.play-btn.playing:hover:not(:disabled) {
 .pad-actions {
   align-items: center;
 }
+.side-item,
+.side-item:hover,
+.side-item.active {
+  border: 0;
+}

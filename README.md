@@ -12,7 +12,8 @@ Everything runs locally in the browser. Your library and audio files are never u
 npm install
 npm start        # fast, optimised build at http://localhost:4173 (use this for real sessions)
 npm run dev      # development mode with live reload, http://localhost:5173 (slower)
-npm test         # format converters, key maths, set planning
+npm test         # format converters, key maths, set planning, mix plan
+npm run e2e      # browser tests: the real app in Chromium with generated test tracks (sound, night, transitions, export)
 npm run build    # static site in dist/ – host anywhere
 ```
 
