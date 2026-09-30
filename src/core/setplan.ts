@@ -7,13 +7,16 @@ import {
   incomingCurves,
   incomingPhase,
   integrate,
+  emptyCurves,
   mergeCurves,
   outgoingCurves,
+  withKeyframes,
   planTransition,
   rideOffset,
   valueAt,
   type BlendStyle,
   type Curves,
+  type TransitionAutomation,
   type TransitionPlan,
 } from './mixplan';
 
@@ -236,7 +239,9 @@ export interface NightSlot {
   /** How it's mixed in from the previous track (as chosen on its entry). */
   blend?: BlendStyle;
   sync?: boolean;
-  /** Tempo, fader and bass automation across both of its transitions. */
+  /** Keyframes of the transition into this track. */
+  automation?: TransitionAutomation;
+  /** Tempo, fader, EQ, filter and FX-send automation across both of its transitions. */
   curves: Curves;
   /** Echo out: when the track cuts, leaving its echoes. */
   echoAt?: number;
@@ -256,13 +261,14 @@ export function nightSlots(items: TimelineItem[]): NightSlot[] {
       gridStart: it.track!.gridStart,
       blend: it.entry.blend,
       sync: it.entry.sync,
-      curves: { rate: [], level: [], bass: [] },
+      automation: it.entry.automation,
+      curves: emptyCurves(),
     }));
   const parts = new Map<string, Curves[]>();
   const add = (id: string, c: Curves) => parts.set(id, [...(parts.get(id) ?? []), c]);
   for (const { a, b, plan } of transitionsOf(slots)) {
-    add(a.id, outgoingCurves(plan, a));
-    add(b.id, incomingCurves(plan, b));
+    add(a.id, withKeyframes(outgoingCurves(plan, a), b.automation?.a, plan.inAt));
+    add(b.id, withKeyframes(incomingCurves(plan, b), b.automation?.b, plan.inAt));
     if (plan.echoAt !== undefined) a.echoAt = plan.echoAt;
   }
   for (const s of slots) s.curves = mergeCurves(...(parts.get(s.id) ?? []));

@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   BASS_KILL_DB,
+  emptyCurves,
+  isCustomBlend,
+  mergeCurves,
+  seedKeyframes,
+  withKeyframes,
   incomingCurves,
   integrate,
   outgoingCurves,
@@ -124,5 +129,48 @@ describe('blend styles', () => {
     const p = planTransition(a, b, { blend: 'echo' });
     expect(p.echoAt).toBe(300);
     expect(outgoingCurves(p, a).level).toEqual([]);
+  });
+});
+
+describe('keyframes', () => {
+  const p = planTransition(a, b);
+  const base = outgoingCurves(p, a);
+
+  it('replace the blend style for the parameters that have them, relative to where B comes in', () => {
+    const c = withKeyframes(base, { level: [{ t: -4, v: 1 }, { t: 8, v: 0.2 }], echo: [{ t: 0, v: 0.6 }] }, 268);
+    expect(c.level).toEqual([
+      { t: 264, v: 1 },
+      { t: 276, v: 0.2 },
+    ]);
+    expect(c.echo).toEqual([{ t: 268, v: 0.6 }]);
+    // untouched: the bass swap still comes from the style
+    expect(c.bass).toEqual(base.bass);
+    expect(withKeyframes(base, undefined, 268)).toBe(base);
+  });
+
+  it('start from the blend style for the fader and bass, and as a bump for the rest', () => {
+    const bass = seedKeyframes(base, 'bass', 268, { t: 2, v: -20 }, 2);
+    const want = [2, p.swapAt! - 268, p.swapAt! - 268 + 0.03];
+    bass.forEach((k, i) => expect(k.t).toBeCloseTo(want[i], 6));
+    expect(bass.map((k) => k.v)).toEqual([-20, 0, BASS_KILL_DB]);
+    expect(seedKeyframes(emptyCurves(), 'reverb', 268, { t: 10, v: 0.8 }, 2)).toEqual([
+      { t: 2, v: 0 },
+      { t: 10, v: 0.8 },
+      { t: 18, v: 0 },
+    ]);
+  });
+
+  it('mark the blend as custom only when the fader or bass are drawn', () => {
+    expect(isCustomBlend(undefined)).toBe(false);
+    expect(isCustomBlend({ a: { echo: [{ t: 0, v: 1 }] } })).toBe(false);
+    expect(isCustomBlend({ b: { bass: [{ t: 0, v: -40 }] } })).toBe(true);
+  });
+
+  it('merge every parameter of both transitions of a track', () => {
+    const m = mergeCurves(withKeyframes(emptyCurves(), { filter: [{ t: 5, v: 0.5 }] }, 100), withKeyframes(emptyCurves(), { filter: [{ t: 0, v: -1 }] }, 10));
+    expect(m.filter).toEqual([
+      { t: 10, v: -1 },
+      { t: 105, v: 0.5 },
+    ]);
   });
 });

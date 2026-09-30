@@ -154,20 +154,69 @@ export function rideOffset(plan: TransitionPlan, t: number): number {
   return integrate(ride, s.rideFrom, t) - (t - s.rideFrom);
 }
 
-export interface Curves {
+/** What can be automated on each deck with keyframes. */
+export type AutoParam = 'level' | 'bass' | 'mid' | 'high' | 'filter' | 'echo' | 'reverb';
+
+export interface AutoParamInfo {
+  id: AutoParam;
+  label: string;
+  min: number;
+  max: number;
+  /** The value that leaves the sound untouched. */
+  neutral: number;
+  format: (v: number) => string;
+  hint: string;
+}
+
+const db = (v: number) => (v <= -39.5 ? 'kill' : `${v > 0 ? '+' : ''}${Math.round(v)} dB`);
+const pct = (v: number) => `${Math.round(v * 100)}%`;
+
+export const AUTO_PARAMS: AutoParamInfo[] = [
+  { id: 'level', label: 'Fader', min: 0, max: 1, neutral: 1, format: pct, hint: 'Channel fader' },
+  { id: 'bass', label: 'Bass', min: -40, max: 6, neutral: 0, format: db, hint: 'Low EQ (below ~220 Hz)' },
+  { id: 'mid', label: 'Mid', min: -40, max: 6, neutral: 0, format: db, hint: 'Mid EQ (around 1 kHz)' },
+  { id: 'high', label: 'High', min: -40, max: 6, neutral: 0, format: db, hint: 'High EQ (above ~4 kHz)' },
+  {
+    id: 'filter',
+    label: 'Filter',
+    min: -1,
+    max: 1,
+    neutral: 0,
+    format: (v) => (Math.abs(v) < 0.02 ? 'off' : v < 0 ? `low-pass ${pct(-v)}` : `high-pass ${pct(v)}`),
+    hint: 'DJ filter: down sweeps a low-pass (muffled), up a high-pass (thin)',
+  },
+  { id: 'echo', label: 'Echo', min: 0, max: 1, neutral: 0, format: pct, hint: 'Send to a 1-beat echo, in time with the deck' },
+  { id: 'reverb', label: 'Reverb', min: 0, max: 1, neutral: 0, format: pct, hint: 'Send to a big hall reverb' },
+];
+
+export const autoParam = (id: AutoParam) => AUTO_PARAMS.find((p) => p.id === id)!;
+
+/** A keyframe: `t` seconds from where the incoming track comes in (so it moves with it), and a value. */
+export interface Keyframe {
+  t: number;
+  v: number;
+}
+export type DeckAutomation = Partial<Record<AutoParam, Keyframe[]>>;
+/** Keyframes drawn for a transition, on the outgoing (a) and incoming (b) deck. */
+export interface TransitionAutomation {
+  a?: DeckAutomation;
+  b?: DeckAutomation;
+}
+
+export interface Curves extends Record<AutoParam, Env> {
   /** Playback rate (1 = as recorded). */
   rate: Env;
-  /** Fader level, 0–1. */
-  level: Env;
-  /** Low EQ, in dB (0 = flat). */
-  bass: Env;
+}
+
+export function emptyCurves(): Curves {
+  return { rate: [], level: [], bass: [], mid: [], high: [], filter: [], echo: [], reverb: [] };
 }
 
 const FAST = 0.03;
 
 /** The outgoing track's side of a transition. */
 export function outgoingCurves(p: TransitionPlan, a: MixTrack): Curves {
-  const c: Curves = { rate: [], level: [], bass: [] };
+  const c = emptyCurves();
   if (p.sync) c.rate.push({ t: p.sync.rideFrom, v: 1 }, { t: p.sync.rideTo, v: p.sync.rate });
   const bar = (a.bpm ? 60 / a.bpm : 0.5) * 4 * (p.sync ? 1 / p.sync.rate : 1);
   if (p.style === 'crossfade') {
@@ -182,7 +231,7 @@ export function outgoingCurves(p: TransitionPlan, a: MixTrack): Curves {
 
 /** The incoming track's side of a transition. */
 export function incomingCurves(p: TransitionPlan, b: MixTrack): Curves {
-  const c: Curves = { rate: [], level: [], bass: [] };
+  const c = emptyCurves();
   const bar = (b.bpm ? 60 / b.bpm : 0.5) * 4;
   if (p.style === 'crossfade') {
     for (let k = 0; k <= 4; k++) c.level.push({ t: p.inAt + (k / 4) * p.overlap, v: Math.sin((k / 4) * (Math.PI / 2)) });
@@ -196,8 +245,44 @@ export function incomingCurves(p: TransitionPlan, b: MixTrack): Curves {
 
 /** One track's curves from both of its transitions (in from the previous track, out to the next). */
 export function mergeCurves(...all: Curves[]): Curves {
-  const by = (k: keyof Curves) => all.flatMap((c) => c[k]).sort((x, y) => x.t - y.t);
-  return { rate: by('rate'), level: by('level'), bass: by('bass') };
+  const out = emptyCurves();
+  for (const k of Object.keys(out) as (keyof Curves)[]) out[k] = all.flatMap((c) => c[k]).sort((x, y) => x.t - y.t);
+  return out;
+}
+
+/**
+ * A deck's side of a transition with its keyframes applied: a parameter with
+ * keyframes follows them instead of the blend style's curve.
+ */
+export function withKeyframes(base: Curves, keys: DeckAutomation | undefined, inAt: number): Curves {
+  if (!keys) return base;
+  const c = { ...base };
+  for (const [param, list] of Object.entries(keys) as [AutoParam, Keyframe[]][]) {
+    if (list?.length) c[param] = [...list].sort((x, y) => x.t - y.t).map((k) => ({ t: inAt + k.t, v: k.v }));
+  }
+  return c;
+}
+
+/** True when the transition's fader or bass follow keyframes rather than its blend style. */
+export function isCustomBlend(auto: TransitionAutomation | undefined): boolean {
+  return !!(auto?.a?.level?.length || auto?.a?.bass?.length || auto?.b?.level?.length || auto?.b?.bass?.length);
+}
+
+/**
+ * The keyframes a parameter starts with when it's first edited: the blend
+ * style's curve for the fader and bass (so you tweak the bass swap rather than
+ * start again), otherwise a bump around the new point (neutral a few bars either
+ * side), so one keyframe doesn't change the whole track.
+ */
+export function seedKeyframes(style: Curves, param: AutoParam, inAt: number, at: Keyframe, bar: number): Keyframe[] {
+  const existing = style[param];
+  if (existing.length) return [...existing.map((p) => ({ t: p.t - inAt, v: p.v })), at].sort((x, y) => x.t - y.t);
+  const n = autoParam(param).neutral;
+  return [
+    { t: at.t - 4 * bar, v: n },
+    at,
+    { t: at.t + 4 * bar, v: n },
+  ];
 }
 
 /**

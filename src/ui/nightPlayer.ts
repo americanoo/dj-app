@@ -1,6 +1,6 @@
-import { valueAt, type Env } from '../core/mixplan';
+import { valueAt, type Curves, type Env } from '../core/mixplan';
 import { slotPos, slotRate, type NightSlot } from '../core/setplan';
-import { playOutFx, type OutFx } from './deck';
+import { impulse, playOutFx, type OutFx } from './deck';
 import { transport } from './transport';
 
 /**
@@ -26,14 +26,47 @@ interface Voice {
   src: AudioBufferSourceNode;
   /** Start / stop fades (and where an FX cuts the track). */
   gain: GainNode;
-  /** The slot as it was when scheduled: if the plan moves it, the voice is redone. */
+  /** Where each automated parameter lands in the channel strip. */
+  targets: Target[];
+  /** The slot's timing as scheduled: if the plan moves it, the voice is redone. */
   sig: string;
+  /** Its automation: if only that changes (keyframes edited), the voice is re-aimed live. */
+  autoSig: string;
 }
 
-const sigOf = (s: NightSlot) => `${s.trackId}|${s.startsAt}|${s.playFor}|${s.mixIn}|${s.echoAt}|${JSON.stringify(s.curves)}`;
+interface Target {
+  param: AudioParam;
+  curve: (c: Curves) => Env;
+  dflt: number;
+}
 
-/** Low EQ corner, like a DJ mixer's bass knob. */
+const sigOf = (s: NightSlot) => `${s.trackId}|${s.startsAt}|${s.playFor}|${s.mixIn}|${s.echoAt}|${JSON.stringify(s.curves.rate)}`;
+const autoSigOf = (s: NightSlot) => JSON.stringify({ ...s.curves, rate: undefined });
+
+/** EQ corners, like a DJ mixer's three bands. */
 const BASS_HZ = 220;
+const MID_HZ = 1000;
+const HIGH_HZ = 4000;
+/** The DJ filter's range: fully down, the low-pass closes to LP_MIN; fully up, the high-pass opens to HP_MAX. */
+const LP_MIN = 180;
+const HP_MAX = 2500;
+const lowPassHz = (v: number) => (v < 0 ? 20000 * Math.pow(LP_MIN / 20000, Math.min(1, -v)) : 20000);
+const highPassHz = (v: number) => (v > 0 ? 20 * Math.pow(HP_MAX / 20, Math.min(1, v)) : 20);
+
+/** A curve through a mapping (like filter position → cutoff), finely enough that straight ramps follow it. */
+function mapEnv(env: Env, f: (v: number) => number, steps = 12): Env {
+  if (!env.length) return [];
+  const out: Env = [{ t: env[0].t, v: f(env[0].v) }];
+  for (let i = 1; i < env.length; i++) {
+    const p = env[i - 1];
+    const q = env[i];
+    for (let k = 1; k <= steps; k++) out.push({ t: p.t + ((q.t - p.t) * k) / steps, v: f(p.v + ((q.v - p.v) * k) / steps) });
+  }
+  return out;
+}
+
+/** How long echo and reverb tails ring after a voice ends. */
+const TAIL = 8;
 
 export class NightPlayer {
   private ctx: AudioContext;
@@ -56,6 +89,8 @@ export class NightPlayer {
   active = false;
   /** Slots an out-effect has played out: they stay silent until the next jump. */
   private cut = new Set<string>();
+  /** Preview loop: playing past `to` jumps back to `from`. */
+  private loopRegion: { from: number; to: number } | null = null;
   /** Slots whose planned echo out has been scheduled. */
   private echoed = new Set<string>();
   private scrubbing: { wasPlaying: boolean; lastAt: number; pending: number | null; timer: number } | null = null;
@@ -153,6 +188,16 @@ export class NightPlayer {
     this.isPlaying = false;
     window.clearInterval(this.timer);
     this.stopAll();
+    this.emit();
+  }
+
+  get loop(): { from: number; to: number } | null {
+    return this.loopRegion;
+  }
+
+  /** Repeat a stretch of the night (a transition, while its keyframes are tweaked), or stop repeating. */
+  setLoop(region: { from: number; to: number } | null) {
+    this.loopRegion = region && region.to > region.from + 1 ? region : null;
     this.emit();
   }
 
@@ -286,6 +331,71 @@ export class NightPlayer {
     for (const p of env) if (p.t > from) param.linearRampToValueAtTime(p.v, Math.max(when, this.ctxAt(p.t)));
   }
 
+  /**
+   * One track's channel strip: source → 3-band EQ → filter → fader → start/stop
+   * fades → out, with post-fader sends to an echo (a beat long, at the tempo the
+   * track plays at) and a reverb. Returns the automated parameters.
+   */
+  private strip(buf: AudioBuffer, s: NightSlot, from: number) {
+    const ctx = this.ctx;
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    const band = (type: BiquadFilterType, hz: number, q = 0.8) => {
+      const f = ctx.createBiquadFilter();
+      f.type = type;
+      f.frequency.value = hz;
+      f.Q.value = q;
+      return f;
+    };
+    const low = band('lowshelf', BASS_HZ);
+    const mid = band('peaking', MID_HZ, 0.7);
+    const high = band('highshelf', HIGH_HZ);
+    const lp = band('lowpass', 20000, 0.9);
+    const hp = band('highpass', 20, 0.9);
+    const level = ctx.createGain();
+    const gain = ctx.createGain();
+    src.connect(low).connect(mid).connect(high).connect(lp).connect(hp).connect(level).connect(gain).connect(this.out);
+    // Echo: a beat at the track's tempo as it plays when the voice starts, darker each repeat.
+    const echoSend = ctx.createGain();
+    echoSend.gain.value = 0;
+    const delay = ctx.createDelay(4);
+    const bpm = s.bpm ? s.bpm * slotRate(s, from) : 120;
+    delay.delayTime.value = Math.min(3.9, 60 / bpm);
+    const fb = ctx.createGain();
+    fb.gain.value = 0.5;
+    const eHp = band('highpass', 300);
+    const eLp = band('lowpass', 5000);
+    gain.connect(echoSend).connect(delay).connect(eHp).connect(eLp);
+    eLp.connect(fb).connect(delay);
+    eLp.connect(this.out);
+    // Reverb: a big hall.
+    const reverbSend = ctx.createGain();
+    reverbSend.gain.value = 0;
+    const verb = ctx.createConvolver();
+    verb.buffer = impulse(ctx);
+    const wet = ctx.createGain();
+    wet.gain.value = 1.6;
+    gain.connect(reverbSend).connect(verb).connect(wet).connect(this.out);
+    const targets: Target[] = [
+      { param: level.gain, curve: (c) => c.level, dflt: 1 },
+      { param: low.gain, curve: (c) => c.bass, dflt: 0 },
+      { param: mid.gain, curve: (c) => c.mid, dflt: 0 },
+      { param: high.gain, curve: (c) => c.high, dflt: 0 },
+      { param: lp.frequency, curve: (c) => mapEnv(c.filter, lowPassHz), dflt: 20000 },
+      { param: hp.frequency, curve: (c) => mapEnv(c.filter, highPassHz), dflt: 20 },
+      { param: echoSend.gain, curve: (c) => c.echo, dflt: 0 },
+      { param: reverbSend.gain, curve: (c) => c.reverb, dflt: 0 },
+    ];
+    const dispose = () => {
+      for (const n of [src, low, mid, high, lp, hp, level]) n.disconnect();
+      // The sends ring on for a while before they're let go.
+      window.setTimeout(() => {
+        for (const n of [gain, echoSend, delay, fb, eHp, eLp, reverbSend, verb, wet]) n.disconnect();
+      }, TAIL * 1000);
+    };
+    return { src, gain, targets, dispose };
+  }
+
   /** Audio-clock time of a moment in the night (while playing). */
   private ctxAt(t: number): number {
     return this.startCtx + (t - this.startNight);
@@ -300,6 +410,14 @@ export class NightPlayer {
     for (const [id, v] of this.voices) {
       const s = bySlot.get(id);
       if (!s || sigOf(s) !== v.sig) this.stopVoice(id);
+      else if (autoSigOf(s) !== v.autoSig) {
+        // Keyframes edited while it plays: re-aim the automation from here on, no restart.
+        v.autoSig = autoSigOf(s);
+        for (const tg of v.targets) {
+          tg.param.cancelScheduledValues(now);
+          this.follow(tg.param, tg.curve(s.curves), tg.dflt, t, now);
+        }
+      }
     }
     for (const s of this.slots) {
       const end = s.startsAt + s.playFor;
@@ -316,33 +434,22 @@ export class NightPlayer {
       if (offset >= buf.duration) continue;
       const when = Math.max(now, this.ctxAt(from));
       const stopAt = Math.max(when + FADE * 2, this.ctxAt(end));
-      // source → bass EQ → fader → start/stop fades → out
-      const src = this.ctx.createBufferSource();
-      src.buffer = buf;
-      const eq = this.ctx.createBiquadFilter();
-      eq.type = 'lowshelf';
-      eq.frequency.value = BASS_HZ;
-      const level = this.ctx.createGain();
-      const gain = this.ctx.createGain();
-      // The mix automation: tempo ride, fader and bass, from wherever the voice joins.
+      const { src, gain, targets, dispose } = this.strip(buf, s, from);
+      // The mix automation: tempo ride, fader, EQ, filter and sends, from wherever the voice joins.
       this.follow(src.playbackRate, s.curves.rate, 1, from, when);
-      this.follow(level.gain, s.curves.level, 1, from, when);
-      this.follow(eq.gain, s.curves.bass, 0, from, when);
+      for (const tg of targets) this.follow(tg.param, tg.curve(s.curves), tg.dflt, from, when);
       gain.gain.setValueAtTime(0, when);
       gain.gain.linearRampToValueAtTime(1, when + FADE);
       gain.gain.setValueAtTime(1, Math.max(when + FADE, stopAt - FADE));
       gain.gain.linearRampToValueAtTime(0, stopAt);
-      src.connect(eq).connect(level).connect(gain).connect(this.out);
       src.start(when, offset);
       src.stop(stopAt + 0.02);
       const id = s.id;
       src.onended = () => {
         if (this.voices.get(id)?.src === src) this.voices.delete(id);
-        gain.disconnect();
-        level.disconnect();
-        eq.disconnect();
+        dispose();
       };
-      this.voices.set(id, { src, gain, sig: sigOf(s) });
+      this.voices.set(id, { src, gain, targets, sig: sigOf(s), autoSig: autoSigOf(s) });
     }
     // Planned echo outs: set off a beat before the out point, so the track cuts right on it.
     for (const s of this.slots) {
@@ -359,6 +466,12 @@ export class NightPlayer {
       playOutFx(this.ctx, this.out, v, buf, posAt(at), posAt, 'echo', bpm, 1, 0.5, at);
     }
     this.prefetch(t);
+    // Looping a preview: back to the start of the loop once past its end.
+    const lp = this.loopRegion;
+    if (lp && !this.scrubbing && t >= lp.to && t < lp.to + 2) {
+      this.play(lp.from);
+      return;
+    }
     // The end of the night: stop.
     const last = this.slots.reduce((m, s) => Math.max(m, s.startsAt + s.playFor), 0);
     if (!this.scrubbing && this.slots.length && t >= last + 0.5) {

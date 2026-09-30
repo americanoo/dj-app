@@ -3356,3 +3356,40 @@ table.midi-map tr.learning td {
   color: #c4b5fd;
   background: rgba(167, 139, 250, 0.12);
 }
+.tv-loop,
+.tv-keys {
+  flex: none;
+}
+.tv-loop.on {
+  border-color: var(--cyan);
+  color: var(--cyan);
+  background: rgba(34, 211, 238, 0.1);
+}
+.tv-keys.on {
+  border-color: #fbbf24;
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.1);
+}
+.tv-params {
+  display: inline-flex;
+  gap: 3px;
+  min-width: 0;
+  overflow: hidden;
+}
+.tv-params button {
+  flex: none;
+  padding: 3px 8px;
+}
+.tv-params button.on {
+  border-color: #fbbf24;
+  color: #fbbf24;
+}
+.tv-count {
+  margin-left: 4px;
+  font-style: normal;
+  font-size: 10px;
+  padding: 0 4px;
+  border-radius: 6px;
+  background: rgba(251, 191, 36, 0.2);
+  color: #fbbf24;
+}

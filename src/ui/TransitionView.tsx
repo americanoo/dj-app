@@ -2,7 +2,23 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { keyColor, keyRelation, toCamelot, type KeyRelation } from '../core/keys';
 import type { Track } from '../core/model';
 import type { Section } from '../core/sections';
-import { BLEND_STYLES, MAX_PITCH, snapIncoming, valueAt, type BlendStyle, type TransitionPlan } from '../core/mixplan';
+import {
+  AUTO_PARAMS,
+  BLEND_STYLES,
+  MAX_PITCH,
+  autoParam,
+  incomingCurves,
+  isCustomBlend,
+  outgoingCurves,
+  seedKeyframes,
+  snapIncoming,
+  valueAt,
+  type AutoParam,
+  type BlendStyle,
+  type Keyframe,
+  type TransitionAutomation,
+  type TransitionPlan,
+} from '../core/mixplan';
 import { buildTimeline, describeTransition, nightSlots, slotPos, transitionsOf, type NightSlot } from '../core/setplan';
 import { formatTime } from '../core/time';
 import type { WaveformData } from '../core/waveform';
@@ -49,6 +65,8 @@ export function TransitionView({ selectedTrackId, onSelectTrack }: Props) {
   const nightState = useNightState();
   const [index, setIndex] = useState(0);
   const [context, setContext] = useState<(typeof CONTEXT_BARS)[number]>(16);
+  /** Keyframes mode: the parameter being drawn (null: the normal view). */
+  const [editParam, setEditParam] = useState<AutoParam | null>(null);
   // Always fully visible: on a short panel the canvas gives way first, then everything scales down.
   const fitRef = useFitZoom<HTMLDivElement>(0.5);
 
@@ -99,11 +117,25 @@ export function TransitionView({ selectedTrackId, onSelectTrack }: Props) {
   const [frozen, setFrozen] = useState<{ from: number; to: number } | null>(null);
   const view = frozen ?? window_;
 
+  const previewFrom = info && a ? Math.max(a.startsAt, Math.min(info.inAt, info.outAt) - Math.min(pad, 8 * 4 * beatA)) : 0;
   const preview = () => {
     if (!info || !a) return;
     if (night.playing && night.position() >= view.from && night.position() <= view.to) return night.pause();
-    night.play(Math.max(a.startsAt, Math.min(info.inAt, info.outAt) - Math.min(pad, 8 * 4 * beatA)));
+    night.play(previewFrom);
   };
+  // Loop the transition: from a few bars before it to a few bars after, over and over, while you tweak it.
+  const loopRegion = info ? { from: previewFrom, to: Math.max(info.inAt, info.outAt) + 4 * 4 * beatA } : null;
+  const looping = !!night.loop && !!loopRegion && Math.abs(night.loop.from - loopRegion.from) < 0.01;
+  const toggleLoop = () => {
+    if (looping || !loopRegion) return night.setLoop(null);
+    night.setLoop(loopRegion);
+    if (!night.playing || night.position() < loopRegion.from || night.position() > loopRegion.to) night.play(loopRegion.from);
+  };
+  // Another transition on show: stop looping the last one.
+  const shownId = b?.id;
+  useEffect(() => {
+    night.setLoop(null);
+  }, [shownId, night]);
 
   if (!pair || !a || !b || !info || !plan) {
     return (
@@ -123,7 +155,20 @@ export function TransitionView({ selectedTrackId, onSelectTrack }: Props) {
   const blend = info.overlap > 0.05;
   const gap = info.overlap < -0.05;
   const lands = info.landsOn;
-  const setBlend = (blend: BlendStyle) => dispatch({ type: 'updateEntry', id: b.id, patch: { blend } });
+  const auto = b.automation;
+  const custom = isCustomBlend(auto);
+  // Picking a blend style hands the fader and bass back to it (drawn effects stay).
+  const setBlend = (blend: BlendStyle) => {
+    const strip = (d?: TransitionAutomation['a']) => (d ? { ...d, level: undefined, bass: undefined } : d);
+    dispatch({ type: 'updateEntry', id: b.id, patch: { blend, automation: auto ? { a: strip(auto.a), b: strip(auto.b) } : undefined } });
+  };
+  const setKeys = (deck: 'a' | 'b', param: AutoParam, keys: Keyframe[] | undefined) =>
+    dispatch({
+      type: 'updateEntry',
+      id: b.id,
+      patch: { automation: { ...auto, [deck]: { ...auto?.[deck], [param]: keys?.length ? keys : undefined } } },
+    });
+  const hasKeys = !!auto && Object.values({ ...auto.a, ...auto.b }).some((l) => l?.length);
   const syncOn = b.sync !== false;
   const tempoChip = tempoText(plan, ta, tb);
 
@@ -150,9 +195,18 @@ export function TransitionView({ selectedTrackId, onSelectTrack }: Props) {
         <button className={`small tv-preview ${nightState.playing ? 'on' : ''}`} onClick={preview} title="Play the night from a few bars before the incoming track">
           {nightState.playing ? '❚❚ Pause' : '▶ Preview transition'}
         </button>
-        <label className="inline small-text tv-blend" title={BLEND_STYLES.find((x) => x.id === plan.style)?.hint}>
+        <button
+          className={`small tv-loop ${looping ? 'on' : ''}`}
+          onClick={toggleLoop}
+          title="Loop the transition, so you can hear your changes over and over"
+          aria-pressed={looping}
+        >
+          ⟲ Loop
+        </button>
+        <label className="inline small-text tv-blend" title={custom ? 'The fader and bass follow your keyframes' : BLEND_STYLES.find((x) => x.id === plan.style)?.hint}>
           Blend
-          <select value={plan.chosen ?? plan.style} onChange={(e) => setBlend(e.target.value as BlendStyle)}>
+          <select value={custom ? 'custom' : (plan.chosen ?? plan.style)} onChange={(e) => setBlend(e.target.value as BlendStyle)}>
+            {custom && <option value="custom">Custom (keyframes)</option>}
             {BLEND_STYLES.map((x) => (
               <option key={x.id} value={x.id}>
                 {x.label}
@@ -161,6 +215,37 @@ export function TransitionView({ selectedTrackId, onSelectTrack }: Props) {
             ))}
           </select>
         </label>
+        <button
+          className={`small tv-keys ${editParam ? 'on' : ''}`}
+          onClick={() => setEditParam(editParam ? null : 'level')}
+          title="Draw keyframes: fader, EQ, filter, echo and reverb on either deck"
+          aria-pressed={!!editParam}
+        >
+          ✎ Keyframes
+        </button>
+        {editParam ? (
+          <span className="tv-params" role="group" aria-label="Parameter">
+            {AUTO_PARAMS.map((pr) => {
+              const n = (auto?.a?.[pr.id]?.length ?? 0) + (auto?.b?.[pr.id]?.length ?? 0);
+              return (
+                <button key={pr.id} className={`small ${editParam === pr.id ? 'on' : ''}`} onClick={() => setEditParam(pr.id)} title={pr.hint}>
+                  {pr.label}
+                  {n > 0 && <i className="tv-count">{n}</i>}
+                </button>
+              );
+            })}
+            {hasKeys && (
+              <button
+                className="small link"
+                onClick={() => dispatch({ type: 'updateEntry', id: b.id, patch: { automation: undefined } })}
+                title="Remove every keyframe of this transition (back to its blend style)"
+              >
+                Clear
+              </button>
+            )}
+          </span>
+        ) : (
+          <>
         <button
           className={`small tv-sync ${syncOn ? 'on' : ''}`}
           onClick={() => dispatch({ type: 'updateEntry', id: b.id, patch: { sync: !syncOn } })}
@@ -203,6 +288,8 @@ export function TransitionView({ selectedTrackId, onSelectTrack }: Props) {
             </span>
           )}
         </span>
+          </>
+        )}
         <span className="grow" />
         <label className="inline small-text muted" title="How much of each track to show around the join">
           <select value={context} onChange={(e) => setContext(Number(e.target.value) as (typeof CONTEXT_BARS)[number])}>
@@ -235,6 +322,8 @@ export function TransitionView({ selectedTrackId, onSelectTrack }: Props) {
           onDragStart={() => setFrozen(view)}
           onDragEnd={() => setFrozen(null)}
           onMoveIn={(at) => dispatch({ type: 'setEntryTime', id: b.id, at })}
+          editParam={editParam}
+          onKeys={setKeys}
         />
         <DeckCard side="B" label="In" track={tb} note={`from ${formatTime(b.mixIn, false)}`} onOpen={() => onSelectTrack(b.trackId)} />
       </div>
@@ -286,6 +375,9 @@ interface CanvasProps {
   onDragStart: () => void;
   onDragEnd: () => void;
   onMoveIn: (at: number) => void;
+  /** Keyframes mode: the parameter being drawn. */
+  editParam: AutoParam | null;
+  onKeys: (deck: 'a' | 'b', param: AutoParam, keys: Keyframe[] | undefined) => void;
 }
 
 function TransitionCanvas(p: CanvasProps) {
@@ -297,6 +389,7 @@ function TransitionCanvas(p: CanvasProps) {
   const props = useRef(p);
   props.current = p;
   const drag = useRef<
+    | { kind: 'key'; deck: 'a' | 'b'; param: AutoParam; index: number; keys: Keyframe[] }
     | { kind: 'move'; startX: number; origAt: number; moved: boolean }
     | { kind: 'scrub'; startX: number; moved: boolean }
     | null
@@ -360,6 +453,58 @@ function TransitionCanvas(p: CanvasProps) {
     return snapIncoming(a, b, t, b.sync !== false);
   }, []);
 
+  /** The pointer in the canvas's own (CSS pixel) coordinates, whatever the panel's zoom. */
+  const local = (e: { clientX: number; clientY: number }) => {
+    const c = canvas.current!;
+    const r = c.getBoundingClientRect();
+    return { x: ((e.clientX - r.left) / r.width) * c.clientWidth, y: ((e.clientY - r.top) / r.height) * c.clientHeight };
+  };
+  const geometry = () => {
+    const c = canvas.current!;
+    const { view } = props.current;
+    const w = c.clientWidth;
+    const rowH = (c.clientHeight - 2) / 2;
+    return { w, rowH, xOf: (t: number) => ((t - view.from) / (view.to - view.from)) * w, tOf: (x: number) => view.from + (x / w) * (view.to - view.from) };
+  };
+  const deckAt = (y: number): 'a' | 'b' => (y > geometry().rowH + 1 ? 'b' : 'a');
+  /** The keyframe under the pointer, on the parameter being drawn. */
+  const keyAt = (pt: { x: number; y: number }) => {
+    const { editParam, b, inAt } = props.current;
+    if (!editParam) return null;
+    const deck = deckAt(pt.y);
+    const { rowH, xOf } = geometry();
+    const keys = b.automation?.[deck]?.[editParam] ?? [];
+    const y0 = deck === 'a' ? 0 : rowH + 2;
+    const i = keys.findIndex((k) => Math.hypot(xOf(inAt + k.t) - pt.x, keyY(editParam, k.v, y0, rowH) - pt.y) <= 8);
+    return i >= 0 ? { deck, i, keys } : null;
+  };
+  /** A keyframe time (from B's in), snapped to the incoming track's beats. */
+  const snapKey = (t: number, free: boolean) => {
+    const { b, inAt } = props.current;
+    if (free || !b.bpm) return Math.round((t - inAt) * 100) / 100;
+    const beat = 60 / b.bpm;
+    const origin = inAt + (b.gridStart ?? 0) - b.mixIn;
+    return Math.round((origin + Math.round((t - origin) / beat) * beat - inAt) * 1000) / 1000;
+  };
+  const keyText = (param: AutoParam, k: Keyframe) => {
+    const { b } = props.current;
+    const bars = b.bpm ? k.t / ((60 / b.bpm) * 4) : undefined;
+    const when =
+      bars === undefined
+        ? `${k.t >= 0 ? '+' : ''}${k.t.toFixed(1)} s`
+        : Math.abs(bars) < 0.05
+          ? 'at B in'
+          : `${Math.abs(Math.round(bars * 4) / 4)} bars ${bars > 0 ? 'after' : 'before'} B in`;
+    return `${autoParam(param).label} ${autoParam(param).format(k.v)} · ${when}`;
+  };
+
+  const removeKey = (e: { clientX: number; clientY: number }) => {
+    const { editParam } = props.current;
+    const hit = editParam && keyAt(local(e));
+    if (!editParam || !hit) return;
+    props.current.onKeys(hit.deck, editParam, hit.keys.filter((_, j) => j !== hit.i));
+  };
+
   const showReadout = (text: string | null, x = 0) => {
     const el = readoutEl.current;
     if (!el) return;
@@ -379,6 +524,30 @@ function TransitionCanvas(p: CanvasProps) {
           const r = e.currentTarget.getBoundingClientRect();
           const lowerHalf = e.clientY - r.top > r.height / 2;
           e.currentTarget.setPointerCapture(e.pointerId);
+          const { editParam } = props.current;
+          if (editParam) {
+            // Keyframes: grab one, or click anywhere on a deck to add one there and drag it.
+            if (e.button !== 0) return;
+            const pt = local(e);
+            const hit = keyAt(pt);
+            if (hit) {
+              drag.current = { kind: 'key', deck: hit.deck, param: editParam, index: hit.i, keys: [...hit.keys] };
+              return;
+            }
+            const { a, b, plan, inAt } = props.current;
+            const deck = deckAt(pt.y);
+            const { rowH, tOf } = geometry();
+            const k = { t: snapKey(tOf(pt.x), e.shiftKey), v: keyValue(editParam, pt.y, deck === 'a' ? 0 : rowH + 2, rowH) };
+            const existing = b.automation?.[deck]?.[editParam];
+            const bar = (b.bpm ? 60 / b.bpm : 0.5) * 4;
+            const keys = existing?.length
+              ? [...existing, k].sort((x, y) => x.t - y.t)
+              : seedKeyframes(deck === 'a' ? outgoingCurves(plan, a) : incomingCurves(plan, b), editParam, inAt, k, bar);
+            props.current.onKeys(deck, editParam, keys);
+            drag.current = { kind: 'key', deck, param: editParam, index: keys.indexOf(k), keys };
+            showReadout(keyText(editParam, k), pt.x);
+            return;
+          }
           // The incoming track's row: grab it to move where it comes in. Elsewhere: scrub the night.
           if (lowerHalf) {
             drag.current = { kind: 'move', startX: e.clientX, origAt: props.current.b.startsAt, moved: false };
@@ -388,8 +557,26 @@ function TransitionCanvas(p: CanvasProps) {
         onPointerMove={(e) => {
           const d = drag.current;
           const r = e.currentTarget.getBoundingClientRect();
+          if (props.current.editParam) {
+            const pt = local(e);
+            e.currentTarget.style.cursor = d?.kind === 'key' ? 'grabbing' : keyAt(pt) ? 'grab' : 'crosshair';
+            if (d?.kind !== 'key') return;
+            // Drag a keyframe: its time snaps to beats (Shift: free) and can't pass its neighbours.
+            const { rowH, tOf } = geometry();
+            const prev = d.keys[d.index - 1];
+            const next = d.keys[d.index + 1];
+            let t = snapKey(tOf(pt.x), e.shiftKey);
+            if (prev) t = Math.max(prev.t + 0.01, t);
+            if (next) t = Math.min(next.t - 0.01, t);
+            const k = { t, v: keyValue(d.param, pt.y, d.deck === 'a' ? 0 : rowH + 2, rowH) };
+            d.keys = d.keys.map((x, j) => (j === d.index ? k : x));
+            props.current.onKeys(d.deck, d.param, d.keys);
+            showReadout(keyText(d.param, k), pt.x);
+            return;
+          }
           e.currentTarget.style.cursor = e.clientY - r.top > r.height / 2 ? 'grab' : 'text';
           if (!d) return;
+          if (d.kind === 'key') return;
           if (!d.moved && Math.abs(e.clientX - d.startX) < 3) return;
           if (d.kind === 'move') {
             d.moved = true;
@@ -414,7 +601,7 @@ function TransitionCanvas(p: CanvasProps) {
           const d = drag.current;
           drag.current = null;
           showReadout(null);
-          if (!d) return;
+          if (!d || d.kind === 'key') return;
           if (d.kind === 'move') props.current.onDragEnd();
           if (d.kind === 'scrub' && d.moved) night.scrubEnd();
           // A click (either row) jumps the night there.
@@ -426,6 +613,14 @@ function TransitionCanvas(p: CanvasProps) {
           showReadout(null);
           if (d?.kind === 'move') props.current.onDragEnd();
           if (d?.kind === 'scrub' && d.moved) night.scrubEnd();
+        }}
+        // Double-click (or right-click) a keyframe to remove it.
+        onDoubleClick={(e) => removeKey(e)}
+        onContextMenu={(e) => {
+          if (props.current.editParam && keyAt(local(e))) {
+            e.preventDefault();
+            removeKey(e);
+          }
         }}
       />
       <div className="tv-playhead" ref={playheadEl} aria-hidden />
@@ -508,6 +703,80 @@ function draw(ctx: CanvasRenderingContext2D, w: number, h: number, p: CanvasProp
   }
   line(outAt, OUT_COLOR, plan.style === 'echo' ? 'ECHO OUT ◂' : 'A OUT ◂', true);
   line(inAt, IN_COLOR, '▸ B IN', false);
+  if (p.editParam) drawKeys(ctx, w, rowH, xOf, p, p.editParam);
+}
+
+const KEY_PAD = 9;
+/** Where a value sits in a deck's row (top = the parameter's maximum). */
+function keyY(param: AutoParam, v: number, y0: number, rowH: number): number {
+  const info = autoParam(param);
+  const f = (v - info.min) / (info.max - info.min);
+  return y0 + KEY_PAD + (1 - f) * (rowH - 2 * KEY_PAD);
+}
+function keyValue(param: AutoParam, y: number, y0: number, rowH: number): number {
+  const info = autoParam(param);
+  const f = 1 - (y - y0 - KEY_PAD) / (rowH - 2 * KEY_PAD);
+  const v = info.min + Math.max(0, Math.min(1, f)) * (info.max - info.min);
+  // Close to neutral clicks onto it, so "back to normal" is easy to hit.
+  const near = (info.max - info.min) * 0.03;
+  return Math.abs(v - info.neutral) < near ? info.neutral : Math.round(v * 100) / 100;
+}
+
+/** Keyframes mode: each deck's curve for the parameter, with its keyframes as dots. */
+function drawKeys(ctx: CanvasRenderingContext2D, w: number, rowH: number, xOf: (t: number) => number, p: CanvasProps, param: AutoParam) {
+  const info = autoParam(param);
+  const span = p.view.to - p.view.from;
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  ctx.fillRect(0, 0, w, rowH * 2 + 2);
+  (['a', 'b'] as const).forEach((deck) => {
+    const slot = deck === 'a' ? p.a : p.b;
+    const y0 = deck === 'a' ? 0 : rowH + 2;
+    const color = deck === 'a' ? OUT_COLOR : IN_COLOR;
+    // The neutral line: where the sound is untouched.
+    ctx.fillStyle = 'rgba(255,255,255,0.28)';
+    const ny = Math.round(keyY(param, info.neutral, y0, rowH));
+    for (let x = 0; x < w; x += 8) ctx.fillRect(x, ny, 4, 1);
+    // The curve the deck follows (the blend style's, or the keyframes'), solid while it plays.
+    const env = slot.curves[param];
+    const start = slot.startsAt;
+    const end = slot.startsAt + slot.playFor;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let x = 0; x <= w; x += 2) {
+      const t = p.view.from + (x / w) * span;
+      const y = keyY(param, valueAt(env, t, info.neutral), y0, rowH);
+      if (x === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.globalAlpha = 0.95;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(Math.max(0, xOf(start)), y0, Math.max(0, Math.min(w, xOf(end)) - Math.max(0, xOf(start))), rowH);
+    ctx.clip();
+    ctx.stroke();
+    ctx.restore();
+    ctx.globalAlpha = 1;
+    const keys = p.b.automation?.[deck]?.[param] ?? [];
+    for (const k of keys) {
+      const x = xOf(p.inAt + k.t);
+      const y = keyY(param, k.v, y0, rowH);
+      ctx.beginPath();
+      ctx.arc(x, y, 4.5, 0, Math.PI * 2);
+      ctx.fillStyle = '#fff';
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = color;
+      ctx.stroke();
+    }
+    ctx.font = 'bold 10px system-ui';
+    const label = `${deck.toUpperCase()} · ${info.label}${keys.length ? '' : env.length ? ' · click to edit the blend’s curve' : ' · click to add a keyframe'}`;
+    const tw = ctx.measureText(label).width;
+    ctx.fillStyle = 'rgba(0,0,0,0.75)';
+    ctx.fillRect(w - tw - 14, y0 + 5, tw + 8, 14);
+    ctx.fillStyle = color;
+    ctx.fillText(label, w - tw - 10, y0 + 15);
+  });
 }
 
 /** The tempo chip: synced (and how far it pitches), or why not. */

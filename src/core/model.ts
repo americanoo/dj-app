@@ -6,7 +6,7 @@
  * All positions are in seconds from the start of the audio file.
  */
 
-import type { BlendStyle } from './mixplan';
+import type { BlendStyle, TransitionAutomation } from './mixplan';
 
 export type SourceFormat = 'rekordbox' | 'traktor' | 'serato' | 'djay' | 'm3u' | 'csv' | 'manual';
 
@@ -112,6 +112,8 @@ export interface SetEntry {
   blend?: BlendStyle;
   /** Ride the previous track's tempo into this one's so the beats lock (default on). */
   sync?: boolean;
+  /** Keyframes for the transition into this track (fader, EQ, filter, echo, reverb on either deck). */
+  automation?: TransitionAutomation;
   /**
    * When this track starts, in seconds from the start of the set. Entries from
    * older versions don't have it and are laid out one after another.

@@ -25,7 +25,7 @@ export interface LoopRegion {
 const impulses = new WeakMap<BaseAudioContext, AudioBuffer>();
 
 /** A 4-second hall: stereo noise with an exponential decay. Made once per audio context. */
-function impulse(ctx: BaseAudioContext): AudioBuffer {
+export function impulse(ctx: BaseAudioContext): AudioBuffer {
   let ir = impulses.get(ctx);
   if (ir) return ir;
   const len = Math.floor(ctx.sampleRate * 4);
