@@ -21,9 +21,11 @@ declare global {
  * (playing sources, low-shelf EQs, echo sends, decodes) so tests can read it.
  * Also hides the folder picker so the <input webkitdirectory> fallback is used.
  */
-async function instrument(page: Page) {
+export async function instrument(page: Page) {
   await page.addInitScript(() => {
     delete (window as { showDirectoryPicker?: unknown }).showDirectoryPicker;
+    // The first-run tour has its own test; everywhere else it's been seen already.
+    if (!sessionStorage.getItem('keep-tour')) localStorage.setItem('setcraft-tour', JSON.stringify({ status: 'done', step: 0 }));
     const w = window as unknown as Record<string, unknown>;
     let tap: AnalyserNode | null = null;
     let ctx: BaseAudioContext | null = null;

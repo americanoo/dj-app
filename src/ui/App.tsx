@@ -22,6 +22,7 @@ import { Timeline } from './Timeline';
 import { TransitionView } from './TransitionView';
 import { MenuButton } from './Menu';
 import { useMusicFolder } from './musicFolder';
+import { Tour, useDemoLoader, useTour } from './Tour';
 import { activeSet, reducer, useStore } from './store';
 
 
@@ -46,6 +47,8 @@ export function App() {
   const [controllerOpen, setControllerOpen] = useState(false);
   const midi = useMidi();
   const folder = useMusicFolder();
+  const tour = useTour();
+  const demo = useDemoLoader();
   const { founding } = useLicense();
   const [loadedTrackId, setLoadedTrackId] = useState<string | null>(null);
   const [storyOpen, setStoryOpen] = useState(false);
@@ -347,6 +350,16 @@ export function App() {
                   <span className="menu-hint">⌘S saves one</span>
                 </button>
                 <button
+                  className="menu-item"
+                  onClick={() => {
+                    close();
+                    tour.setState({ status: 'new', step: 0 });
+                  }}
+                >
+                  Tutorial
+                  <span className="menu-hint">the guided tour</span>
+                </button>
+                <button
                   className={`menu-item founding-item ${founding ? 'is-founder' : ''}`}
                   onClick={() => {
                     close();
@@ -358,7 +371,7 @@ export function App() {
               </>
             )}
           </MenuButton>
-          <button onClick={() => setExportOpen(true)} title="Export to rekordbox, Traktor, Serato, djay Pro or M3U8">
+          <button className="export-btn" onClick={() => setExportOpen(true)} title="Export to rekordbox, Traktor, Serato, djay Pro or M3U8">
             Export
           </button>
           <button className="primary" onClick={() => fileInput.current?.click()}>
@@ -401,6 +414,8 @@ export function App() {
             selectedTrackId={loadedTrackId}
             onSelectTrack={setLoadedTrackId}
             onImport={() => fileInput.current?.click()}
+            onDemo={() => void demo.load()}
+            demoBusy={demo.busy}
             onFixBpms={() => setBpmFixOpen(true)}
           />
         </section>
@@ -450,6 +465,7 @@ export function App() {
           </div>
         </div>
       )}
+      <Tour state={tour.state} setState={tour.setState} loadedTrackId={loadedTrackId} />
       <div className="toasts" aria-live="polite">
         {toasts.map((t) => (
           <div key={t.id} className={`toast ${t.kind}`}>

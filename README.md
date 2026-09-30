@@ -19,6 +19,17 @@ npm run build    # static site in dist/ – host anywhere
 
 ---
 
+## First time? The tutorial
+
+The first time you open Setcraft, a short welcome offers a **hands-on tour**. Pick **Try it with demo tracks**
+(three short club tracks made right in your browser, so you can learn before your library is ready) or **Use my
+own music**. The tour then spotlights one part of the screen at a time: importing and linking your music folder,
+the library, the journey of the night, the transition view (blend, Sync, keyframes), the deck and hot cues, the
+player, and export. Most steps ask you to do the thing (add two tracks to the set, overlap them, preview the
+transition, set a cue, press play) and move on by themselves once you have; a step you've already done is just
+read, and **Skip** / **Next** moves on anyway. **Esc** ends it. Replay it any time from **⋯ → Tutorial**. The
+demo tracks are also on offer on the empty library screen, and show a *demo* badge in the library.
+
 ## One-page workspace
 
 Everything happens on one page, in four stacked panels. Drag the handles between them to resize; the sizes

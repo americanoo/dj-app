@@ -31,7 +31,7 @@ export function LinkFolderButton({ compact = false, topbar = false }: { compact?
 
   if (folder.status === 'needs-permission') {
     return (
-      <button className={compact ? 'small' : 'small primary'} onClick={() => void folder.reconnect()}>
+      <button className={`folder-btn ${compact ? 'small' : 'small primary'}`} onClick={() => void folder.reconnect()}>
         Reconnect “{folder.folderName}”
       </button>
     );
@@ -53,7 +53,7 @@ export function LinkFolderButton({ compact = false, topbar = false }: { compact?
       : "Pick the folder your music lives in (subfolders included). Setcraft finds each track's audio for waveforms and playback.";
   return (
     <>
-      <button className={topbar ? '' : 'small'} onClick={pick} title={title}>
+      <button className={`folder-btn ${topbar ? '' : 'small'}`} onClick={pick} title={title}>
         {label}
       </button>
       {fallbackInput}

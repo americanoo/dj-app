@@ -3722,3 +3722,158 @@ button.play-btn.playing:hover:not(:disabled) {
 .side-item.active {
   border: 0;
 }
+
+/* ---------- first-run tutorial ---------- */
+.tour-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(2, 2, 4, 0.72);
+  backdrop-filter: blur(6px);
+}
+.tour-welcome {
+  width: min(520px, 100%);
+  padding: 34px 34px 24px;
+  border-radius: 18px;
+  background: #101017;
+  box-shadow:
+    0 30px 80px -20px rgba(0, 0, 0, 0.9),
+    0 0 0 1px rgba(255, 255, 255, 0.05);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+.tour-welcome h2 {
+  font-size: 24px;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+}
+.tour-welcome p {
+  color: var(--text-2);
+  line-height: 1.55;
+  max-width: 420px;
+}
+.tour-logo {
+  width: 52px;
+  height: 52px;
+  display: grid;
+  place-items: center;
+  border-radius: 16px;
+  font-size: 26px;
+  color: #fff;
+  background: var(--grad);
+  box-shadow: 0 10px 30px -10px rgba(166, 107, 255, 0.7);
+}
+.tour-choices {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin: 8px 0 4px;
+}
+.tour-skip {
+  margin-top: 4px;
+  color: var(--text-3);
+  justify-content: center;
+}
+/* The spotlight: everything but the target is dimmed; the app stays clickable. */
+.tour-spot {
+  position: fixed;
+  z-index: 180;
+  border-radius: 12px;
+  pointer-events: none;
+  box-shadow:
+    0 0 0 9999px rgba(2, 2, 4, 0.62),
+    0 0 0 2px rgba(236, 235, 244, 0.85),
+    0 0 30px 4px rgba(166, 107, 255, 0.35);
+  transition:
+    left 0.3s var(--ease),
+    top 0.3s var(--ease),
+    width 0.3s var(--ease),
+    height 0.3s var(--ease);
+}
+.tour-dim {
+  position: fixed;
+  inset: 0;
+  z-index: 180;
+  pointer-events: none;
+  background: rgba(2, 2, 4, 0.62);
+}
+.tour-card {
+  position: fixed;
+  z-index: 190;
+  width: 340px;
+  max-width: calc(100vw - 16px);
+  padding: 14px 16px 12px;
+  border-radius: 14px;
+  background: #15151d;
+  box-shadow:
+    0 24px 60px -16px rgba(0, 0, 0, 0.95),
+    0 0 0 1px rgba(255, 255, 255, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition:
+    left 0.3s var(--ease),
+    top 0.3s var(--ease);
+}
+.tour-card h3 {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.tour-card p {
+  color: var(--text-2);
+  line-height: 1.5;
+  font-size: 12.5px;
+}
+.tour-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.tour-count {
+  font: 600 10.5px var(--mono);
+  color: var(--text-3);
+  letter-spacing: 0.06em;
+}
+.tour-todo {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(166, 107, 255, 0.1);
+  color: #d4c2ff !important;
+}
+.tour-todo.done {
+  background: rgba(46, 230, 160, 0.12);
+  color: var(--ok) !important;
+}
+.tour-dots {
+  display: flex;
+  gap: 4px;
+}
+.tour-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+}
+.tour-dots i.past {
+  background: rgba(255, 255, 255, 0.35);
+}
+.tour-dots i.on {
+  width: 16px;
+  border-radius: 3px;
+  background: var(--on-bg);
+}
+.tour-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}

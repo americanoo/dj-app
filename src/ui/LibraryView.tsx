@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { isDemoTrack } from './demo';
 import { keyColor, toCamelot } from '../core/keys';
 import { TRACK_DRAG_TYPE } from './Timeline';
 import type { Track } from '../core/model';
@@ -19,11 +20,16 @@ export function LibraryView({
   selectedTrackId,
   onSelectTrack,
   onImport,
+  onDemo,
+  demoBusy = false,
   onFixBpms,
 }: {
   selectedTrackId: string | null;
   onSelectTrack: (id: string) => void;
   onImport: () => void;
+  /** Add the demo tracks (to try things before importing). */
+  onDemo?: () => void;
+  demoBusy?: boolean;
   onFixBpms: () => void;
 }) {
   const { project, dispatch } = useStore();
@@ -136,10 +142,15 @@ export function LibraryView({
             per line)
           </li>
         </ul>
-        <button className="primary big" onClick={onImport}>
-          Choose files…
-        </button>
-        <p className="muted">…or drag &amp; drop them anywhere on this page.</p>
+        <div className="row">
+          <button className="primary big" onClick={onImport}>
+            Choose files…
+          </button>
+          <button className="big" onClick={onDemo} disabled={demoBusy} title="Three short tracks made right here in your browser, to try everything out">
+            {demoBusy ? 'Making the demo tracks…' : 'Try it with demo tracks'}
+          </button>
+        </div>
+        <p className="muted">…or drag &amp; drop your exports anywhere on this page.</p>
         <div className="empty-folder">
           <p>
             <b>For waveforms</b>, link the folder your music lives in. Subfolders are searched too, and each track's
@@ -321,10 +332,16 @@ const TrackRow = memo(function TrackRow({
       <td>{t.artist}</td>
       <td>
         {t.title}
-        {!t.path && (
-          <span className="badge warn" title="No file location: can't be exported to DJ software">
-            no file
+        {isDemoTrack(t) ? (
+          <span className="badge" title="A demo track, made by Setcraft for trying things out. Delete it any time.">
+            demo
           </span>
+        ) : (
+          !t.path && (
+            <span className="badge warn" title="No file location: can't be exported to DJ software">
+              no file
+            </span>
+          )
         )}
       </td>
       <td className={oddBpm ? 'num bpm-odd' : 'num'} title={oddBpm ? 'Looks like half or double speed: see Fix BPMs' : undefined}>
