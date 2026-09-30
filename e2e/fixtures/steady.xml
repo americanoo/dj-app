@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<DJ_PLAYLISTS Version="1.0.0"><PRODUCT Name="rekordbox" Version="6.8.5" Company="AlphaTheta"/>
+<COLLECTION Entries="1">
+<TRACK TrackID="900" Name="Groove" Artist="Steady" Genre="Reggaeton" TotalTime="192" AverageBpm="120.00" Tonality="Am" Location="file://localhost/Users/dj/Music/Latin/Steady%20-%20Groove.wav"><TEMPO Inizio="0.000" Bpm="120.00" Metro="4/4" Battito="1"/></TRACK>
+</COLLECTION><PLAYLISTS><NODE Type="0" Name="ROOT" Count="0"></NODE></PLAYLISTS></DJ_PLAYLISTS>
