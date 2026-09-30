@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { EXPORT_TARGETS, exportCollection, exportFor, type CollectionTarget, type ExportTarget } from '../core/formats';
 import { safeName } from '../core/formats/rekordbox';
-import { setPlanMarkdown } from '../core/setplan';
+import { planCues, setPlanMarkdown, withPlanCues } from '../core/setplan';
 import { isChangedInSetcraft, type Track } from '../core/model';
 import { activeSet, useStore } from './store';
 import { useLicense } from './license';
@@ -62,6 +62,12 @@ export function ExportPanel({
   const [which, setWhich] = useState<'changed' | 'all'>(changedIds.length ? 'changed' : 'all');
   const [withSet, setWithSet] = useState(false);
   const [withUpdatesList, setWithUpdatesList] = useState(true);
+  // The night's transitions, written into the tracks as memory cues.
+  const mixCues = useMemo(() => planCues(set, lib), [set, lib]);
+  const mixCueTracks = Object.keys(mixCues);
+  const mixCueCount = Object.values(mixCues).reduce((n, c) => n + c.length, 0);
+  const [withMixCues, setWithMixCues] = useState(mixCueCount > 0);
+  const useMixCues = withMixCues && mixCueCount > 0;
   // playlist mode
   const [scope, setScope] = useState<Scope>(setTrackIds.length ? 'set' : 'library');
   const [playlistId, setPlaylistId] = useState(lib.playlists[0]?.id ?? '');
@@ -88,8 +94,10 @@ export function ExportPanel({
   // Collection: the chosen tracks, plus the set's tracks when the set goes along as a playlist.
   const collectionIds = useMemo(() => {
     const ids = which === 'changed' ? changedIds : Object.keys(lib.tracks);
-    return withSet ? [...new Set([...ids, ...setTrackIds])] : ids;
-  }, [which, changedIds, lib.tracks, withSet, setTrackIds]);
+    // Tracks gaining mix-point cues have changed too.
+    const extra = [...(withSet ? setTrackIds : []), ...(useMixCues ? mixCueTracks : [])];
+    return extra.length ? [...new Set([...ids, ...extra])] : ids;
+  }, [which, changedIds, lib.tracks, withSet, setTrackIds, useMixCues, mixCueTracks]);
 
   const trackIds = mode === 'collection' ? collectionIds : playlistTrackIds;
   const tracks = useMemo(() => {
@@ -127,7 +135,8 @@ export function ExportPanel({
   const run = (onlyFirst?: number) => {
     const allowed = onlyFirst ? new Set(tracks.slice(0, onlyFirst).map((t) => t.id)) : undefined;
     const keep = (ids: string[]) => (allowed ? ids.filter((id) => allowed.has(id)) : ids);
-    const tracks_ = allowed ? tracks.filter((t) => allowed.has(t.id)) : tracks;
+    const chosen = allowed ? tracks.filter((t) => allowed.has(t.id)) : tracks;
+    const tracks_ = useMixCues ? withPlanCues(chosen, mixCues) : chosen;
     try {
       let result: { file: { fileName: string; data: string | Uint8Array; mime: string }; notes: string[] };
       if (mode === 'collection') {
@@ -205,6 +214,7 @@ export function ExportPanel({
                 Add a “Setcraft updates” playlist listing them, so they’re easy to find
               </label>
             )}
+            <MixCuesToggle checked={useMixCues} disabled={!mixCueCount} count={mixCueCount} tracks={mixCueTracks.length} setName={set.name} onChange={setWithMixCues} />
             <label className="inline toggle">
               <input type="checkbox" checked={withSet} disabled={!setTrackIds.length} onChange={(e) => setWithSet(e.target.checked)} />
               Also add the set “{set.name}” as a playlist ({setTrackIds.length} track{setTrackIds.length === 1 ? '' : 's'}, in timeline order)
@@ -239,6 +249,7 @@ export function ExportPanel({
                 </select>
               </label>
             )}
+            <MixCuesToggle checked={useMixCues} disabled={!mixCueCount} count={mixCueCount} tracks={mixCueTracks.length} setName={set.name} onChange={setWithMixCues} />
             <label className="grow">
               Playlist name in the export
               <input value={name} placeholder={defaultName} onChange={(e) => setName(e.target.value)} />
@@ -352,5 +363,20 @@ export function ExportPanel({
         </p>
       </section>
     </div>
+  );
+}
+
+/** Write the night's transitions into the tracks as memory cues. */
+function MixCuesToggle(p: { checked: boolean; disabled: boolean; count: number; tracks: number; setName: string; onChange: (v: boolean) => void }) {
+  return (
+    <label
+      className="inline toggle"
+      title="Memory cues on each track: where to bring the next one in (with the blend), where it goes out, where it comes in from, and the bass swap. Only in the export; your cues here don't change."
+    >
+      <input type="checkbox" checked={p.checked} disabled={p.disabled} onChange={(e) => p.onChange(e.target.checked)} />
+      {p.disabled
+        ? `Add the night’s mix points as memory cues (none yet: “${p.setName}” needs two tracks that follow each other)`
+        : `Add the night’s mix points as memory cues (${p.count} on ${p.tracks} track${p.tracks === 1 ? '' : 's'} of “${p.setName}”)`}
+    </label>
   );
 }

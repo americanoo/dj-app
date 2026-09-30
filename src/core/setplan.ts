@@ -1,9 +1,10 @@
 /** Narrative analysis of a set: timeline, transition checks and a printable plan. */
-import type { Library, SetEntry, SetPlan, Track } from './model';
+import type { Cue, Library, SetEntry, SetPlan, Track } from './model';
 import { keyRelation, toCamelot, type KeyRelation } from './keys';
 import { effectiveBpmDelta } from './tempo';
 import { formatTime } from './time';
 import {
+  BLEND_STYLES,
   incomingCurves,
   incomingPhase,
   integrate,
@@ -340,4 +341,51 @@ export function describeTransition(a: Omit<NightSlot, 'curves'>, b: Omit<NightSl
   }
   if (a.bpm && b.bpm) info.bpmChange = Math.round(((b.bpm - a.bpm) / a.bpm) * 1000) / 10;
   return info;
+}
+
+/** Colours for the night's mix points in the DJ software: where to bring the next track in, and where to leave. */
+const PLAN_IN_COLOR = '#22d3ee';
+const PLAN_OUT_COLOR = '#ff3d9a';
+const PLAN_SWAP_COLOR = '#ffb020';
+
+/**
+ * The night's transitions as memory cues for the DJ software, so the plan is on
+ * the waveform when you play it for real. On the outgoing track: where to bring
+ * the next one in, and where this one goes out. On the incoming track: where it
+ * comes in from, and the bass swap. Positions follow the tempo ride, so they're
+ * where the plan puts them in each file. A cue already sitting on the same spot
+ * isn't doubled.
+ */
+export function planCues(set: SetPlan, lib: Library): Record<string, Cue[]> {
+  const slots = nightSlots(buildTimeline(set, lib));
+  const out: Record<string, Cue[]> = {};
+  const add = (trackId: string, start: number, name: string, color: string) => {
+    const t = lib.tracks[trackId];
+    // Nothing past (or right at) the end of the file: the track has simply run out there.
+    if (!t || start < 0 || (t.duration && start > t.duration - 0.5)) return;
+    const pos = Math.round(start * 1000) / 1000;
+    const taken = [...t.cues, ...(out[trackId] ?? [])].some((c) => Math.abs(c.start - pos) < 0.05);
+    if (taken) return;
+    (out[trackId] ??= []).push({ id: `plan-${trackId}-${pos}`, kind: 'cue', slot: null, start: pos, name, color, origin: 'manual' });
+  };
+  for (const { a, b, plan } of transitionsOf(slots)) {
+    const ta = lib.tracks[a.trackId];
+    const tb = lib.tracks[b.trackId];
+    if (!ta || !tb) continue;
+    const style = BLEND_STYLES.find((s) => s.id === plan.style)?.label.toLowerCase() ?? '';
+    const ride = plan.sync && tb.bpm ? `, ride to ${Math.round(tb.bpm)}` : '';
+    const aSlot = slots.find((s) => s.id === a.id)!;
+    if (plan.inAt >= a.startsAt && plan.inAt < a.startsAt + a.playFor) {
+      add(a.trackId, slotPos(aSlot, plan.inAt), `▸ ${tb.title} in (${style}${ride})`, PLAN_IN_COLOR);
+    }
+    add(a.trackId, slotPos(aSlot, plan.outAt), `◂ out → ${tb.title}`, PLAN_OUT_COLOR);
+    add(b.trackId, b.mixIn, `◂ in from ${ta.title}`, PLAN_IN_COLOR);
+    if (plan.swapAt !== undefined) add(b.trackId, b.mixIn + (plan.swapAt - plan.inAt), '⇅ bass swap', PLAN_SWAP_COLOR);
+  }
+  return out;
+}
+
+/** Tracks with the night's mix points added to their cues (for export only; the project isn't changed). */
+export function withPlanCues(tracks: Track[], cues: Record<string, Cue[]>): Track[] {
+  return tracks.map((t) => (cues[t.id]?.length ? { ...t, cues: [...t.cues, ...cues[t.id]] } : t));
 }

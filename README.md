@@ -245,6 +245,13 @@ Export has two modes:
 - **Playlist only**: an ordered list (the set, an imported playlist, the changed tracks or the library), for any
   target including Serato crates and M3U8.
 
+In both modes, **Add the night's mix points as memory cues** (on whenever the set has a transition) writes the
+plan into the tracks, so it's on the waveform when you play the night for real: on the outgoing track, where to
+bring the next one in (with the blend and the tempo ride, e.g. *▸ Groove in (bass swap, ride to 120)*) and where
+it goes out; on the incoming track, where it comes in from and the bass swap. Positions follow the tempo ride, a
+cue already on the same spot isn't doubled, and nothing lands past the end of a file. The night's tracks go along
+even if they're otherwise unchanged. Only the export gets them; your cues in Setcraft stay as they are.
+
 | Target                  | File           | Carries                                 | How to load it |
 |-------------------------|----------------|-----------------------------------------|----------------|
 | rekordbox               | `.xml`         | playlist, hot cues + colours, memory cues, loops, grid | Preferences → Advanced → *rekordbox xml* → import the playlist from the *rekordbox xml* tree |

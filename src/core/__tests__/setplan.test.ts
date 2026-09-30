@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { newSet, type Library, type Track } from '../model';
-import { buildTimeline, describeTransition, formatSetTime, nextInNight, nightSlots, slotsAt, transitionsOf, nightAtTrack, trackAtNight, parseClock, setEnd, setPlanMarkdown, totalSeconds, withTimes } from '../setplan';
+import { buildTimeline, describeTransition, planCues, withPlanCues, formatSetTime, nextInNight, nightSlots, slotsAt, transitionsOf, nightAtTrack, trackAtNight, parseClock, setEnd, setPlanMarkdown, totalSeconds, withTimes } from '../setplan';
 import { reducer } from '../../ui/store';
 import { emptyProject } from '../model';
 
@@ -235,6 +235,24 @@ describe('night playback and transitions', () => {
     expect(slotsAt(slots, 100).map((s) => s.trackId)).toEqual(['a']);
     expect(slotsAt(slots, 280).map((s) => s.trackId)).toEqual(['a', 'b']);
     expect(slotsAt(slots, 650)).toEqual([]);
+  });
+
+  it('turns the plan into memory cues for the DJ software', () => {
+    const cues = planCues(set, lib);
+    const names = (id: string) => (cues[id] ?? []).map((c) => `${c.name} @ ${c.start.toFixed(2)}`);
+    // a: where b comes in (after a's tempo ride to 126: 0.4 s further into the file). Its planned
+    // out is the end of its file, which the faster ride reaches early: no cue past the end.
+    expect(names('a')).toEqual(['▸ B in (bass swap, ride to 126) @ 268.90']);
+    // b: its mix-in already has a hot cue (0:30), so no "in from" cue on top of it; the bass swap is marked
+    expect(names('b').length).toBe(1);
+    expect(names('b')[0]).toMatch(/^⇅ bass swap @ 4\d\.\d\d$/);
+    // c comes in after a gap (b just ends): only where it comes in
+    expect(names('c')).toEqual(['◂ in from B @ 0.00']);
+    for (const c of Object.values(cues).flat()) expect(c.slot).toBeNull();
+    // added to the exported copies only
+    const exported = withPlanCues([lib.tracks.b], cues);
+    expect(exported[0].cues.length).toBe(lib.tracks.b.cues.length + 1);
+    expect(lib.tracks.b.cues.length).toBe(1);
   });
 
   it('describes each transition', () => {

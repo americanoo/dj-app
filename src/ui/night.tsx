@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useSyncExternalStore, type ReactNode } from 'react';
 import { buildTimeline, nightSlots } from '../core/setplan';
-import { audioContext, useAudio } from './audio';
+import { audioContext, decodedAudio, useAudio } from './audio';
 import { useMusicFolder } from './musicFolder';
 import { NightPlayer } from './nightPlayer';
 import { activeSet, useStore } from './store';
@@ -26,14 +26,16 @@ export function NightProvider({ children }: { children: ReactNode }) {
   }
   const player = shared;
   // Audio comes from a file attached this session, or else the linked music folder.
-  player.setLoader(async (trackId) => {
-    const { audio: attached, folder: f, tracks } = refs.current;
-    let data: ArrayBuffer | undefined;
-    const a = attached[trackId];
-    if (a) data = await (await fetch(a.url)).arrayBuffer();
-    else if (f.status === 'ready') data = await (await f.findFile(tracks[trackId]?.path))?.arrayBuffer();
-    return data ? audioContext().decodeAudioData(data) : undefined;
-  });
+  player.setLoader((trackId) =>
+    // The same decoded audio the deck uses, so a track in both is only held once.
+    decodedAudio(trackId, async () => {
+      const { audio: attached, folder: f, tracks } = refs.current;
+      const a = attached[trackId];
+      if (a) return (await fetch(a.url)).arrayBuffer();
+      if (f.status === 'ready') return (await f.findFile(tracks[trackId]?.path))?.arrayBuffer();
+      return undefined;
+    }),
+  );
 
   useEffect(() => {
     player.setSlots(nightSlots(buildTimeline(activeSet(project), project.library)));

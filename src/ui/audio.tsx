@@ -41,7 +41,7 @@ interface AudioStore {
   getWaveform: (trackId: string) => Promise<WaveformData | undefined>;
   forget: (trackId: string) => void;
   forgetAll: () => void;
-  /** Decoded audio for playback (decodes again if another track was decoded since). */
+  /** Decoded audio for playback, from the shared cache (decoded again only if it was let go). */
   getBuffer: (trackId: string) => Promise<AudioBuffer | undefined>;
 }
 
@@ -106,14 +106,43 @@ function runAnalysis(buf: AudioBuffer): Promise<BandPeaks> {
 }
 
 /**
- * Most recently decoded track. Decoded audio is large (about 130 MB for six
- * minutes of stereo), so only one is kept, for the deck.
+ * Decoded audio, shared by everything that plays: the deck and the night
+ * player ask for a track here and get the same AudioBuffer, so a track is
+ * never held twice. Decoded audio is large (about 130 MB for six minutes of
+ * stereo), so only the few most recently used tracks are kept.
  */
-let decoded: { trackId: string; buffer: AudioBuffer } | null = null;
+const DECODED_MAX = 4;
+const decodedCache = new Map<string, Promise<AudioBuffer | undefined>>();
+
+/** A track's decoded audio: from the cache, or decoded from `load`'s bytes (and kept). */
+export function decodedAudio(trackId: string, load: () => Promise<ArrayBuffer | undefined>): Promise<AudioBuffer | undefined> {
+  const hit = decodedCache.get(trackId);
+  if (hit) {
+    // Most recently used goes to the back of the queue.
+    decodedCache.delete(trackId);
+    decodedCache.set(trackId, hit);
+    return hit;
+  }
+  const p = load()
+    .then((data) => (data ? audioContext().decodeAudioData(data) : undefined))
+    .catch(() => undefined);
+  decodedCache.set(trackId, p);
+  // Nothing to decode (no file yet): don't remember that, so it's tried again later.
+  void p.then((buf) => !buf && decodedCache.get(trackId) === p && decodedCache.delete(trackId));
+  while (decodedCache.size > DECODED_MAX) decodedCache.delete(decodedCache.keys().next().value!);
+  return p;
+}
+
+function keepDecoded(trackId: string, buf: AudioBuffer) {
+  decodedCache.delete(trackId);
+  decodedCache.set(trackId, Promise.resolve(buf));
+  while (decodedCache.size > DECODED_MAX) decodedCache.delete(decodedCache.keys().next().value!);
+}
 
 async function analyse(trackId: string, file: File): Promise<WaveformData> {
   const buf = await audioContext().decodeAudioData(await file.arrayBuffer());
-  decoded = { trackId, buffer: buf };
+  // A newly attached file replaces whatever was decoded for the track before.
+  keepDecoded(trackId, buf);
   const r = await runAnalysis(buf);
   return {
     duration: buf.duration,
@@ -222,12 +251,9 @@ export function AudioProvider({ children }: { children: ReactNode }) {
 
   const getBuffer = useCallback(
     async (trackId: string) => {
-      if (decoded?.trackId === trackId) return decoded.buffer;
       const a = audio[trackId];
       if (!a) return undefined;
-      const buffer = await audioContext().decodeAudioData(await (await fetch(a.url)).arrayBuffer());
-      decoded = { trackId, buffer };
-      return buffer;
+      return decodedAudio(trackId, async () => (await fetch(a.url)).arrayBuffer());
     },
     [audio],
   );

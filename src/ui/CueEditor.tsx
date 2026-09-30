@@ -1,28 +1,28 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { keyColor, toCamelot, normaliseKey } from '../core/keys';
+import { keyColor, toCamelot } from '../core/keys';
 import { nextInNight, withTimes } from '../core/setplan';
-import { scaleTempo } from '../core/tempo';
-import { CUE_COLORS, MAX_HOT_CUES, SLOT_LETTERS, uid, type Cue, type Project, type Track } from '../core/model';
-import { barBeatLabel, beatLength, formatTime, parseTime, round, SNAP_MODES, snapTime, type SnapMode } from '../core/time';
+import { CUE_COLORS, MAX_HOT_CUES, SLOT_LETTERS, uid, type Cue, type Track } from '../core/model';
+import { barBeatLabel, beatLength, formatTime, round, SNAP_MODES, snapTime, type SnapMode } from '../core/time';
 import { audioContext, useAudio } from './audio';
 import { Deck, FX_BEATS, type OutFx } from './deck';
 import { moveCueToSlot } from '../core/cues';
 import { useMusicFolder } from './musicFolder';
 import { useFitZoom } from './fit';
-import { Knob } from './Knob';
 import { JOG_SPEEDS, useMidi, useMidiActions } from './midi';
 import { transport } from './transport';
 import { useNight, useNightState } from './night';
 import { NightNow, SourceSwitch } from './NightBar';
 import { AutoCuePanel } from './AutoCuePanel';
+import { CueHistory } from './CueHistory';
+import { NightStepper, TrackFields } from './TrackFields';
+import { CueForm } from './CueForm';
+import { PlayerBar } from './PlayerBar';
+import { PlayIcon } from './PlayIcon';
 import { LinkFolderButton } from './MusicFolderControl';
 import { activeSet, useStore } from './store';
 import { SECTION_COLORS, Waveform } from './Waveform';
 import { detectSections, SECTION_LABELS } from '../core/sections';
-import { PadStrip } from './MergeReview';
-import { formatWhen, useVersions } from './versions';
-import { cueDiffSummary, cueHistory, type CueHistoryEntry, type VersionMeta } from '../core/versions';
 
 const LOOP_BEATS = [1, 2, 4, 8, 16, 32];
 const ZOOM_BARS = [2, 4, 8, 16, 32];
@@ -38,6 +38,18 @@ export function CueEditor({ trackId, onSelectTrack }: { trackId: string | null; 
   useEffect(() => {
     if (!track) transport.publish(null);
   }, [track]);
+  // With no track on the deck, Space still plays and pauses the night when the bar is on it.
+  useEffect(() => {
+    if (track) return;
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName;
+      if (e.code !== 'Space' || !night.active || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      e.preventDefault();
+      night.toggle();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [track, night]);
   if (!track) {
     return (
       <>
@@ -109,7 +121,6 @@ function TrackCueWorkspace({
   const { dispatch, project } = useStore();
   const { audio: attached, remembered, rememberedIds, loading, attach, loadRemembered, getBuffer } = useAudio();
   const night = useNight();
-  const nightState = useNightState();
   const folder = useMusicFolder();
   const audioInfo = attached[track.id];
   // Playable audio from this visit, or the waveform remembered from an earlier one.
@@ -1168,142 +1179,29 @@ function TrackCueWorkspace({
         </section>
       </div>
 
-      {createPortal(
-        // The player bar floats along the bottom of the whole app.
-        <div className="transport-bar" role="region" aria-label="Player">
-          <div className="tb-left">
-            <SourceSwitch />
-            {nightState.active ? (
-              <NightNow />
-            ) : (
-              <>
-            <div className="tb-track">
-              <b>{track.title}</b>
-              <span>
-                {track.artist}
-                {track.key && (
-                  <i className="key-pill" style={{ background: keyColor(track.key) }}>
-                    {toCamelot(track.key)}
-                  </i>
-                )}
-              </span>
-            </div>
-            <span className="clock">
-              {formatTime(playhead)}
-              {bpm && <span className="muted"> · bar {barBeatLabel(playhead, bpm, gridStart)}</span>}
-            </span>
-            {activeLoop && (
-              <button className="small looping-btn" onClick={exitLoop} title="Release the loop and play on">
-                ↻ {activeLoop.name || 'Loop'} · exit
-              </button>
-            )}
-              </>
-            )}
-          </div>
-          <div className="transport">
-            {nightState.active ? (
-              <button className="small" onClick={() => night.jumpMix(-1)} title="To just before the previous mix">
-                ◂ Mix
-              </button>
-            ) : (
-              <button className="small" onClick={() => seek(q(now() - (beat ?? 0.5) * 4))} title="Back one bar (Shift+←)">
-                −1 bar
-              </button>
-            )}
-            {(() => {
-              const on = nightState.active ? nightState.playing : playing;
-              return (
-                <button
-                  className={`play-btn ${on ? 'playing' : ''}`}
-                  onClick={togglePlay}
-                  disabled={!nightState.active && !deckReady}
-                  title={on ? 'Pause (Space)' : 'Play (Space)'}
-                  aria-label={on ? 'Pause' : 'Play'}
-                >
-                  <PlayIcon playing={on} />
-                </button>
-              );
-            })()}
-            {nightState.active ? (
-              <button className="small" onClick={() => night.jumpMix(1)} title="To just before the next mix">
-                Mix ▸
-              </button>
-            ) : (
-              <button className="small" onClick={() => seek(q(now() + (beat ?? 0.5) * 4))} title="Forward one bar (Shift+→)">
-                +1 bar
-              </button>
-            )}
-          </div>
-          <div className="tb-right">
-            <div className="snap-control fx-group" role="group" aria-label="Out effects">
-              <span className="snap-label">FX</span>
-              {(
-                [
-                  ['echo', 'Echo', 'E', 'Echo out: beat-synced echoes; the track cuts on the first echo and the echoes fade'],
-                  ['reverb', 'Reverb', 'R', 'Reverb out: the track swells into a big reverb, cuts, and the reverb rings out'],
-                  ['loop', 'Loop', 'L', 'Loop out: the next beats repeat as a loop roll that fades over two bars while a filter sweeps up'],
-                  ['spin', 'Spin', 'B', 'Backspin: whips the record backwards and winds it down'],
-                ] as [OutFx, string, string, string][]
-              ).map(([kind, label, key, hint]) => (
-                <button
-                  key={kind}
-                  className={fxActive === kind ? 'on' : ''}
-                  disabled={!deckReady}
-                  onClick={() => fireFx(kind)}
-                  title={`${hint}. Key ${key}. Stopped? It plays a bar from the playhead first.`}
-                >
-                  {label}
-                </button>
-              ))}
-              <select
-                className="fx-beats"
-                value={fxBeats}
-                onChange={(e) => setFxBeats(Number(e.target.value))}
-                aria-label="FX beats"
-                title="Beats: the echo time, how long the reverb swells, the loop length, or how long the backspin lasts"
-              >
-                {FX_BEATS.map((b) => (
-                  <option key={b} value={b}>
-                    {b === 0.25 ? '1/4' : b === 0.5 ? '1/2' : b === 0.75 ? '3/4' : b} {b > 1 ? 'beats' : 'beat'}
-                  </option>
-                ))}
-              </select>
-              <Knob
-                value={fxMix}
-                onChange={setFxMix}
-                label="D/W"
-                title="Dry/wet: left mostly the track, middle both, right only the effect (on the loop out, how far the filter sweeps)"
-              />
-              <button
-                className={`then-next ${playOn ? 'on' : ''}`}
-                aria-pressed={playOn}
-                onClick={() => setPlayOn((v) => !v)}
-                title={
-                  next
-                    ? `Then play on into the next track of the night, “${project.library.tracks[next.trackId]?.title}”, from ${formatTime(next.at, false)}, while the FX tail rings (also when a track ends). ${playOn ? 'On' : 'Off'}.`
-                    : 'Then play on into the next track of the night (this track has none after it in the set).'
-                }
-              >
-                ▸ Next
-              </button>
-            </div>
-            <label className="inline volume" title="Preview volume · the bar shows the level going to your speakers">
-              Vol
-              <span className="level-meter" ref={meterRef} aria-hidden />
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.01}
-                value={volume}
-                onChange={(e) => setVolume(Number(e.target.value))}
-                aria-label="Volume"
-              />
-            </label>
-          </div>
-        </div>,
-        document.body,
-      )}
+      <PlayerBar
+        track={track}
+        playhead={playhead}
+        activeLoop={activeLoop}
+        onExitLoop={exitLoop}
+        onBarBack={() => seek(q(now() - (beat ?? 0.5) * 4))}
+        onBarForward={() => seek(q(now() + (beat ?? 0.5) * 4))}
+        playing={playing}
+        deckReady={deckReady}
+        onTogglePlay={togglePlay}
+        fxActive={fxActive}
+        onFx={fireFx}
+        fxBeats={fxBeats}
+        onFxBeats={setFxBeats}
+        fxMix={fxMix}
+        onFxMix={setFxMix}
+        playOn={playOn}
+        onPlayOn={() => setPlayOn((v) => !v)}
+        next={next ? { title: project.library.tracks[next.trackId]?.title ?? '', at: next.at } : undefined}
+        volume={volume}
+        onVolume={setVolume}
+        meterRef={meterRef}
+      />
       {autoOpen && <AutoCuePanel track={track} sections={sections} wave={wave} onApply={setCues} onClose={() => setAutoOpen(false)} />}
       {historyOpen &&
         // Portalled so the pop-up isn't scaled with the deck.
@@ -1321,326 +1219,5 @@ function TrackCueWorkspace({
           document.body,
         )}
     </div>
-  );
-}
-
-/** Earlier states of this track's cues from saved versions, with one-click restore. */
-function CueHistory({ track, autoLoad = false }: { track: Track; autoLoad?: boolean }) {
-  const { project, dispatch } = useStore();
-  const { versions, load, save } = useVersions();
-  const [entries, setEntries] = useState<CueHistoryEntry[] | null>(null);
-  const [loadingHistory, setLoadingHistory] = useState(false);
-
-  const show = async () => {
-    setLoadingHistory(true);
-    try {
-      const snapshots = await Promise.all(
-        versions.map(async (meta) => ({ meta, project: await load(meta.id) })),
-      );
-      setEntries(
-        cueHistory(
-          track.id,
-          track.cues,
-          snapshots.filter((s): s is { meta: VersionMeta; project: Project } => !!s.project),
-        ),
-      );
-    } finally {
-      setLoadingHistory(false);
-    }
-  };
-
-  useEffect(() => {
-    if (autoLoad && versions.length) void show();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Refresh when the track's cues change (e.g. after a restore).
-  useEffect(() => {
-    if (entries) void show();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [track.cues, versions]);
-
-  const restore = async (e: CueHistoryEntry) => {
-    await save(project, `Before restoring cues of ${track.artist} – ${track.title}`, true).catch(() => undefined);
-    // Restored cues count as edits made here, so later imports won't overwrite them.
-    dispatch({ type: 'setCues', trackId: track.id, cues: e.cues.map((c) => ({ ...c, edited: true, pinned: undefined })) });
-  };
-
-  return (
-    <section className="card">
-      <div className="card-head">
-        <h3>Earlier versions of these cues</h3>
-        <span className="muted">From your saved versions</span>
-        {!entries && (
-          <button className="small" disabled={loadingHistory || !versions.length} onClick={() => void show()}>
-            {versions.length ? (loadingHistory ? 'Loading…' : 'Show history') : 'No saved versions yet'}
-          </button>
-        )}
-      </div>
-      {entries && !entries.length && <p className="muted">These cues haven't changed in any saved version.</p>}
-      {entries?.map((e) => (
-        <div key={e.version.id} className="history-row">
-          <div className="history-meta">
-            <b>{e.version.name}</b>
-            <span className="muted small-text">
-              {formatWhen(e.version.createdAt)} · {e.cues.length} cue{e.cues.length === 1 ? '' : 's'}
-            </span>
-            <ul className="diff-list">
-              {cueDiffSummary(e.cues, track.cues).map((d) => (
-                <li key={d}>{d}</li>
-              ))}
-            </ul>
-          </div>
-          <PadStrip label="" cues={e.cues} />
-          <button className="small" onClick={() => void restore(e)}>
-            Restore these cues
-          </button>
-        </div>
-      ))}
-    </section>
-  );
-}
-
-/** ‹ › to step to the previous / next track in the night. */
-function NightStepper({ trackId, onSelectTrack }: { trackId: string; onSelectTrack: (id: string) => void }) {
-  const { project } = useStore();
-  const ids = withTimes(activeSet(project), project.library)
-    .entries.map((e) => e.trackId)
-    .filter((id) => project.library.tracks[id]);
-  const idx = ids.indexOf(trackId);
-  return (
-    <div className="night-stepper">
-      <button className="icon" disabled={idx <= 0} onClick={() => onSelectTrack(ids[idx - 1])} title="Previous track in the night">
-        ‹
-      </button>
-      <span className="muted small-text">{idx >= 0 ? `${idx + 1}/${ids.length}` : 'not in set'}</span>
-      <button
-        className="icon"
-        disabled={idx < 0 || idx >= ids.length - 1}
-        onClick={() => onSelectTrack(ids[idx + 1])}
-        title="Next track in the night"
-      >
-        ›
-      </button>
-    </div>
-  );
-}
-
-function CueForm({
-  cue,
-  beat,
-  occupied,
-  onChange,
-  onSlotChange,
-  onDelete,
-  onJump,
-  onSetToPlayhead,
-}: {
-  cue: Cue;
-  beat: number | undefined;
-  occupied: (Cue | undefined)[];
-  onChange: (patch: Partial<Cue>) => void;
-  onSlotChange: (slot: number | null) => void;
-  onDelete: () => void;
-  onJump: () => void;
-  onSetToPlayhead: () => void;
-}) {
-  const [startText, setStartText] = useState(formatTime(cue.start));
-  useEffect(() => setStartText(formatTime(cue.start)), [cue.start]);
-  const loopBeats = cue.end !== undefined && beat ? round((cue.end - cue.start) / beat, 3) : undefined;
-
-  const nudge = (sec: number) => {
-    const start = round(Math.max(0, cue.start + sec), 3);
-    onChange({ start, end: cue.end !== undefined ? round(cue.end + (start - cue.start), 3) : undefined });
-  };
-
-  return (
-    <div className="cue-form">
-      <div className="row">
-        <label className="grow">
-          Name
-          <input value={cue.name} placeholder="e.g. Vocal in, Drop, Outro" onChange={(e) => onChange({ name: e.target.value })} autoFocus />
-        </label>
-        <label>
-          Pad
-          <select value={cue.slot ?? ''} onChange={(e) => onSlotChange(e.target.value === '' ? null : Number(e.target.value))}>
-            <option value="">Memory</option>
-            {SLOT_LETTERS.map((l, i) => (
-              <option key={l} value={i}>
-                {l}
-                {occupied[i] ? ' (replace)' : ''}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-      <div className="row">
-        <label>
-          Start
-          <input
-            value={startText}
-            onChange={(e) => setStartText(e.target.value)}
-            onBlur={() => {
-              const s = parseTime(startText);
-              if (s !== undefined) nudge(s - cue.start);
-              else setStartText(formatTime(cue.start));
-            }}
-          />
-        </label>
-        {cue.kind === 'loop' && (
-          <label>
-            Length (beats)
-            <input
-              type="number"
-              min={0.03125}
-              step="any"
-              value={loopBeats ?? ''}
-              disabled={!beat}
-              onChange={(e) => {
-                const b = Number(e.target.value);
-                if (beat && b > 0) onChange({ end: round(cue.start + b * beat, 3) });
-              }}
-            />
-          </label>
-        )}
-        <label>
-          Type
-          <select
-            value={cue.kind}
-            onChange={(e) =>
-              e.target.value === 'loop'
-                ? onChange({ kind: 'loop', end: round(cue.start + (beat ?? 0.5) * 16, 3) })
-                : onChange({ kind: 'cue', end: undefined })
-            }
-          >
-            <option value="cue">Cue</option>
-            <option value="loop">Loop</option>
-          </select>
-        </label>
-      </div>
-      <div className="row wrap">
-        <span className="muted">Nudge</span>
-        {beat && (
-          <>
-            <button className="small" onClick={() => nudge(-beat * 4)}>−bar</button>
-            <button className="small" onClick={() => nudge(-beat)}>−beat</button>
-          </>
-        )}
-        <button className="small" onClick={() => nudge(-0.01)}>−10ms</button>
-        <button className="small" onClick={() => nudge(0.01)}>+10ms</button>
-        {beat && (
-          <>
-            <button className="small" onClick={() => nudge(beat)}>+beat</button>
-            <button className="small" onClick={() => nudge(beat * 4)}>+bar</button>
-          </>
-        )}
-      </div>
-      <div className="row wrap">
-        <span className="muted">Colour</span>
-        {CUE_COLORS.map((c) => (
-          <button
-            key={c}
-            className={`swatch-btn ${cue.color === c ? 'active' : ''}`}
-            style={{ background: c }}
-            onClick={() => onChange({ color: c })}
-            aria-label={`Colour ${c}`}
-          />
-        ))}
-        <input type="color" value={cue.color} onChange={(e) => onChange({ color: e.target.value })} aria-label="Custom colour" />
-      </div>
-      <div className="row">
-        <button className="small" onClick={onJump}>Jump to</button>
-        <button className="small" onClick={onSetToPlayhead}>Move to playhead</button>
-        <span className="grow" />
-        <button className="small danger" onClick={onDelete}>Delete</button>
-      </div>
-    </div>
-  );
-}
-
-function TrackFields({ track }: { track: Track }) {
-  const { dispatch } = useStore();
-  const update = (patch: Partial<Track>) => dispatch({ type: 'updateTrack', id: track.id, patch });
-  const [bpmText, setBpmText] = useState(track.bpm?.toString() ?? '');
-  useEffect(() => setBpmText(track.bpm?.toString() ?? ''), [track.bpm]);
-  const [keyText, setKeyText] = useState(track.key ?? '');
-  const [gridText, setGridText] = useState(track.gridStart !== undefined ? formatTime(track.gridStart) : '');
-
-  return (
-    <div className="track-fields">
-      <label>
-        <span className="bpm-label">
-          BPM
-          <button
-            className="tempo-btn"
-            disabled={!track.bpm}
-            onClick={() => update(scaleTempo(track, 0.5))}
-            title="Halve the BPM (fix a double-time reading, e.g. 192 → 96)"
-          >
-            ×½
-          </button>
-          <button
-            className="tempo-btn"
-            disabled={!track.bpm}
-            onClick={() => update(scaleTempo(track, 2))}
-            title="Double the BPM (fix a half-time reading, e.g. 87 → 174)"
-          >
-            ×2
-          </button>
-        </span>
-        <input
-          value={bpmText}
-          inputMode="decimal"
-          onChange={(e) => setBpmText(e.target.value)}
-          onBlur={() => {
-            const n = Number(bpmText);
-            const bpm = n > 0 ? n : undefined;
-            // A hand-edited tempo replaces any imported variable-tempo grid.
-            if (bpm !== track.bpm) update({ bpm, beatGrid: undefined });
-          }}
-        />
-      </label>
-      <label>
-        <span>
-          Key {track.key && <span className="muted">· {toCamelot(track.key)}</span>}
-        </span>
-        <input value={keyText} onChange={(e) => setKeyText(e.target.value)} onBlur={() => update({ key: normaliseKey(keyText.trim()) })} />
-      </label>
-      <label title="Position of the first downbeat (bar 1, beat 1)">
-        Grid start
-        <input
-          value={gridText}
-          placeholder="0:00.000"
-          onChange={(e) => setGridText(e.target.value)}
-          onBlur={() => {
-            const gridStart = parseTime(gridText);
-            const unchanged =
-              gridStart !== undefined && track.gridStart !== undefined && Math.abs(gridStart - track.gridStart) < 0.0005;
-            if (!unchanged && gridStart !== track.gridStart) update({ gridStart, beatGrid: undefined });
-          }}
-        />
-      </label>
-      <label className="grow" title="Absolute path of the audio file on the computer running your DJ software">
-        File location
-        <input
-          value={track.path ?? ''}
-          placeholder="/Users/you/Music/Artist - Title.mp3"
-          onChange={(e) => update({ path: e.target.value || undefined })}
-        />
-      </label>
-    </div>
-  );
-}
-
-function PlayIcon({ playing }: { playing: boolean }) {
-  return playing ? (
-    <svg viewBox="0 0 24 24" aria-hidden>
-      <rect x="6" y="5" width="4.2" height="14" rx="1" />
-      <rect x="13.8" y="5" width="4.2" height="14" rx="1" />
-    </svg>
-  ) : (
-    <svg viewBox="0 0 24 24" aria-hidden>
-      <path d="M8.5 5.2v13.6a.8.8 0 0 0 1.2.7l10.6-6.8a.8.8 0 0 0 0-1.4L9.7 4.5a.8.8 0 0 0-1.2.7z" />
-    </svg>
   );
 }
