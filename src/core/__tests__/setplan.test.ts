@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { newSet, type Library, type Track } from '../model';
-import { buildTimeline, formatSetTime, parseClock, setEnd, setPlanMarkdown, totalSeconds, withTimes } from '../setplan';
+import { buildTimeline, formatSetTime, nextInNight, nightAtTrack, trackAtNight, parseClock, setEnd, setPlanMarkdown, totalSeconds, withTimes } from '../setplan';
 import { reducer } from '../../ui/store';
 import { emptyProject } from '../model';
 
@@ -144,5 +144,64 @@ describe('set clock', () => {
     expect(formatSetTime(7200, '23:00')).toBe('01:00'); // past midnight
     expect(formatSetTime(3725)).toBe('1:02:05');
     expect(formatSetTime(65)).toBe('1:05');
+  });
+});
+
+describe('playing on into the next track', () => {
+  const lib: Library = {
+    tracks: {
+      a: track('a', { duration: 300 }),
+      b: track('b', { duration: 400, gridStart: 0.4, cues: [{ id: 'in', kind: 'cue', slot: 0, start: 30, name: 'In', color: '#fff' }] }),
+      c: track('c', { duration: 360, gridStart: 0.25 }),
+    },
+    playlists: [],
+  };
+  const set = newSet('Night');
+  const ch = set.chapters[0].id;
+  set.entries = [
+    { id: '1', trackId: 'a', chapterId: ch, energy: 3, transition: '', notes: '', at: 0 },
+    { id: '3', trackId: 'c', chapterId: ch, energy: 8, transition: '', notes: '', at: 600 },
+    { id: '2', trackId: 'b', chapterId: ch, energy: 5, transition: '', notes: '', at: 280, mixInCueId: 'in' },
+  ];
+
+  it('follows the night in time order and starts at the mix-in cue, else the first downbeat', () => {
+    expect(nextInNight(set, lib, 'a')).toEqual({ trackId: 'b', at: 30 });
+    expect(nextInNight(set, lib, 'b')).toEqual({ trackId: 'c', at: 0.25 });
+  });
+
+  it('has nothing after the last track, or for a track not in the night', () => {
+    expect(nextInNight(set, lib, 'c')).toBeUndefined();
+    expect(nextInNight(set, lib, 'zzz')).toBeUndefined();
+  });
+});
+
+describe('scrubbing the night', () => {
+  const lib: Library = {
+    tracks: {
+      a: track('a', { duration: 300 }),
+      b: track('b', { duration: 400, cues: [{ id: 'in', kind: 'cue', slot: 0, start: 30, name: 'In', color: '#fff' }] }),
+    },
+    playlists: [],
+  };
+  const set = newSet('Night');
+  const ch = set.chapters[0].id;
+  set.entries = [
+    { id: '1', trackId: 'a', chapterId: ch, energy: 3, transition: '', notes: '', at: 0 },
+    // b comes in at 4:40 (a blend over a's last 20 s) from its mix-in at 0:30
+    { id: '2', trackId: 'b', chapterId: ch, energy: 5, transition: '', notes: '', at: 280, mixInCueId: 'in' },
+  ];
+  const items = buildTimeline(set, lib);
+
+  it('maps a moment of the night to a track and a spot in it', () => {
+    expect(trackAtNight(items, 100)).toEqual({ trackId: 'a', pos: 100 });
+    // during the blend the incoming track wins
+    expect(trackAtNight(items, 290)).toEqual({ trackId: 'b', pos: 40 });
+    expect(trackAtNight(items, 500)).toEqual({ trackId: 'b', pos: 250 });
+  });
+
+  it('and back again', () => {
+    expect(nightAtTrack(items, 'a', 100)).toBe(100);
+    expect(nightAtTrack(items, 'b', 40)).toBe(290);
+    expect(nightAtTrack(items, 'zzz', 1)).toBeUndefined();
   });
 });

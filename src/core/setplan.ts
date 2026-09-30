@@ -169,3 +169,43 @@ export function setPlanMarkdown(set: SetPlan, lib: Library): string {
   }
   return out.join('\n');
 }
+
+/**
+ * The track after `trackId` in the night, and where to start it: its mix-in
+ * cue when the set has one, otherwise its first downbeat.
+ */
+export function nextInNight(set: SetPlan, lib: Library, trackId: string): { trackId: string; at: number } | undefined {
+  const entries = withTimes(set, lib).entries.filter((e) => lib.tracks[e.trackId]);
+  const i = entries.findIndex((e) => e.trackId === trackId);
+  const next = i >= 0 ? entries.slice(i + 1).find((e) => e.trackId !== trackId) : undefined;
+  if (!next) return undefined;
+  const t = lib.tracks[next.trackId];
+  const mixIn = t.cues.find((c) => c.id === next.mixInCueId)?.start;
+  return { trackId: next.trackId, at: Math.max(0, mixIn ?? t.gridStart ?? 0) };
+}
+
+/** Where a timeline item's track starts playing (its mix-in cue, else the top of the file). */
+function itemMixIn(it: TimelineItem): number {
+  return it.track?.cues.find((c) => c.id === it.entry.mixInCueId)?.start ?? 0;
+}
+
+/**
+ * The track playing `t` seconds into the night, and the spot in it. During a
+ * blend the incoming (later) track wins; in a gap, the next track's start.
+ */
+export function trackAtNight(items: TimelineItem[], t: number): { trackId: string; pos: number } | undefined {
+  const withTrack = items.filter((it) => it.track);
+  const playing = withTrack.filter((it) => t >= it.startsAt && t < it.startsAt + it.playFor);
+  const it = playing.length
+    ? playing.reduce((a, b) => (b.startsAt >= a.startsAt ? b : a))
+    : (withTrack.find((x) => x.startsAt > t) ?? withTrack[withTrack.length - 1]);
+  if (!it) return undefined;
+  const into = Math.max(0, Math.min(it.playFor, t - it.startsAt));
+  return { trackId: it.entry.trackId, pos: itemMixIn(it) + into };
+}
+
+/** How far into the night a spot in a track is (its first appearance in the set). */
+export function nightAtTrack(items: TimelineItem[], trackId: string, pos: number): number | undefined {
+  const it = items.find((x) => x.entry.trackId === trackId);
+  return it ? it.startsAt + (pos - itemMixIn(it)) : undefined;
+}

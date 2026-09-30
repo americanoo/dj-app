@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { keyColor, toCamelot, normaliseKey } from '../core/keys';
-import { withTimes } from '../core/setplan';
+import { nextInNight, withTimes } from '../core/setplan';
 import { scaleTempo } from '../core/tempo';
 import { CUE_COLORS, MAX_HOT_CUES, SLOT_LETTERS, uid, type Cue, type Project, type Track } from '../core/model';
 import { barBeatLabel, beatLength, formatTime, parseTime, round, SNAP_MODES, snapTime, type SnapMode } from '../core/time';
@@ -10,7 +10,9 @@ import { Deck, FX_BEATS, type OutFx } from './deck';
 import { moveCueToSlot } from '../core/cues';
 import { useMusicFolder } from './musicFolder';
 import { useFitZoom } from './fit';
+import { Knob } from './Knob';
 import { JOG_SPEEDS, useMidi, useMidiActions } from './midi';
+import { transport } from './transport';
 import { AutoCuePanel } from './AutoCuePanel';
 import { LinkFolderButton } from './MusicFolderControl';
 import { activeSet, useStore } from './store';
@@ -27,6 +29,21 @@ const ZOOM_BARS = [2, 4, 8, 16, 32];
 export function CueEditor({ trackId, onSelectTrack }: { trackId: string | null; onSelectTrack: (id: string) => void }) {
   const { project } = useStore();
   const track = trackId ? project.library.tracks[trackId] : undefined;
+  // Playing on into the next track: the next deck starts itself here once its audio is ready.
+  const [autoStart, setAutoStart] = useState<{ trackId: string; at: number; play: boolean } | null>(null);
+  // Scrubbing the night onto another track: load it at that spot (playing if the deck was).
+  useEffect(
+    () =>
+      transport.onRequest((r) => {
+        if (r.type !== 'seek' || r.trackId === trackId) return;
+        setAutoStart({ trackId: r.trackId, at: r.pos, play: !!r.play });
+        onSelectTrack(r.trackId);
+      }),
+    [trackId, onSelectTrack],
+  );
+  useEffect(() => {
+    if (!track) transport.publish(null);
+  }, [track]);
   if (!track) {
     return (
       <div className="deck-empty">
@@ -34,10 +51,35 @@ export function CueEditor({ trackId, onSelectTrack }: { trackId: string | null; 
       </div>
     );
   }
-  return <TrackCueWorkspace key={track.id} track={track} onSelectTrack={onSelectTrack} />;
+  return (
+    <TrackCueWorkspace
+      key={track.id}
+      track={track}
+      onSelectTrack={onSelectTrack}
+      autoStart={autoStart?.trackId === track.id ? autoStart : null}
+      onAutoStarted={() => setAutoStart(null)}
+      onPlayOn={(next) => {
+        setAutoStart({ ...next, play: true });
+        onSelectTrack(next.trackId);
+      }}
+    />
+  );
 }
 
-function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTrack: (id: string) => void }) {
+function TrackCueWorkspace({
+  track,
+  onSelectTrack,
+  autoStart,
+  onAutoStarted,
+  onPlayOn,
+}: {
+  track: Track;
+  onSelectTrack: (id: string) => void;
+  /** Start here as soon as the audio is ready (playing on from the previous track, or scrubbing the night). */
+  autoStart: { trackId: string; at: number; play: boolean } | null;
+  onAutoStarted: () => void;
+  onPlayOn: (next: { trackId: string; at: number }) => void;
+}) {
   const { dispatch, project } = useStore();
   const { audio: attached, remembered, rememberedIds, loading, attach, loadRemembered, getBuffer } = useAudio();
   const folder = useMusicFolder();
@@ -56,7 +98,32 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
       return 0.9;
     }
   });
-  const [playhead, setPlayhead] = useState(track.cues.find((c) => c.slot === 0)?.start ?? track.gridStart ?? 0);
+  const [playhead, setPlayhead] = useState(autoStart?.at ?? track.cues.find((c) => c.slot === 0)?.start ?? track.gridStart ?? 0);
+  const autoStartRef = useRef(autoStart);
+  autoStartRef.current = autoStart;
+  const onAutoStartedRef = useRef(onAutoStarted);
+  onAutoStartedRef.current = onAutoStarted;
+  const onPlayOnRef = useRef(onPlayOn);
+  onPlayOnRef.current = onPlayOn;
+  // "Then: next track": after an out-FX, or when a track ends, the night plays on.
+  const [playOn, setPlayOn] = useState(() => {
+    try {
+      return localStorage.getItem('setcraft-play-on') === '1';
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem('setcraft-play-on', playOn ? '1' : '0');
+    } catch {
+      // private mode
+    }
+  }, [playOn]);
+  const playOnRef = useRef(playOn);
+  playOnRef.current = playOn;
+  /** Pending switch to the next track after an out-FX. */
+  const playOnTimerRef = useRef(0);
   const [playing, setPlaying] = useState(false);
   const [snapMode, setSnapMode] = useState<SnapMode>(() => {
     try {
@@ -151,6 +218,9 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
     const d = new Deck(audioContext(), () => {
       setPlaying(false);
       setPlayhead(d.position());
+      // Reached the end of the track: play on through the night if asked.
+      const next = nextRef.current;
+      if (playOnRef.current && next && d.position() >= d.duration - 0.05) onPlayOnRef.current(next);
     });
     deckRef.current = d;
     return () => {
@@ -172,6 +242,15 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
         d.setVolume(volume);
         d.seek(playheadRef.current);
         setDeckReady(true);
+        // The previous track played on into this one: start straight away.
+        const start = autoStartRef.current;
+        if (start) {
+          if (start.play) {
+            d.play(start.at);
+            setPlaying(true);
+          }
+          onAutoStartedRef.current();
+        }
       })
       .catch(() => setError('This audio could not be decoded for playback.'));
     return () => {
@@ -205,8 +284,12 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
       const d = deckRef.current;
       if (d && t - last > 80) {
         last = t;
-        setPlayhead(d.position());
+        const pos = d.position();
+        setPlayhead(pos);
+        // Heading for the end with "Then: next" on: load the next track now, so it starts without a gap.
+        if (playOnRef.current && pos > d.duration - 30) prewarmRef.current();
       }
+      if (d) transport.publish({ trackId: track.id, pos: d.position(), playing: true });
       if (d && meter) {
         // Fast attack, slow release, like a hardware meter.
         const lv = d.level();
@@ -309,6 +392,8 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
   const togglePlay = useCallback(() => {
     const d = deckRef.current;
     if (!d || !deckReady) return;
+    // Play / pause after an FX means "stay on this track": cancel playing on into the next one.
+    window.clearTimeout(playOnTimerRef.current);
     if (hold.current) {
       // Space while scrubbing: decide whether playback resumes on release.
       hold.current.resume = !hold.current.resume;
@@ -325,8 +410,45 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
     }
   }, [deckReady]);
 
+  // The next track in the night, and getting its audio ready before it's needed.
+  const next = useMemo(() => nextInNight(activeSet(project), project.library, track.id), [project, track.id]);
+  const nextRef = useRef(next);
+  nextRef.current = next;
+  const prewarmed = useRef<string | null>(null);
+  const prewarm = useCallback(() => {
+    const n = nextRef.current;
+    if (!n || prewarmed.current === n.trackId) return;
+    prewarmed.current = n.trackId;
+    if (attached[n.trackId]) void getBuffer(n.trackId).catch(() => undefined);
+    else if (folder.status === 'ready' && !loading[n.trackId]) {
+      void folder
+        .findFile(project.library.tracks[n.trackId]?.path)
+        .then((f) => f && attach(n.trackId, f))
+        .catch(() => undefined);
+    }
+  }, [attached, getBuffer, folder, loading, project.library.tracks, attach]);
+  const prewarmRef = useRef(prewarm);
+  prewarmRef.current = prewarm;
+  const playOnTimer = playOnTimerRef;
+  useEffect(() => () => window.clearTimeout(playOnTimerRef.current), []);
+
   // Out effects: hear how the track leaves. Stopped? It plays a bar from the playhead first.
   const [fxActive, setFxActive] = useState<OutFx | null>(null);
+  const [fxMix, setFxMix] = useState<number>(() => {
+    try {
+      const v = Number(localStorage.getItem('setcraft-fx-mix') ?? '0.5');
+      return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0.5;
+    } catch {
+      return 0.5;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem('setcraft-fx-mix', String(fxMix));
+    } catch {
+      // private mode
+    }
+  }, [fxMix]);
   const [fxBeats, setFxBeats] = useState<number>(() => {
     try {
       const v = Number(localStorage.getItem('setcraft-fx-beats'));
@@ -352,7 +474,13 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
         if (!d.playing) return;
         // An out-effect plays through, not round a loop.
         if (activeLoop) exitLoop();
-        d.outFx(kind, bpm, fxBeats);
+        const nextIn = d.outFx(kind, bpm, fxBeats, fxMix);
+        const n = nextRef.current;
+        if (nextIn !== undefined && playOnRef.current && n) {
+          prewarm();
+          window.clearTimeout(playOnTimer.current);
+          playOnTimer.current = window.setTimeout(() => onPlayOnRef.current(n), nextIn * 1000);
+        }
         setFxActive(kind);
         window.setTimeout(() => setFxActive((k) => (k === kind ? null : k)), 1800);
       };
@@ -364,7 +492,7 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
         fxTimer.current = window.setTimeout(go, (beat ?? 0.5) * 4 * 1000);
       }
     },
-    [deckReady, bpm, beat, activeLoop, exitLoop, fxBeats],
+    [deckReady, bpm, beat, activeLoop, exitLoop, fxBeats, fxMix, prewarm],
   );
   useEffect(() => () => window.clearTimeout(fxTimer.current), []);
 
@@ -460,6 +588,7 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
       else if (e.key === 'q' || e.key === 'Q') setSnapMode((m) => SNAP_MODES[(SNAP_MODES.indexOf(m) + 1) % SNAP_MODES.length]);
       else if (e.key === 'e' || e.key === 'E') fireFx('echo');
       else if (e.key === 'r' || e.key === 'R') fireFx('reverb');
+      else if (e.key === 'l' || e.key === 'L') fireFx('loop');
       else if (e.key === 'b' || e.key === 'B') fireFx('spin');
       else if (e.key === '[' || e.key === ']') {
         // Jump to the previous / next cue.
@@ -488,6 +617,10 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
   useMidiActions((e) => {
     if (e.action === 'volume') {
       if (e.value !== undefined) setVolume(e.value);
+      return;
+    }
+    if (e.action === 'fxMix') {
+      if (e.value !== undefined) setFxMix(e.value);
       return;
     }
     if (e.action === 'jog') {
@@ -530,6 +663,8 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
         return fireFx('reverb');
       case 'fxSpin':
         return fireFx('spin');
+      case 'fxLoop':
+        return fireFx('loop');
       case 'snap':
         return setSnapMode((m) => SNAP_MODES[(SNAP_MODES.indexOf(m) + 1) % SNAP_MODES.length]);
       case 'prevTrack':
@@ -544,6 +679,30 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
       }
     }
   });
+
+  // The journey-of-the-night timeline follows the deck, and can move it.
+  useEffect(() => {
+    if (!playing) transport.publish({ trackId: track.id, pos: playhead, playing: false });
+  }, [playhead, playing, track.id]);
+  const transportHandlers = useRef({ scrubStart, scrubEnd, seek });
+  transportHandlers.current = { scrubStart, scrubEnd, seek };
+  useEffect(
+    () =>
+      transport.onRequest((r) => {
+        const h = transportHandlers.current;
+        if (r.type === 'scrubStart') h.scrubStart();
+        else if (r.type === 'scrubEnd') h.scrubEnd();
+        else if (r.trackId === track.id) {
+          h.seek(r.pos);
+          const d = deckRef.current;
+          if (r.play && d && !d.playing && !hold.current && deckReady) {
+            d.play(r.pos);
+            setPlaying(true);
+          }
+        }
+      }),
+    [track.id, deckReady],
+  );
 
   const selected = track.cues.find((c) => c.id === selectedId);
   const sortedCues = [...track.cues].sort((a, b) => a.start - b.start);
@@ -644,39 +803,6 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
           </div>
 
           <div className="deck-right">
-          <div className="snap-control fx-group" role="group" aria-label="Out effects">
-            <span className="snap-label">FX</span>
-            {(
-              [
-                ['echo', 'Echo', 'E', 'Echo out: beat-synced echoes; the track cuts on the first echo and the echoes fade'],
-                ['reverb', 'Reverb', 'R', 'Reverb out: the track swells into a big reverb, cuts, and the reverb rings out'],
-                ['spin', 'Spin', 'B', 'Backspin: whips the record backwards and winds it down'],
-              ] as [OutFx, string, string, string][]
-            ).map(([kind, label, key, hint]) => (
-              <button
-                key={kind}
-                className={fxActive === kind ? 'on' : ''}
-                disabled={!deckReady}
-                onClick={() => fireFx(kind)}
-                title={`${hint}. Key ${key}. Stopped? It plays a bar from the playhead first.`}
-              >
-                {label}
-              </button>
-            ))}
-            <select
-              className="fx-beats"
-              value={fxBeats}
-              onChange={(e) => setFxBeats(Number(e.target.value))}
-              aria-label="FX beats"
-              title="Beats: the echo time, how long the reverb swells, or how long the backspin lasts"
-            >
-              {FX_BEATS.map((b) => (
-                <option key={b} value={b}>
-                  {b === 0.25 ? '1/4' : b === 0.5 ? '1/2' : b === 0.75 ? '3/4' : b} {b > 1 ? 'beats' : 'beat'}
-                </option>
-              ))}
-            </select>
-          </div>
           <label className="inline volume" title="Preview volume · the bar shows the level going to your speakers">
             Vol
             <span className="level-meter" ref={meterRef} aria-hidden />
@@ -807,31 +933,86 @@ function TrackCueWorkspace({ track, onSelectTrack }: { track: Track; onSelectTra
             if (c) seek(c.start);
           }}
         />
-        {sections.length > 0 && (
-          <div className="section-chips">
-            {sections.map((sec) => (
+        <div className="deck-strip">
+          {sections.length > 0 && (
+            <div className="section-chips">
+              {sections.map((sec) => (
+                <button
+                  key={sec.start}
+                  className={`section-chip ${playhead >= sec.start && playhead < sec.end ? 'current' : ''}`}
+                  style={{ '--sec': SECTION_COLORS[sec.kind] } as React.CSSProperties}
+                  onClick={() => seek(q(sec.start))}
+                  title={`${SECTION_LABELS[sec.kind]}: ${formatTime(sec.start, false)}–${formatTime(sec.end, false)}${
+                    bpm ? ` (${Math.round((sec.end - sec.start) / (beat! * 4))} bars)` : ''
+                  }`}
+                >
+                  {SECTION_LABELS[sec.kind]}
+                  <span>{formatTime(sec.start, false)}</span>
+                </button>
+              ))}
               <button
-                key={sec.start}
-                className={`section-chip ${playhead >= sec.start && playhead < sec.end ? 'current' : ''}`}
-                style={{ '--sec': SECTION_COLORS[sec.kind] } as React.CSSProperties}
-                onClick={() => seek(q(sec.start))}
-                title={`${SECTION_LABELS[sec.kind]}: ${formatTime(sec.start, false)}–${formatTime(sec.end, false)}${
-                  bpm ? ` (${Math.round((sec.end - sec.start) / (beat! * 4))} bars)` : ''
-                }`}
+                className="small auto-cue-btn"
+                onClick={() => setAutoOpen(true)}
+                title="Set cue points automatically from the song's sections (drop, breakdowns, build, outro…)"
               >
-                {SECTION_LABELS[sec.kind]}
-                <span>{formatTime(sec.start, false)}</span>
+                ✦ Auto cues…
               </button>
-            ))}
-            <button
-              className="small auto-cue-btn"
-              onClick={() => setAutoOpen(true)}
-              title="Set cue points automatically from the song's sections (drop, breakdowns, build, outro…)"
-            >
-              ✦ Auto cues…
-            </button>
-          </div>
-        )}
+            </div>
+          )}
+          <span className="grow" />
+            <div className="snap-control fx-group" role="group" aria-label="Out effects">
+              <span className="snap-label">FX</span>
+              {(
+                [
+                  ['echo', 'Echo', 'E', 'Echo out: beat-synced echoes; the track cuts on the first echo and the echoes fade'],
+                  ['reverb', 'Reverb', 'R', 'Reverb out: the track swells into a big reverb, cuts, and the reverb rings out'],
+                  ['loop', 'Loop', 'L', 'Loop out: the next beats repeat as a loop roll that fades over two bars while a filter sweeps up'],
+                  ['spin', 'Spin', 'B', 'Backspin: whips the record backwards and winds it down'],
+                ] as [OutFx, string, string, string][]
+              ).map(([kind, label, key, hint]) => (
+                <button
+                  key={kind}
+                  className={fxActive === kind ? 'on' : ''}
+                  disabled={!deckReady}
+                  onClick={() => fireFx(kind)}
+                  title={`${hint}. Key ${key}. Stopped? It plays a bar from the playhead first.`}
+                >
+                  {label}
+                </button>
+              ))}
+              <select
+                className="fx-beats"
+                value={fxBeats}
+                onChange={(e) => setFxBeats(Number(e.target.value))}
+                aria-label="FX beats"
+                title="Beats: the echo time, how long the reverb swells, the loop length, or how long the backspin lasts"
+              >
+                {FX_BEATS.map((b) => (
+                  <option key={b} value={b}>
+                    {b === 0.25 ? '1/4' : b === 0.5 ? '1/2' : b === 0.75 ? '3/4' : b} {b > 1 ? 'beats' : 'beat'}
+                  </option>
+                ))}
+              </select>
+              <Knob
+                value={fxMix}
+                onChange={setFxMix}
+                label="D/W"
+                title="Dry/wet: left mostly the track, middle both, right only the effect (on the loop out, how far the filter sweeps)"
+              />
+              <button
+                className={`then-next ${playOn ? 'on' : ''}`}
+                aria-pressed={playOn}
+                onClick={() => setPlayOn((v) => !v)}
+                title={
+                  next
+                    ? `Then play on into the next track of the night, “${project.library.tracks[next.trackId]?.title}”, from ${formatTime(next.at, false)}, while the FX tail rings (also when a track ends). ${playOn ? 'On' : 'Off'}.`
+                    : 'Then play on into the next track of the night (this track has none after it in the set).'
+                }
+              >
+                ▸ Next
+              </button>
+            </div>
+        </div>
       </section>
 
       <div className="cue-columns">

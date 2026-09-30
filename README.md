@@ -29,7 +29,10 @@ their own space. Earlier versions of a track's cues open from **History** in the
 | Panel | What it's for |
 |-------|---------------|
 | **Deck** (top) | The loaded track: a full-width colour waveform with its sections, and underneath it the eight hot cue pads in one row, the loop and memory cue buttons, and the cue list on the right. ‹ › steps through the night. |
-| **Journey of the night** (centre) | A zoomable timeline of the set, from the whole night down to seconds, shown in clock time once the set has a start time. Drag tracks here from the library at the exact moment they should start, and drag them along to move them. Tracks snap to whole seconds and to neighbouring tracks' edges; hold **Shift** for free placement. Alternating lanes show overlaps as blends. Chapter bands and the energy line sit above, and the dot on each track shows its key compatibility with the previous one. Click a track to load it into the deck and edit its start time, chapter, energy, transition, notes and mix points; **Delete** removes it. |
+| **Journey of the night** (centre) | A zoomable timeline of the set, from the whole night down to seconds, shown in clock time once the set has a start time. Drag tracks here from the library at the exact moment they should start, and drag them along to move them. Tracks snap to whole seconds and to neighbouring tracks' edges; hold **Shift** for free placement. Alternating lanes show overlaps as blends. It's also a **scrubbable timeline of the night**: a playhead shows where
+the deck is, and clicking or dragging the background (the ruler, bands or empty lanes) jumps there, loading that
+track at the matching spot (during a blend, the incoming track). Dragging within the loaded track scrubs it live;
+dragging onto another track shows where you'll land and loads it when you let go, playing if the deck was. Chapter bands and the energy line sit above, and the dot on each track shows its key compatibility with the previous one. Click a track to load it into the deck and edit its start time, chapter, energy, transition, notes and mix points; **Delete** removes it. |
 | **Library** (bottom) | Your imported collection and playlists. Click a row to load it into the deck, drag it onto the timeline, or double-click to add it at the end of the night. |
 
 The top bar holds **Story & chapters** (story, venue, start time, target length, chapters and the energy arc),
@@ -195,14 +198,19 @@ cues go straight through. Re-importing the same file changes nothing.
   on *make it a memory cue*, or drag a memory cue from the list onto a pad.
 - Markers can also be moved precisely in the cue form. Each cue can be edited by name, colour, pad, start time (typed or
   nudged by bar, beat or 10 ms), type, and loop length in beats.
-- **Out FX** to hear how a track leaves (deck bar, *FX*): **Echo** (beat-synced echoes; the track cuts on the first
-  echo and the echoes ring out), **Reverb** (the track swells into a big reverb, cuts, and the reverb tail rings)
-  and **Spin** (a backspin that winds the record down). **Beats** sets the echo time, the reverb swell or the
-  length of the spin (1/4 to 4 beats). When the deck is stopped, an FX plays one bar from the playhead first, so you
-  can park on your mix-out point and hear it.
+- **Out FX** to hear how a track leaves (the *FX* strip under the waveforms): **Echo** (beat-synced echoes; the
+  track cuts on the first echo and the echoes ring out), **Reverb** (the track swells into a big reverb, cuts, and
+  the reverb tail rings), **Loop** (a loop roll that fades over two bars while a filter sweeps up) and **Spin** (a
+  backspin that winds the record down). **Beats** sets the echo time, the reverb swell, the loop length or the
+  length of the spin (1/4 to 4 beats), and the **D/W** knob sets dry/wet (left mostly the track, middle both,
+  right only the effect; on the loop, how far the filter sweeps). When the deck is stopped, an FX plays one bar
+  from the playhead first, so you can park on your mix-out point and hear it.
+- **▸ Next** plays on through the night: after an out FX the next track in the set comes in while the tail rings
+  (from its mix-in cue, or its first downbeat), and when a track ends the next one starts. Its audio is loaded
+  ahead of time so there's no gap. Pressing play/pause during an FX stays on the current track.
 - Keyboard: `Space` play/pause · `1`–`8` pads · `M` memory cue · `Q` snap Free/Beat/Bar · `←/→` beat
-  (`Shift`: bar) · `[` / `]` previous/next cue · `E` echo out · `R` reverb out · `B` backspin · `Delete` removes the
-  selected cue.
+  (`Shift`: bar) · `[` / `]` previous/next cue · `E` echo out · `R` reverb out · `L` loop out · `B` backspin ·
+  `Delete` removes the selected cue.
 - Editing a track's BPM, key, grid start or file location here fixes that track's details before export.
   **×½ / ×2** next to BPM fix half- or double-time readings (e.g. a 96 BPM reggaeton track read as 192)
   without moving the downbeat. On the timeline, half/double-time mixes (96 → 192) aren't flagged as BPM jumps.
@@ -252,8 +260,8 @@ Plug a MIDI DJ controller in over USB, open **Controller** in the top bar and cl
 Edge; Safari has no MIDI support). Map it by learning: click **Learn** next to an action and press the button,
 move the fader or turn the jog wheel. You can map play/pause, hot cues A–H, the jog wheel (holds the track and
 scrubs, playing on when you let go; its encoding is detected while learning, and there's a sensitivity setting),
-volume, ±1 bar, a 4-beat loop, loop exit, memory cue, the three out FX, previous/next track in the night and the
-snap mode. Mappings are saved in the browser, and the controller reconnects on your next visit.
+volume, ±1 bar, a 4-beat loop, loop exit, memory cue, the four out FX and the FX dry/wet, previous/next track in
+the night and the snap mode. Mappings are saved in the browser, and the controller reconnects on your next visit.
 
 ## Founding DJ pass
 

@@ -10,7 +10,7 @@
 const FADE = 0.004; // seconds
 
 /** Ways to play a track out, like a DJ would into the next one. */
-export type OutFx = 'echo' | 'reverb' | 'spin';
+export type OutFx = 'echo' | 'reverb' | 'loop' | 'spin';
 
 /** Beat lengths offered for the effects. */
 export const FX_BEATS = [0.25, 0.5, 0.75, 1, 2, 4] as const;
@@ -39,6 +39,8 @@ export class Deck {
   private clockSeenAt = 0;
   /** An out-effect has scheduled the track to stop: when (audio clock) and where it ends up. */
   private fxStop: { at: number; pos: number } | null = null;
+  /** Audio-clock time until which an effect tail is still ringing. */
+  private tailUntil = 0;
   private static impulses = new WeakMap<BaseAudioContext, AudioBuffer>();
 
   constructor(ctx: AudioContext, onEnded: () => void = () => undefined) {
@@ -172,11 +174,16 @@ export class Deck {
    * Play the track out with an effect. The track stops (after a beat for echo
    * and reverb, straight away for a backspin) and the effect's tail rings on;
    * `onEnded` fires when the track itself has stopped. Beat-synced to `bpm`;
-   * `beats` sets the echo time, the reverb swell, or the length of the spin.
+   * `beats` sets the echo time, the reverb swell, the loop length or the
+   * length of the spin. `mix` is the dry/wet knob, 0–1: at 0.5 both the track
+   * and the effect are at full level; towards 1 only the effect; towards 0
+   * mostly the track. On the loop out it sets how far the filter sweeps.
+   * Returns how many seconds from now the next track should come in (at the
+   * cut, or once a spin has wound down), or undefined if nothing was playing.
    */
-  outFx(kind: OutFx, bpm?: number, beats = 1) {
+  outFx(kind: OutFx, bpm?: number, beats = 1, mix = 0.5): number | undefined {
     const v = this.voice;
-    if (!v || !this.buffer || this.fxStop) return;
+    if (!v || !this.buffer || this.fxStop) return undefined;
     const ctx = this.ctx;
     const beat = bpm && bpm > 0 ? 60 / bpm : 0.5;
     const now = ctx.currentTime;
@@ -186,6 +193,18 @@ export class Deck {
     let cutAt: number;
     let stopPos: number;
     let tail: number;
+    let nextIn: number;
+    const wetAmt = Math.min(1, Math.max(0, mix) * 2);
+    const dryAmt = Math.min(1, Math.max(0, 1 - mix) * 2);
+    // Until the cut, the track plays at the dry level.
+    let dryUntilCut = 1;
+    // The effects are fed the track at full level (whatever the dry level), faded out at the cut.
+    const feed = () => {
+      const pre = keep(ctx.createGain());
+      v.src.connect(pre);
+      return pre;
+    };
+    const feeds: GainNode[] = [];
 
     if (kind === 'echo') {
       // Classic echo out: 3/4-beat repeats, darker each time, then the track cuts on the beat.
@@ -203,15 +222,20 @@ export class Deck {
       fb.gain.value = 0.62;
       send.gain.setValueAtTime(0, now);
       send.gain.linearRampToValueAtTime(1, now + 0.03);
-      v.gain.connect(send).connect(delay).connect(hp).connect(lp);
+      const pre = feed();
+      feeds.push(pre);
+      pre.connect(send).connect(delay).connect(hp).connect(lp);
       lp.connect(fb).connect(delay);
       lp.connect(wet).connect(this.out);
       // The track cuts on the first repeat (at least half a beat in, so the echo has something to repeat).
       cutAt = now + Math.max(beat * 0.5, delay.delayTime.value);
       stopPos = this.positionAt(cutAt);
       tail = 9 * delay.delayTime.value + 1;
-      wet.gain.setValueAtTime(0.9, cutAt);
+      nextIn = cutAt;
+      wet.gain.setValueAtTime(0.9 * wetAmt, now);
+      wet.gain.setValueAtTime(0.9 * wetAmt, cutAt);
       wet.gain.linearRampToValueAtTime(0, cutAt + tail);
+      dryUntilCut = dryAmt;
     } else if (kind === 'reverb') {
       // Reverb out: the track swells into a big hall over a beat, cuts, and the hall rings out.
       const send = keep(ctx.createGain());
@@ -224,13 +248,43 @@ export class Deck {
       const swell = Math.max(0.1, beat * beats);
       send.gain.setValueAtTime(0.15, now);
       send.gain.linearRampToValueAtTime(1.3, now + swell);
-      v.gain.connect(send).connect(hp).connect(verb).connect(wet).connect(this.out);
-      wet.gain.setValueAtTime(2.4, now);
+      const pre = feed();
+      feeds.push(pre);
+      pre.connect(send).connect(hp).connect(verb).connect(wet).connect(this.out);
+      wet.gain.setValueAtTime(2.4 * wetAmt, now);
+      dryUntilCut = dryAmt;
       cutAt = now + swell;
       stopPos = this.positionAt(cutAt);
       tail = 5;
-      wet.gain.setValueAtTime(2.4, cutAt + 2);
+      nextIn = cutAt;
+      wet.gain.setValueAtTime(2.4 * wetAmt, cutAt + 2);
       wet.gain.linearRampToValueAtTime(0, cutAt + tail);
+    } else if (kind === 'loop') {
+      // Loop out: the next `beats` repeat as a loop roll that fades over two bars while a filter sweeps up.
+      const len = Math.max(0.05, beat * beats);
+      const fade = beat * 8;
+      const roll = keep(ctx.createBufferSource());
+      const hp = keep(ctx.createBiquadFilter());
+      const g = keep(ctx.createGain());
+      roll.buffer = this.buffer;
+      roll.loop = true;
+      roll.loopStart = pos;
+      roll.loopEnd = Math.min(this.buffer.duration, pos + len);
+      hp.type = 'highpass';
+      hp.frequency.setValueAtTime(20, now);
+      hp.frequency.exponentialRampToValueAtTime(40 + 1800 * Math.max(0, mix), now + fade);
+      g.gain.setValueAtTime(0.0001, now);
+      g.gain.exponentialRampToValueAtTime(1, now + 0.01);
+      g.gain.setValueAtTime(1, now + fade * 0.25);
+      g.gain.linearRampToValueAtTime(0, now + fade);
+      roll.connect(hp).connect(g).connect(this.out);
+      roll.start(now, pos);
+      roll.stop(now + fade + 0.05);
+      cutAt = now + 0.012;
+      stopPos = pos;
+      tail = fade + 0.2;
+      // The next track comes in while the loop fades.
+      nextIn = now + fade * 0.5;
     } else {
       // Backspin: the record is whipped backwards and winds down over half a bar.
       const r0 = 3.2;
@@ -254,20 +308,32 @@ export class Deck {
       cutAt = now + 0.02;
       stopPos = Math.max(0, pos - span);
       tail = T + 0.2;
+      nextIn = now + T * 0.85;
     }
 
     // Cut the track itself.
     this.fxStop = { at: cutAt, pos: stopPos };
-    v.gain.gain.cancelScheduledValues(now);
-    v.gain.gain.setValueAtTime(1, Math.max(now, cutAt - 0.02));
-    v.gain.gain.linearRampToValueAtTime(0, cutAt);
+    // Dry level until the cut (a short glide to it), then a quick fade to silence.
+    const g = v.gain.gain;
+    const dryAt = Math.max(now, Math.min(now + 0.03, cutAt - 0.021));
+    g.cancelScheduledValues(now);
+    g.setValueAtTime(g.value, now);
+    if (dryAt > now) g.linearRampToValueAtTime(dryUntilCut, dryAt);
+    g.setValueAtTime(dryUntilCut, Math.max(dryAt, cutAt - 0.02));
+    g.linearRampToValueAtTime(0, cutAt);
+    for (const pre of feeds) {
+      pre.gain.setValueAtTime(1, Math.max(now, cutAt - 0.02));
+      pre.gain.linearRampToValueAtTime(0, cutAt);
+    }
     try {
       v.src.stop(cutAt + 0.01);
     } catch {
       // already scheduled to stop
     }
     // Tidy up the effect once its tail has died away.
+    this.tailUntil = Math.max(this.tailUntil, cutAt + tail);
     window.setTimeout(() => nodes.forEach((n) => n.disconnect()), (cutAt - now + tail + 0.5) * 1000);
+    return Math.max(0, nextIn - now);
   }
 
   /** A 4-second hall: stereo noise with an exponential decay. Made once per audio context. */
@@ -307,8 +373,14 @@ export class Deck {
 
   dispose() {
     this.stopVoice();
-    this.out.disconnect();
-    this.meter.disconnect();
+    // Let an effect tail ring out (into the next track) before disconnecting.
+    const ringing = this.tailUntil - this.ctx.currentTime;
+    const done = () => {
+      this.out.disconnect();
+      this.meter.disconnect();
+    };
+    if (ringing > 0) window.setTimeout(done, ringing * 1000 + 200);
+    else done();
   }
 
   private applyLoop(src: AudioBufferSourceNode) {

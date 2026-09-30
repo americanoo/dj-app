@@ -2906,3 +2906,91 @@ table.midi-map tr.learning td {
 .jog-speed {
   margin-bottom: 8px;
 }
+.fx-group button.then-next.on {
+  background: var(--cyan);
+  color: #07070a;
+}
+
+/* scrubbing the night */
+.timeline-scroll {
+  cursor: crosshair;
+}
+.tl-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: #fff;
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.7);
+  z-index: 6;
+  pointer-events: none;
+}
+.tl-now {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--text);
+}
+/* dragging to scrub must not select (and then drag) ruler text */
+.timeline-scroll {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* knobs */
+.knob {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  cursor: ns-resize;
+  user-select: none;
+  touch-action: none;
+  border-radius: 6px;
+  padding: 0 4px;
+  outline: none;
+}
+.knob:focus-visible {
+  box-shadow: 0 0 0 1px var(--cyan);
+}
+.knob svg {
+  width: 22px;
+  height: 22px;
+}
+.knob-track {
+  fill: #0d0d13;
+  stroke: rgba(255, 255, 255, 0.12);
+  stroke-width: 2;
+}
+.knob-arc {
+  fill: none;
+  stroke: var(--pink);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+}
+.knob-pointer {
+  stroke: #fff;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+.knob-label {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--text-3);
+}
+
+/* under the waveforms: section chips on the left, out FX on the right */
+.deck-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.deck-strip > .grow {
+  flex: 1;
+}
+.deck-strip .section-chips {
+  margin: 0;
+}

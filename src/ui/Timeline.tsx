@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { keyColor, toCamelot, type KeyRelation } from '../core/keys';
 import { SLOT_LETTERS, type SetEntry } from '../core/model';
-import { buildTimeline, formatSetTime, parseClock, totalSeconds, type TimelineItem } from '../core/setplan';
+import { buildTimeline, formatSetTime, nightAtTrack, parseClock, totalSeconds, trackAtNight, type TimelineItem } from '../core/setplan';
+import { transport } from './transport';
 import { formatTime, parseTime } from '../core/time';
 import { activeSet, useStore } from './store';
 import { useFitZoom, zoomOf } from './fit';
@@ -60,6 +61,39 @@ export function Timeline({ selectedTrackId, onSelectTrack, onOpenStory }: Props)
 
   const selected = items.find((it) => it.entry.id === selectedId);
 
+  // Night playhead: follows the deck every frame, outside React.
+  const playheadEl = useRef<HTMLDivElement>(null);
+  const nowEl = useRef<HTMLSpanElement>(null);
+  const nightT = useRef<number | null>(null);
+  const live = useRef({ items, pxps: 1, startClock: set.startClock });
+  const place = useCallback(() => {
+    const { pxps: px, startClock } = live.current;
+    const t = nightT.current;
+    const el = playheadEl.current;
+    if (el) {
+      el.style.display = t === null ? 'none' : '';
+      if (t !== null) el.style.transform = `translateX(${t * px}px)`;
+    }
+    if (nowEl.current) nowEl.current.textContent = t === null ? '' : `▶ ${formatSetTime(Math.max(0, t), startClock, true)}`;
+  }, []);
+  // Scrubbing the night: click or drag the background (not a track block).
+  const scrub = useRef<{
+    wasPlaying: boolean;
+    held: boolean;
+    moved: boolean;
+    last: { trackId: string; pos: number };
+    ghost: boolean;
+  } | null>(null);
+  useEffect(
+    () =>
+      transport.onPosition((p) => {
+        if (scrub.current?.ghost) return; // the line follows the pointer until it's let go
+        nightT.current = p ? (nightAtTrack(live.current.items, p.trackId, p.pos) ?? null) : null;
+        place();
+      }),
+    [place],
+  );
+
   // Fill the panel's height: the energy line slims down on short panels and the lanes take the rest.
   const energyH = viewHeight >= 170 ? ENERGY_H : SMALL_ENERGY_H;
   const laneH = Math.max(
@@ -113,9 +147,9 @@ export function Timeline({ selectedTrackId, onSelectTrack, onOpenStory }: Props)
   };
 
   const timeAt = (clientX: number) => {
-    const el = scroller.current!;
-    const rect = el.getBoundingClientRect();
-    return Math.max(0, ((clientX - rect.left) / zoomOf(el) + el.scrollLeft) / pxps);
+    // Measured from the canvas itself (it sits inside a margin and scrolls with the view).
+    const canvas = scroller.current!.querySelector<HTMLElement>('.timeline-canvas')!;
+    return Math.max(0, (clientX - canvas.getBoundingClientRect().left) / zoomOf(canvas) / pxps);
   };
 
   /** Whole seconds, pulled onto a neighbouring track's start or end when close. */
@@ -169,6 +203,12 @@ export function Timeline({ selectedTrackId, onSelectTrack, onOpenStory }: Props)
 
   const width = Math.max(viewWidth, length * pxps + 24);
   const lanesTop = RULER_H + CHAPTER_H + energyH;
+  live.current = { items, pxps, startClock: set.startClock };
+  useLayoutEffect(() => {
+    const p = transport.position;
+    if (!scrub.current?.ghost) nightT.current = p ? (nightAtTrack(items, p.trackId, p.pos) ?? null) : null;
+    place();
+  });
 
   return (
     <div className="timeline-pane" ref={fitRef} data-keys-own onKeyDown={onKeyDown} tabIndex={-1}>
@@ -180,6 +220,7 @@ export function Timeline({ selectedTrackId, onSelectTrack, onOpenStory }: Props)
             ? ` · ${set.startClock}–${formatSetTime(end, set.startClock)}`
             : ''}
         </span>
+        <span className="tl-now" ref={nowEl} title="Where the deck is in the night. Click or drag the timeline to jump." />
         <button className="small" onClick={onOpenStory} title="Story, venue, start time and chapters">
           Story &amp; chapters
         </button>
@@ -220,10 +261,58 @@ export function Timeline({ selectedTrackId, onSelectTrack, onOpenStory }: Props)
           onSelectTrack(trackId);
         }}
         onPointerDown={(e) => {
-          if (e.target === e.currentTarget || (e.target as HTMLElement).classList.contains('tl-lanes')) setSelectedId(null);
+          const target = e.target as HTMLElement;
+          if (target.closest('.tl-block, button, input, select')) return;
+          if (e.target === e.currentTarget || target.classList.contains('tl-lanes')) setSelectedId(null);
+          if (e.button !== 0) return;
+          const at = trackAtNight(items, timeAt(e.clientX));
+          if (!at) return;
+          e.currentTarget.setPointerCapture(e.pointerId);
+          scrub.current = { wasPlaying: !!transport.position?.playing, held: false, moved: false, last: at, ghost: false };
+        }}
+        onPointerMove={(e) => {
+          const sc = scrub.current;
+          if (!sc) return;
+          const t = timeAt(e.clientX);
+          const at = trackAtNight(items, t);
+          if (!at) return;
+          sc.moved = true;
+          sc.last = at;
+          if (at.trackId === transport.position?.trackId) {
+            // The deck's own track: scrub it live, holding the audio.
+            if (!sc.held) {
+              transport.request({ type: 'scrubStart' });
+              sc.held = true;
+            }
+            sc.ghost = false;
+            transport.request({ type: 'seek', trackId: at.trackId, pos: at.pos });
+          } else {
+            // Another track: show where it'll land; it loads on release.
+            sc.ghost = true;
+            nightT.current = t;
+            place();
+          }
+        }}
+        onPointerUp={() => {
+          const sc = scrub.current;
+          scrub.current = null;
+          if (!sc) return;
+          const { trackId, pos } = sc.last;
+          if (trackId === transport.position?.trackId) {
+            if (!sc.moved) transport.request({ type: 'seek', trackId, pos });
+            if (sc.held) transport.request({ type: 'scrubEnd' });
+          } else {
+            // Loading another track replaces the held one, so no need to let go of it first.
+            transport.request({ type: 'seek', trackId, pos, play: sc.wasPlaying });
+          }
+        }}
+        onPointerCancel={() => {
+          if (scrub.current?.held) transport.request({ type: 'scrubEnd' });
+          scrub.current = null;
         }}
       >
         <div className="timeline-canvas" style={{ width, height: lanesTop + laneH * 2 + 8 }}>
+          <div className="tl-playhead" ref={playheadEl} aria-hidden />
           <div className="tl-ruler" style={{ height: RULER_H }}>
             {ticks.map((t) => (
               <span key={t} className="tl-tick" style={{ left: t * pxps }}>
