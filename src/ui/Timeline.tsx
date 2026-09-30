@@ -79,10 +79,13 @@ export function Timeline({ selectedTrackId, onSelectTrack, onOpenStory }: Props)
   // Scrubbing the night: click or drag the background (not a track block).
   const scrub = useRef<{
     wasPlaying: boolean;
-    held: boolean;
+    /** The deck track currently scrubbing with sound (after scrubStart). */
+    audibleOn: string | null;
     moved: boolean;
     last: { trackId: string; pos: number };
     ghost: boolean;
+    /** Hovering over another track: load it after a moment and keep scrubbing there. */
+    dwell: { trackId: string; timer: number } | null;
   } | null>(null);
   useEffect(
     () =>
@@ -268,7 +271,7 @@ export function Timeline({ selectedTrackId, onSelectTrack, onOpenStory }: Props)
           const at = trackAtNight(items, timeAt(e.clientX));
           if (!at) return;
           e.currentTarget.setPointerCapture(e.pointerId);
-          scrub.current = { wasPlaying: !!transport.position?.playing, held: false, moved: false, last: at, ghost: false };
+          scrub.current = { wasPlaying: !!transport.position?.playing, audibleOn: null, moved: false, last: at, ghost: false, dwell: null };
         }}
         onPointerMove={(e) => {
           const sc = scrub.current;
@@ -279,35 +282,53 @@ export function Timeline({ selectedTrackId, onSelectTrack, onOpenStory }: Props)
           sc.moved = true;
           sc.last = at;
           if (at.trackId === transport.position?.trackId) {
-            // The deck's own track: scrub it live, holding the audio.
-            if (!sc.held) {
+            // The deck's own track: play from wherever the pointer is.
+            if (sc.audibleOn !== at.trackId) {
               transport.request({ type: 'scrubStart' });
-              sc.held = true;
+              sc.audibleOn = at.trackId;
             }
+            if (sc.dwell) window.clearTimeout(sc.dwell.timer);
+            sc.dwell = null;
             sc.ghost = false;
             transport.request({ type: 'seek', trackId: at.trackId, pos: at.pos });
           } else {
-            // Another track: show where it'll land; it loads on release.
+            // Another track: the line follows the pointer, and after a moment there the
+            // track loads and plays from the pointer, so scrubbing carries on across the night.
             sc.ghost = true;
             nightT.current = t;
             place();
+            if (sc.dwell?.trackId !== at.trackId) {
+              if (sc.dwell) window.clearTimeout(sc.dwell.timer);
+              sc.dwell = {
+                trackId: at.trackId,
+                timer: window.setTimeout(() => {
+                  const cur = scrub.current;
+                  if (!cur || cur.last.trackId !== at.trackId) return;
+                  cur.ghost = false;
+                  transport.request({ type: 'seek', trackId: cur.last.trackId, pos: cur.last.pos, play: true });
+                }, 300),
+              };
+            }
           }
         }}
         onPointerUp={() => {
           const sc = scrub.current;
           scrub.current = null;
           if (!sc) return;
+          if (sc.dwell) window.clearTimeout(sc.dwell.timer);
           const { trackId, pos } = sc.last;
           if (trackId === transport.position?.trackId) {
             if (!sc.moved) transport.request({ type: 'seek', trackId, pos });
-            if (sc.held) transport.request({ type: 'scrubEnd' });
+            // Let go: play on if the deck was playing, otherwise stop where it landed.
+            if (sc.audibleOn) transport.request({ type: 'scrubEnd', resume: sc.wasPlaying });
           } else {
-            // Loading another track replaces the held one, so no need to let go of it first.
             transport.request({ type: 'seek', trackId, pos, play: sc.wasPlaying });
           }
         }}
         onPointerCancel={() => {
-          if (scrub.current?.held) transport.request({ type: 'scrubEnd' });
+          const sc = scrub.current;
+          if (sc?.dwell) window.clearTimeout(sc.dwell.timer);
+          if (sc?.audibleOn) transport.request({ type: 'scrubEnd', resume: sc.wasPlaying });
           scrub.current = null;
         }}
       >

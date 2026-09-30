@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { newSet, type Library, type Track } from '../model';
-import { buildTimeline, formatSetTime, nextInNight, nightAtTrack, trackAtNight, parseClock, setEnd, setPlanMarkdown, totalSeconds, withTimes } from '../setplan';
+import { buildTimeline, formatSetTime, nextInNight, nextTransition, nightAtTrack, trackAtNight, parseClock, setEnd, setPlanMarkdown, totalSeconds, withTimes } from '../setplan';
 import { reducer } from '../../ui/store';
 import { emptyProject } from '../model';
 
@@ -203,5 +203,15 @@ describe('scrubbing the night', () => {
     expect(nightAtTrack(items, 'a', 100)).toBe(100);
     expect(nightAtTrack(items, 'b', 40)).toBe(290);
     expect(nightAtTrack(items, 'zzz', 1)).toBeUndefined();
+  });
+
+  it('lines the next track up against this one', () => {
+    // b starts 4:40 into a, from its 0:30 mix-in; a hands over at its end (5:00)
+    const link = nextTransition(items, 'a')!;
+    expect(link).toEqual({ trackId: 'b', at: 30, inAt: 280, outAt: 300 });
+    // 4:50 into a is the same moment as trackAtNight says for b
+    expect(290 - link.inAt + link.at).toBe(trackAtNight(items, 290)!.pos);
+    expect(nextTransition(items, 'b')).toBeUndefined();
+    expect(nextTransition(items, 'zzz')).toBeUndefined();
   });
 });

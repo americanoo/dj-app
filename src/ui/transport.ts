@@ -14,9 +14,10 @@ export interface DeckPosition {
 }
 
 export type TransportRequest =
-  /** Hold the audio while the night is being dragged (like a hand on the record). */
+  /** The night is being dragged: play from wherever the pointer is. */
   | { type: 'scrubStart' }
-  | { type: 'scrubEnd' }
+  /** Let go: keep playing (`resume`) or stop where it landed. */
+  | { type: 'scrubEnd'; resume: boolean }
   /** Go to `pos` in `trackId`, loading it if it isn't the deck's track; `play` starts it playing. */
   | { type: 'seek'; trackId: string; pos: number; play?: boolean };
 

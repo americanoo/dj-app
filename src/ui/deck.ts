@@ -41,6 +41,8 @@ export class Deck {
   private fxStop: { at: number; pos: number } | null = null;
   /** Audio-clock time until which an effect tail is still ringing. */
   private tailUntil = 0;
+  /** Audio-clock time until which an out-effect is the main event (the next track's cue to come in). */
+  private fxUntil = 0;
   private static impulses = new WeakMap<BaseAudioContext, AudioBuffer>();
 
   constructor(ctx: AudioContext, onEnded: () => void = () => undefined) {
@@ -155,6 +157,24 @@ export class Deck {
   seek(to: number) {
     if (this.playing) this.play(to);
     else this.pausedAt = Math.max(0, Math.min(to, this.duration));
+  }
+
+  /**
+   * An out-effect is playing the track out: until the track has cut and the
+   * effect has had its moment (the echo's first repeat, the spin winding down…).
+   */
+  get fxBusy(): boolean {
+    return this.fxStop !== null || this.ctx.currentTime < this.fxUntil;
+  }
+
+  /**
+   * Scrubbing during an out-effect: let the effect play out untouched and move
+   * where the track lands. Otherwise the same as `seek`.
+   */
+  scrubTo(to: number) {
+    const at = Math.max(0, Math.min(to, this.duration));
+    if (this.fxStop) this.fxStop.pos = at;
+    else this.seek(at);
   }
 
   /** Engage (or with `null`, exit) a loop. Playback continues seamlessly. */
@@ -332,6 +352,7 @@ export class Deck {
     }
     // Tidy up the effect once its tail has died away.
     this.tailUntil = Math.max(this.tailUntil, cutAt + tail);
+    this.fxUntil = Math.max(cutAt, nextIn);
     window.setTimeout(() => nodes.forEach((n) => n.disconnect()), (cutAt - now + tail + 0.5) * 1000);
     return Math.max(0, nextIn - now);
   }

@@ -209,3 +209,28 @@ export function nightAtTrack(items: TimelineItem[], trackId: string, pos: number
   const it = items.find((x) => x.entry.trackId === trackId);
   return it ? it.startsAt + (pos - itemMixIn(it)) : undefined;
 }
+
+/**
+ * How the next track in the night lines up against this one, so both can be
+ * drawn on the same clock: the next track comes in at `inAt` seconds into this
+ * track, starting from `at` in its own file, and this track hands over at
+ * `outAt`. Anything at `pos` in this track happens with the next one at
+ * `pos - inAt + at`; before `inAt` it hasn't started yet.
+ */
+export function nextTransition(
+  items: TimelineItem[],
+  trackId: string,
+): { trackId: string; at: number; inAt: number; outAt: number } | undefined {
+  const i = items.findIndex((x) => x.entry.trackId === trackId && x.track);
+  if (i < 0) return undefined;
+  const cur = items[i];
+  const next = items.slice(i + 1).find((x) => x.track && x.entry.trackId !== trackId);
+  if (!next) return undefined;
+  const curIn = itemMixIn(cur);
+  return {
+    trackId: next.entry.trackId,
+    at: itemMixIn(next),
+    inAt: curIn + next.startsAt - cur.startsAt,
+    outAt: curIn + cur.playFor,
+  };
+}
