@@ -3156,11 +3156,188 @@ table.midi-map tr.learning td {
   height: 16px;
 }
 
-/* The next track in the night, running under the deck on the same clock */
-.deck-pane canvas.wave.fill.next-lane {
-  flex: 0.45 1 0;
-  min-height: 30px;
-  max-height: 110px;
-  margin-top: -2px;
-  box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.25);
+/* Each block shows the part of its track the night plays */
+.tl-block .tl-wave {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  opacity: 0.5;
+}
+.tl-block > .tl-title,
+.tl-block > .tl-meta {
+  position: relative;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+}
+
+/* Night playback */
+.night-play.on {
+  border-color: var(--cyan);
+  color: var(--cyan);
+}
+.source-switch {
+  display: inline-flex;
+  flex: none;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.source-switch button {
+  border: 0;
+  border-radius: 0;
+  padding: 5px 10px;
+  font-size: 12px;
+  background: transparent;
+  color: var(--text-2);
+}
+.source-switch button.on {
+  background: var(--grad);
+  color: #fff;
+  font-weight: 650;
+}
+
+/* ---------- transition: two decks on one clock (top) ---------- */
+.transition-view {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.transition-view.empty p {
+  padding: 14px 16px;
+  font-size: 13px;
+}
+.transition-view .pane-head {
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+.tv-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--mono);
+  flex: none;
+}
+.tv-preview {
+  flex: none;
+}
+.tv-preview.on {
+  border-color: var(--cyan);
+  color: var(--cyan);
+}
+.tv-chips {
+  display: inline-flex;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+}
+.tv-chips .chip {
+  white-space: nowrap;
+}
+.chip.bad {
+  color: var(--danger);
+}
+.tv-body {
+  flex: 1;
+  min-height: 92px;
+  display: grid;
+  grid-template-columns: 150px 1fr 150px;
+  gap: 8px;
+  padding: 8px 10px 10px;
+}
+.tv-deck {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--line-strong);
+}
+.tv-deck > * {
+  flex: none;
+}
+.tv-deck-a {
+  border-top: 2px solid #f472b6;
+}
+.tv-deck-b {
+  border-top: 2px solid #22d3ee;
+}
+.tv-side {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-2);
+}
+.tv-deck b {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tv-facts {
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.tv-deck-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+.tv-deck-top button {
+  font-size: 11px;
+  padding: 0;
+}
+.tv-canvas-wrap {
+  position: relative;
+  min-width: 0;
+  min-height: 76px;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.tv-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  user-select: none;
+}
+.tv-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: #fff;
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+  pointer-events: none;
+}
+.tv-readout {
+  position: absolute;
+  bottom: 22px;
+  transform: translateX(8px);
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.85);
+  color: #fff;
+  font: 600 11px var(--mono);
+  white-space: nowrap;
+  pointer-events: none;
+}
+@media (max-width: 900px) {
+  .tv-body {
+    grid-template-columns: 1fr;
+  }
+  .tv-deck {
+    display: none;
+  }
 }

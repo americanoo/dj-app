@@ -185,7 +185,7 @@ export function nextInNight(set: SetPlan, lib: Library, trackId: string): { trac
 }
 
 /** Where a timeline item's track starts playing (its mix-in cue, else the top of the file). */
-function itemMixIn(it: TimelineItem): number {
+export function itemMixIn(it: TimelineItem): number {
   return it.track?.cues.find((c) => c.id === it.entry.mixInCueId)?.start ?? 0;
 }
 
@@ -210,27 +210,74 @@ export function nightAtTrack(items: TimelineItem[], trackId: string, pos: number
   return it ? it.startsAt + (pos - itemMixIn(it)) : undefined;
 }
 
-/**
- * How the next track in the night lines up against this one, so both can be
- * drawn on the same clock: the next track comes in at `inAt` seconds into this
- * track, starting from `at` in its own file, and this track hands over at
- * `outAt`. Anything at `pos` in this track happens with the next one at
- * `pos - inAt + at`; before `inAt` it hasn't started yet.
- */
-export function nextTransition(
-  items: TimelineItem[],
-  trackId: string,
-): { trackId: string; at: number; inAt: number; outAt: number } | undefined {
-  const i = items.findIndex((x) => x.entry.trackId === trackId && x.track);
-  if (i < 0) return undefined;
-  const cur = items[i];
-  const next = items.slice(i + 1).find((x) => x.track && x.entry.trackId !== trackId);
-  if (!next) return undefined;
-  const curIn = itemMixIn(cur);
-  return {
-    trackId: next.entry.trackId,
-    at: itemMixIn(next),
-    inAt: curIn + next.startsAt - cur.startsAt,
-    outAt: curIn + cur.playFor,
-  };
+/** One track's stretch of the night, ready to play: from `mixIn` in the file, at `startsAt`, for `playFor` seconds. */
+export interface NightSlot {
+  /** The set entry. */
+  id: string;
+  trackId: string;
+  startsAt: number;
+  playFor: number;
+  mixIn: number;
+  bpm?: number;
+  gridStart?: number;
+}
+
+/** What plays when: every track of the night, overlapping ones together. */
+export function nightSlots(items: TimelineItem[]): NightSlot[] {
+  return items
+    .filter((it) => it.track && it.playFor > 0)
+    .map((it) => ({ id: it.entry.id, trackId: it.entry.trackId, startsAt: it.startsAt, playFor: it.playFor, mixIn: itemMixIn(it), bpm: it.track!.bpm, gridStart: it.track!.gridStart }));
+}
+
+/** The slots sounding at `t` (more than one during a blend). */
+export function slotsAt(slots: NightSlot[], t: number): NightSlot[] {
+  return slots.filter((s) => t >= s.startsAt && t < s.startsAt + s.playFor);
+}
+
+/** Consecutive tracks of the night, as outgoing (a) → incoming (b) pairs. */
+export function transitionsOf(slots: NightSlot[]): { a: NightSlot; b: NightSlot }[] {
+  const sorted = [...slots].sort((x, y) => x.startsAt - y.startsAt);
+  const out: { a: NightSlot; b: NightSlot }[] = [];
+  for (let i = 1; i < sorted.length; i++) {
+    if (sorted[i].trackId !== sorted[i - 1].trackId) out.push({ a: sorted[i - 1], b: sorted[i] });
+  }
+  return out;
+}
+
+export interface TransitionInfo {
+  /** Night time the incoming track comes in, and the outgoing one ends. */
+  inAt: number;
+  outAt: number;
+  /** Seconds both play together (0 or less: a cut, or a gap of that length). */
+  overlap: number;
+  /** The overlap in the outgoing track's bars. */
+  overlapBars?: number;
+  /** Percent tempo change from the outgoing track to the incoming one. */
+  bpmChange?: number;
+  /** Where the incoming track lands in the outgoing one's grid: bar and beat (1-based). */
+  landsOn?: { bar: number; beat: number; offBeats: number; phrase: boolean };
+}
+
+/** How a transition lines up: overlap, tempo change, and whether it comes in on the beat. */
+export function describeTransition(a: NightSlot, b: NightSlot): TransitionInfo {
+  const inAt = b.startsAt;
+  const outAt = a.startsAt + a.playFor;
+  const overlap = outAt - inAt;
+  const info: TransitionInfo = { inAt, outAt, overlap };
+  if (a.bpm && a.bpm > 0) {
+    const beat = 60 / a.bpm;
+    if (overlap > 0) info.overlapBars = Math.round((overlap / beat / 4) * 10) / 10;
+    // B's start, as a spot in A's file, counted in A's beats from its grid.
+    const posInA = a.mixIn + (inAt - a.startsAt);
+    const beats = (posInA - (a.gridStart ?? 0)) / beat;
+    const whole = Math.round(beats);
+    info.landsOn = {
+      bar: Math.floor(whole / 4) + 1,
+      beat: (((whole % 4) + 4) % 4) + 1,
+      offBeats: Math.round((beats - whole) * 100) / 100,
+      phrase: Math.abs(beats - whole) < 0.1 && ((whole % 32) + 32) % 32 === 0,
+    };
+  }
+  if (a.bpm && b.bpm) info.bpmChange = Math.round(((b.bpm - a.bpm) / a.bpm) * 1000) / 10;
+  return info;
 }

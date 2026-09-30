@@ -42,19 +42,6 @@ interface Props {
   onCueDrag?: (id: string, change: Pick<Cue, 'start' | 'end'>) => void;
   /** Beat-grid snapping for drags (Shift bypasses it). */
   snap?: (sec: number) => number;
-  /** Labelled lines, e.g. where the next track comes in. */
-  marks?: WaveMark[];
-  /** A name in the top-left corner. */
-  label?: string;
-  className?: string;
-  /** How far scrubbing may go (default: the whole track). */
-  scrubRange?: [number, number];
-}
-
-export interface WaveMark {
-  at: number;
-  label: string;
-  color: string;
 }
 
 /** Pixels the pointer must move before a press on a cue becomes a drag. */
@@ -388,31 +375,6 @@ export function Waveform(p: Props) {
       ctx.fillRect(px(ex) - 5, h - 12, 5, 12);
     }
 
-    // Marks: a dashed line with its name along the bottom.
-    for (const m of p.marks ?? []) {
-      const mx = px(xOf(m.at));
-      if (mx < -100 || mx > w + 100) continue;
-      ctx.fillStyle = m.color;
-      for (let y = 0; y < h; y += 6) ctx.fillRect(mx - 1, y, 2, 3);
-      ctx.font = 'bold 10px system-ui';
-      const tw = ctx.measureText(m.label).width;
-      const lx = Math.min(Math.max(mx + 4, 2), w - tw - 8);
-      const ly = h - 16;
-      ctx.fillStyle = 'rgba(0,0,0,0.7)';
-      ctx.fillRect(lx - 3, ly, tw + 6, 13);
-      ctx.fillStyle = m.color;
-      ctx.fillText(m.label, lx, ly + 10);
-    }
-
-    if (p.label) {
-      ctx.font = 'bold 11px system-ui';
-      const tw = ctx.measureText(p.label).width;
-      ctx.fillStyle = 'rgba(0,0,0,0.65)';
-      ctx.fillRect(4, 4, tw + 10, 16);
-      ctx.fillStyle = 'rgba(255,255,255,0.85)';
-      ctx.fillText(p.label, 9, 16);
-    }
-
     // Playhead
     ctx.fillStyle = COLORS.playhead;
     ctx.fillRect(px(xOf(playhead)) - 0.5, 0, 1.5, h);
@@ -467,7 +429,7 @@ export function Waveform(p: Props) {
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [p.playing, dragging, size, peakMax, p.sections, p.bands, p.duration, p.peaks, p.peaksPerSecond, p.cues, p.playhead, p.bpm, p.gridStart, p.selectedCueId, p.windowSeconds, p.height, p.marks, p.label]);
+  }, [p.playing, dragging, size, peakMax, p.sections, p.bands, p.duration, p.peaks, p.peaksPerSecond, p.cues, p.playhead, p.bpm, p.gridStart, p.selectedCueId, p.windowSeconds, p.height]);
 
   // Wheel / trackpad scrolls through the track; ⌘/Ctrl + wheel zooms.
   useEffect(() => {
@@ -489,8 +451,7 @@ export function Waveform(p: Props) {
         wheelTimer.current = 0;
         props.current.onScrubEnd?.();
       }, WHEEL_IDLE_MS);
-      const [lo, hi] = q.scrubRange ?? [0, q.duration];
-      (q.onScrub ?? q.onSeek)(Math.max(lo, Math.min(hi, shownPlayhead.current + delta * secPerPx)));
+      (q.onScrub ?? q.onSeek)(Math.max(0, Math.min(q.duration, shownPlayhead.current + delta * secPerPx)));
     };
     c.addEventListener('wheel', onWheel, { passive: false });
     return () => {
@@ -504,7 +465,7 @@ export function Waveform(p: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [p.windowSeconds, p.duration]);
 
-  const clampS = (s: number) => Math.max(p.scrubRange?.[0] ?? 0, Math.min(p.scrubRange?.[1] ?? p.duration, s));
+  const clampS = (s: number) => Math.max(0, Math.min(p.duration, s));
 
   const secAt = (clientX: number) => {
     const rect = canvas.current!.getBoundingClientRect();
@@ -557,7 +518,7 @@ export function Waveform(p: Props) {
   return (
     <canvas
       ref={canvas}
-      className={`${p.windowSeconds ? 'wave detail' : 'wave overview'}${p.fill ? ' fill' : ''}${dragging || scrubbing ? ' dragging' : ''}${p.className ? ` ${p.className}` : ''}`}
+      className={`${p.windowSeconds ? 'wave detail' : 'wave overview'}${p.fill ? ' fill' : ''}${dragging || scrubbing ? ' dragging' : ''}`}
       style={p.fill ? undefined : { height: p.height }}
       onPointerDown={(e) => {
         const hit = handleAt(e.clientX, e.clientY);

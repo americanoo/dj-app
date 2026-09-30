@@ -19,6 +19,7 @@ import { useVersions } from './versions';
 import { defaultVersionName, VersionsPanel } from './VersionsPanel';
 import { StoryPanel } from './StoryPanel';
 import { Timeline } from './Timeline';
+import { TransitionView } from './TransitionView';
 import { activeSet, reducer, useStore } from './store';
 
 
@@ -57,7 +58,7 @@ export function App() {
     if (!el) return;
     const measure = () => {
       const cs = getComputedStyle(el);
-      setRoom(el.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom) - 20); // two splitters
+      setRoom(el.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom) - 30); // three splitters
     };
     measure();
     const ro = new ResizeObserver(measure);
@@ -65,7 +66,9 @@ export function App() {
     return () => ro.disconnect();
   }, []);
   const LIBRARY_MIN = 200;
-  const squeeze = room > 0 && layout.deck + layout.timeline > room - LIBRARY_MIN ? Math.max(0.3, (room - LIBRARY_MIN) / (layout.deck + layout.timeline)) : 1;
+  const stacked = layout.transition + layout.deck + layout.timeline;
+  const squeeze = room > 0 && stacked > room - LIBRARY_MIN ? Math.max(0.3, (room - LIBRARY_MIN) / stacked) : 1;
+  const transitionH = Math.round(layout.transition * squeeze);
   const deckH = Math.round(layout.deck * squeeze);
   const timelineH = Math.round(layout.timeline * squeeze);
   useEffect(() => {
@@ -340,14 +343,23 @@ export function App() {
       </header>
 
       <main ref={mainRef} className="workspace-layout">
+        <section className="pane transition-pane" style={{ height: transitionH }}>
+          <TransitionView selectedTrackId={loadedTrackId} onSelectTrack={setLoadedTrackId} />
+        </section>
+        <Splitter
+          value={transitionH}
+          min={110}
+          max={600}
+          onChange={(transition) => setLayout({ transition, deck: deckH, timeline: timelineH })}
+        />
         <section className="pane deck-pane" style={{ height: deckH }}>
           <CueEditor trackId={loadedTrackId} onSelectTrack={setLoadedTrackId} />
         </section>
-        <Splitter value={deckH} min={200} max={900} onChange={(deck) => setLayout({ deck, timeline: timelineH })} />
+        <Splitter value={deckH} min={200} max={900} onChange={(deck) => setLayout({ transition: transitionH, deck, timeline: timelineH })} />
         <section className="pane timeline-host" style={{ height: timelineH }}>
           <Timeline selectedTrackId={loadedTrackId} onSelectTrack={setLoadedTrackId} onOpenStory={() => setStoryOpen(true)} />
         </section>
-        <Splitter value={timelineH} min={150} max={700} onChange={(timeline) => setLayout({ deck: deckH, timeline })} />
+        <Splitter value={timelineH} min={150} max={700} onChange={(timeline) => setLayout({ transition: transitionH, deck: deckH, timeline })} />
         <section className="pane library-pane">
           <LibraryView
             selectedTrackId={loadedTrackId}
@@ -415,15 +427,17 @@ export function App() {
 
 const LAYOUT_KEY = 'setcraft-layout-v1';
 
-/** Heights (px) of the deck and timeline panes; the library gets the rest. */
-function loadLayout(): { deck: number; timeline: number } {
+/** Heights (px) of the transition, deck and timeline panes; the library gets the rest. */
+function loadLayout(): { transition: number; deck: number; timeline: number } {
   try {
     const saved = JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? 'null');
-    if (saved && typeof saved.deck === 'number' && typeof saved.timeline === 'number') return saved;
+    if (saved && typeof saved.deck === 'number' && typeof saved.timeline === 'number') {
+      return { transition: typeof saved.transition === 'number' ? saved.transition : 190, deck: saved.deck, timeline: saved.timeline };
+    }
   } catch {
     // fall through to defaults
   }
-  return { deck: 440, timeline: 240 };
+  return { transition: 190, deck: 400, timeline: 220 };
 }
 
 function clamp(v: number, min: number, max: number): number {

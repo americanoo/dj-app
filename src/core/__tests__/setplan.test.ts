@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { newSet, type Library, type Track } from '../model';
-import { buildTimeline, formatSetTime, nextInNight, nextTransition, nightAtTrack, trackAtNight, parseClock, setEnd, setPlanMarkdown, totalSeconds, withTimes } from '../setplan';
+import { buildTimeline, describeTransition, formatSetTime, nextInNight, nightSlots, slotsAt, transitionsOf, nightAtTrack, trackAtNight, parseClock, setEnd, setPlanMarkdown, totalSeconds, withTimes } from '../setplan';
 import { reducer } from '../../ui/store';
 import { emptyProject } from '../model';
 
@@ -204,14 +204,48 @@ describe('scrubbing the night', () => {
     expect(nightAtTrack(items, 'b', 40)).toBe(290);
     expect(nightAtTrack(items, 'zzz', 1)).toBeUndefined();
   });
+});
 
-  it('lines the next track up against this one', () => {
-    // b starts 4:40 into a, from its 0:30 mix-in; a hands over at its end (5:00)
-    const link = nextTransition(items, 'a')!;
-    expect(link).toEqual({ trackId: 'b', at: 30, inAt: 280, outAt: 300 });
-    // 4:50 into a is the same moment as trackAtNight says for b
-    expect(290 - link.inAt + link.at).toBe(trackAtNight(items, 290)!.pos);
-    expect(nextTransition(items, 'b')).toBeUndefined();
-    expect(nextTransition(items, 'zzz')).toBeUndefined();
+describe('night playback and transitions', () => {
+  const lib: Library = {
+    tracks: {
+      a: track('a', { duration: 300, bpm: 120, gridStart: 0.5 }),
+      b: track('b', { duration: 400, bpm: 126, cues: [{ id: 'in', kind: 'cue', slot: 0, start: 30, name: 'In', color: '#fff' }] }),
+      c: track('c', { duration: 200 }),
+    },
+    playlists: [],
+  };
+  const set = newSet('Night');
+  const ch = set.chapters[0].id;
+  set.entries = [
+    { id: '1', trackId: 'a', chapterId: ch, energy: 3, transition: '', notes: '', at: 0 },
+    // b comes in about 16 bars (31.5 s at 120) before a ends, on a's bar 135 (268 s past the grid = beat 536)
+    { id: '2', trackId: 'b', chapterId: ch, energy: 5, transition: '', notes: '', at: 268.5, mixInCueId: 'in' },
+    // c after a 20 s gap (b ends at 638.5)
+    { id: '3', trackId: 'c', chapterId: ch, energy: 5, transition: '', notes: '', at: 648.5 + 10 },
+  ];
+  const slots = nightSlots(buildTimeline(set, lib));
+
+  it('plays overlapping tracks together', () => {
+    expect(slots.map((s) => [s.trackId, s.startsAt, s.playFor, s.mixIn])).toEqual([
+      ['a', 0, 300, 0],
+      ['b', 268.5, 370, 30],
+      ['c', 658.5, 200, 0],
+    ]);
+    expect(slotsAt(slots, 100).map((s) => s.trackId)).toEqual(['a']);
+    expect(slotsAt(slots, 280).map((s) => s.trackId)).toEqual(['a', 'b']);
+    expect(slotsAt(slots, 650)).toEqual([]);
+  });
+
+  it('describes each transition', () => {
+    const [ab, bc] = transitionsOf(slots);
+    const t = describeTransition(ab.a, ab.b);
+    expect(t.overlap).toBeCloseTo(31.5);
+    expect(t.overlapBars).toBeCloseTo(15.8);
+    expect(t.bpmChange).toBe(5);
+    expect(t.landsOn).toEqual({ bar: 135, beat: 1, offBeats: 0, phrase: false });
+    const g = describeTransition(bc.a, bc.b);
+    expect(g.overlap).toBeCloseTo(-20);
+    expect(g.overlapBars).toBeUndefined();
   });
 });

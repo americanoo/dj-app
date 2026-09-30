@@ -2,8 +2,8 @@
  * A small bus between the deck and the journey-of-the-night timeline, outside
  * React so the playhead can move every frame without re-rendering anything.
  *
- * The deck publishes where it is; the timeline asks it to jump (scrubbing the
- * night), which may mean loading another track.
+ * The deck publishes where it is, and whichever player starts (the deck or the
+ * night player) claims the speakers so the other one stops.
  */
 
 export interface DeckPosition {
@@ -13,20 +13,15 @@ export interface DeckPosition {
   playing: boolean;
 }
 
-export type TransportRequest =
-  /** The night is being dragged: play from wherever the pointer is. */
-  | { type: 'scrubStart' }
-  /** Let go: keep playing (`resume`) or stop where it landed. */
-  | { type: 'scrubEnd'; resume: boolean }
-  /** Go to `pos` in `trackId`, loading it if it isn't the deck's track; `play` starts it playing. */
-  | { type: 'seek'; trackId: string; pos: number; play?: boolean };
-
 type Listener<T> = (value: T) => void;
+
+/** What's playing: the deck (one track, for cues and FX) or the night player (the whole set). */
+export type AudioOwner = 'deck' | 'night';
 
 class Transport {
   position: DeckPosition | null = null;
   private positionListeners = new Set<Listener<DeckPosition | null>>();
-  private requestListeners = new Set<Listener<TransportRequest>>();
+  private claimListeners = new Set<Listener<AudioOwner>>();
 
   publish(p: DeckPosition | null) {
     this.position = p;
@@ -40,14 +35,15 @@ class Transport {
     };
   }
 
-  request(r: TransportRequest) {
-    for (const fn of this.requestListeners) fn(r);
+  /** `owner` starts playing: whoever else is playing stops, so only one thing plays at a time. */
+  claim(owner: AudioOwner) {
+    for (const fn of this.claimListeners) fn(owner);
   }
 
-  onRequest(fn: Listener<TransportRequest>): () => void {
-    this.requestListeners.add(fn);
+  onClaim(fn: Listener<AudioOwner>): () => void {
+    this.claimListeners.add(fn);
     return () => {
-      this.requestListeners.delete(fn);
+      this.claimListeners.delete(fn);
     };
   }
 }

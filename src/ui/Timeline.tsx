@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { keyColor, toCamelot, type KeyRelation } from '../core/keys';
 import { SLOT_LETTERS, type SetEntry } from '../core/model';
-import { buildTimeline, formatSetTime, nightAtTrack, parseClock, totalSeconds, trackAtNight, type TimelineItem } from '../core/setplan';
+import { buildTimeline, formatSetTime, itemMixIn, nightAtTrack, parseClock, totalSeconds, type TimelineItem } from '../core/setplan';
 import { transport } from './transport';
+import { useNight, useNightState } from './night';
+import { useAudio } from './audio';
 import { formatTime, parseTime } from '../core/time';
 import { activeSet, useStore } from './store';
 import { useFitZoom, zoomOf } from './fit';
@@ -77,25 +79,38 @@ export function Timeline({ selectedTrackId, onSelectTrack, onOpenStory }: Props)
     if (nowEl.current) nowEl.current.textContent = t === null ? '' : `▶ ${formatSetTime(Math.max(0, t), startClock, true)}`;
   }, []);
   // Scrubbing the night: click or drag the background (not a track block).
-  const scrub = useRef<{
-    wasPlaying: boolean;
-    /** The deck track currently scrubbing with sound (after scrubStart). */
-    audibleOn: string | null;
-    moved: boolean;
-    last: { trackId: string; pos: number };
-    ghost: boolean;
-    /** Hovering over another track: load it after a moment and keep scrubbing there. */
-    dwell: { trackId: string; timer: number } | null;
-  } | null>(null);
+  const scrub = useRef<{ startX: number; moved: boolean } | null>(null);
+  const night = useNight();
+  const nightState = useNightState();
+  /** Where the playhead goes: the night player's position, or the deck's place in the night. */
+  const followed = useCallback(() => {
+    if (night.active) return night.position();
+    const p = transport.position;
+    return p ? (nightAtTrack(live.current.items, p.trackId, p.pos) ?? null) : null;
+  }, [night]);
   useEffect(
     () =>
-      transport.onPosition((p) => {
-        if (scrub.current?.ghost) return; // the line follows the pointer until it's let go
-        nightT.current = p ? (nightAtTrack(live.current.items, p.trackId, p.pos) ?? null) : null;
+      transport.onPosition(() => {
+        if (night.active) return;
+        nightT.current = followed();
         place();
       }),
-    [place],
+    [place, night, followed],
   );
+  // While the night plays, the playhead moves every frame.
+  useEffect(() => {
+    nightT.current = followed();
+    place();
+    if (!nightState.playing) return;
+    let raf = 0;
+    const tick = () => {
+      nightT.current = night.position();
+      place();
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [nightState.playing, nightState.active, night, place, followed]);
 
   // Fill the panel's height: the energy line slims down on short panels and the lanes take the rest.
   const energyH = viewHeight >= 170 ? ENERGY_H : SMALL_ENERGY_H;
@@ -208,8 +223,7 @@ export function Timeline({ selectedTrackId, onSelectTrack, onOpenStory }: Props)
   const lanesTop = RULER_H + CHAPTER_H + energyH;
   live.current = { items, pxps, startClock: set.startClock };
   useLayoutEffect(() => {
-    const p = transport.position;
-    if (!scrub.current?.ghost) nightT.current = p ? (nightAtTrack(items, p.trackId, p.pos) ?? null) : null;
+    nightT.current = followed();
     place();
   });
 
@@ -223,7 +237,19 @@ export function Timeline({ selectedTrackId, onSelectTrack, onOpenStory }: Props)
             ? ` · ${set.startClock}–${formatSetTime(end, set.startClock)}`
             : ''}
         </span>
-        <span className="tl-now" ref={nowEl} title="Where the deck is in the night. Click or drag the timeline to jump." />
+        <button
+          className={`small night-play ${nightState.playing ? 'on' : ''}`}
+          onClick={() => (night.playing ? night.pause() : night.play())}
+          disabled={!items.length}
+          title="Play the night as planned: overlapping tracks play together, one runs into the next"
+        >
+          {nightState.playing ? '❚❚ Pause night' : '▶ Play night'}
+        </button>
+        <span
+          className="tl-now"
+          ref={nowEl}
+          title="Where you are in the night. Click or drag the timeline to jump there and listen."
+        />
         <button className="small" onClick={onOpenStory} title="Story, venue, start time and chapters">
           Story &amp; chapters
         </button>
@@ -268,67 +294,34 @@ export function Timeline({ selectedTrackId, onSelectTrack, onOpenStory }: Props)
           if (target.closest('.tl-block, button, input, select')) return;
           if (e.target === e.currentTarget || target.classList.contains('tl-lanes')) setSelectedId(null);
           if (e.button !== 0) return;
-          const at = trackAtNight(items, timeAt(e.clientX));
-          if (!at) return;
+          if (!items.length) return;
           e.currentTarget.setPointerCapture(e.pointerId);
-          scrub.current = { wasPlaying: !!transport.position?.playing, audibleOn: null, moved: false, last: at, ghost: false, dwell: null };
+          scrub.current = { startX: e.clientX, moved: false };
         }}
         onPointerMove={(e) => {
           const sc = scrub.current;
           if (!sc) return;
-          const t = timeAt(e.clientX);
-          const at = trackAtNight(items, t);
-          if (!at) return;
-          sc.moved = true;
-          sc.last = at;
-          if (at.trackId === transport.position?.trackId) {
-            // The deck's own track: play from wherever the pointer is.
-            if (sc.audibleOn !== at.trackId) {
-              transport.request({ type: 'scrubStart' });
-              sc.audibleOn = at.trackId;
-            }
-            if (sc.dwell) window.clearTimeout(sc.dwell.timer);
-            sc.dwell = null;
-            sc.ghost = false;
-            transport.request({ type: 'seek', trackId: at.trackId, pos: at.pos });
-          } else {
-            // Another track: the line follows the pointer, and after a moment there the
-            // track loads and plays from the pointer, so scrubbing carries on across the night.
-            sc.ghost = true;
-            nightT.current = t;
-            place();
-            if (sc.dwell?.trackId !== at.trackId) {
-              if (sc.dwell) window.clearTimeout(sc.dwell.timer);
-              sc.dwell = {
-                trackId: at.trackId,
-                timer: window.setTimeout(() => {
-                  const cur = scrub.current;
-                  if (!cur || cur.last.trackId !== at.trackId) return;
-                  cur.ghost = false;
-                  transport.request({ type: 'seek', trackId: cur.last.trackId, pos: cur.last.pos, play: true });
-                }, 300),
-              };
-            }
+          if (!sc.moved && Math.abs(e.clientX - sc.startX) < 3) return;
+          if (!sc.moved) {
+            // Dragging plays from under the pointer (even from pause): both tracks in a blend.
+            sc.moved = true;
+            night.scrubStart();
           }
+          const t = timeAt(e.clientX);
+          night.scrubTo(t);
+          nightT.current = t;
+          place();
         }}
-        onPointerUp={() => {
+        onPointerUp={(e) => {
           const sc = scrub.current;
           scrub.current = null;
           if (!sc) return;
-          if (sc.dwell) window.clearTimeout(sc.dwell.timer);
-          const { trackId, pos } = sc.last;
-          if (trackId === transport.position?.trackId) {
-            if (!sc.moved) transport.request({ type: 'seek', trackId, pos });
-            // Let go: play on if the deck was playing, otherwise stop where it landed.
-            if (sc.audibleOn) transport.request({ type: 'scrubEnd', resume: sc.wasPlaying });
-          } else {
-            transport.request({ type: 'seek', trackId, pos, play: sc.wasPlaying });
-          }
+          // Let go: play on if the night was playing, otherwise stop where it landed.
+          if (sc.moved) night.scrubEnd();
+          else night.seek(timeAt(e.clientX));
         }}
         onPointerCancel={() => {
-          const sc = scrub.current;
-          if (sc?.dwell) window.clearTimeout(sc.dwell.timer);
-          if (sc?.audibleOn) transport.request({ type: 'scrubEnd', resume: sc.wasPlaying });
+          if (scrub.current?.moved) night.scrubEnd();
           scrub.current = null;
         }}
       >
@@ -449,6 +442,7 @@ function TrackBlock(props: {
         true,
       )}${item.warnings.length ? '\n⚠ ' + item.warnings.join('\n⚠ ') : ''}`}
     >
+      {t && <BlockWave trackId={t.id} from={itemMixIn(item)} seconds={item.playFor} width={w} />}
       {item.gap < 0 || item.keyRelation !== 'unknown' ? (
         <i className="tl-rel" style={{ background: item.warnings.length ? 'var(--danger)' : RELATION_COLOR[item.keyRelation] }} />
       ) : null}
@@ -549,4 +543,53 @@ function EntryInspector({ item, onClose }: { item: TimelineItem; onClose: () => 
       </button>
     </div>
   );
+}
+
+/**
+ * The part of the track the night plays, drawn inside its block: what you see
+ * lined up on the timeline is what you hear.
+ */
+function BlockWave({ trackId, from, seconds, width }: { trackId: string; from: number; seconds: number; width: number }) {
+  const { audio, remembered, rememberedIds, loadRemembered } = useAudio();
+  const wave = audio[trackId] ?? remembered[trackId];
+  const canvas = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    if (!wave && rememberedIds.has(trackId)) void loadRemembered(trackId);
+  }, [wave, rememberedIds, trackId, loadRemembered]);
+  useEffect(() => {
+    const c = canvas.current;
+    if (!c || !wave) return;
+    // Very wide blocks (zoomed right in) are drawn at a capped size and stretched.
+    const w = Math.max(1, Math.min(2400, Math.round(width)));
+    const h = 40;
+    c.width = w;
+    c.height = h;
+    const ctx = c.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, w, h);
+    const pps = wave.peaksPerSecond;
+    const layers: [Float32Array, string][] = wave.bands
+      ? [
+          [wave.bands.low, 'rgba(47,107,255,0.75)'],
+          [wave.bands.mid, 'rgba(245,155,35,0.6)'],
+          [wave.bands.high, 'rgba(242,239,232,0.55)'],
+        ]
+      : [[wave.peaks, 'rgba(61,111,214,0.8)']];
+    let max = 0.05;
+    for (const v of wave.peaks) if (v > max) max = v;
+    for (const [arr, color] of layers) {
+      ctx.fillStyle = color;
+      for (let x = 0; x < w; x++) {
+        const s0 = from + (x / w) * seconds;
+        const i0 = Math.floor(s0 * pps);
+        const i1 = Math.max(i0 + 1, Math.floor((from + ((x + 1) / w) * seconds) * pps));
+        let m = 0;
+        for (let i = i0; i < i1 && i < arr.length; i++) if (arr[i] > m) m = arr[i];
+        const a = Math.min(1, m / max) * (h / 2 - 1);
+        if (a > 0.3) ctx.fillRect(x, h / 2 - a, 1, a * 2);
+      }
+    }
+  }, [wave, from, seconds, width]);
+  if (!wave) return null;
+  return <canvas ref={canvas} className="tl-wave" aria-hidden />;
 }

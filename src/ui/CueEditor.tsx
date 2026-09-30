@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { keyColor, toCamelot, normaliseKey } from '../core/keys';
-import { buildTimeline, DEFAULT_TRACK_SECONDS, nextInNight, nextTransition, withTimes } from '../core/setplan';
+import { nextInNight, withTimes } from '../core/setplan';
 import { scaleTempo } from '../core/tempo';
 import { CUE_COLORS, MAX_HOT_CUES, SLOT_LETTERS, uid, type Cue, type Project, type Track } from '../core/model';
 import { barBeatLabel, beatLength, formatTime, parseTime, round, SNAP_MODES, snapTime, type SnapMode } from '../core/time';
@@ -13,6 +13,8 @@ import { useFitZoom } from './fit';
 import { Knob } from './Knob';
 import { JOG_SPEEDS, useMidi, useMidiActions } from './midi';
 import { transport } from './transport';
+import { useNight, useNightState } from './night';
+import { NightNow, SourceSwitch } from './NightBar';
 import { AutoCuePanel } from './AutoCuePanel';
 import { LinkFolderButton } from './MusicFolderControl';
 import { activeSet, useStore } from './store';
@@ -28,19 +30,11 @@ const ZOOM_BARS = [2, 4, 8, 16, 32];
 /** The deck: waveform, pads and cues of the selected track. */
 export function CueEditor({ trackId, onSelectTrack }: { trackId: string | null; onSelectTrack: (id: string) => void }) {
   const { project } = useStore();
+  const night = useNight();
+  const nightState = useNightState();
   const track = trackId ? project.library.tracks[trackId] : undefined;
   // Playing on into the next track: the next deck starts itself here once its audio is ready.
   const [autoStart, setAutoStart] = useState<{ trackId: string; at: number; play: boolean } | null>(null);
-  // Scrubbing the night onto another track: load it at that spot (playing if the deck was).
-  useEffect(
-    () =>
-      transport.onRequest((r) => {
-        if (r.type !== 'seek' || r.trackId === trackId) return;
-        setAutoStart({ trackId: r.trackId, at: r.pos, play: !!r.play });
-        onSelectTrack(r.trackId);
-      }),
-    [trackId, onSelectTrack],
-  );
   useEffect(() => {
     if (!track) transport.publish(null);
   }, [track]);
@@ -52,13 +46,29 @@ export function CueEditor({ trackId, onSelectTrack }: { trackId: string | null; 
         </div>
         {createPortal(
           <div className="transport-bar empty" role="region" aria-label="Player">
-            <div className="tb-left muted">No track loaded</div>
+            <div className="tb-left">
+              <SourceSwitch />
+              {nightState.active ? <NightNow /> : <span className="muted">No track loaded</span>}
+            </div>
             <div className="transport">
-              <button className="play-btn" disabled aria-label="Play">
-                <svg viewBox="0 0 24 24" aria-hidden>
-                  <path d="M8.5 5.2v13.6a.8.8 0 0 0 1.2.7l10.6-6.8a.8.8 0 0 0 0-1.4L9.7 4.5a.8.8 0 0 0-1.2.7z" />
-                </svg>
+              {nightState.active && (
+                <button className="small" onClick={() => night.jumpMix(-1)} title="To just before the previous mix">
+                  ◂ Mix
+                </button>
+              )}
+              <button
+                className={`play-btn ${nightState.playing ? 'playing' : ''}`}
+                disabled={!nightState.active}
+                onClick={() => night.toggle()}
+                aria-label={nightState.playing ? 'Pause' : 'Play'}
+              >
+                <PlayIcon playing={nightState.playing} />
               </button>
+              {nightState.active && (
+                <button className="small" onClick={() => night.jumpMix(1)} title="To just before the next mix">
+                  Mix ▸
+                </button>
+              )}
             </div>
             <div className="tb-right" />
           </div>,
@@ -98,6 +108,8 @@ function TrackCueWorkspace({
 }) {
   const { dispatch, project } = useStore();
   const { audio: attached, remembered, rememberedIds, loading, attach, loadRemembered, getBuffer } = useAudio();
+  const night = useNight();
+  const nightState = useNightState();
   const folder = useMusicFolder();
   const audioInfo = attached[track.id];
   // Playable audio from this visit, or the waveform remembered from an earlier one.
@@ -277,6 +289,7 @@ function TrackCueWorkspace({
 
   useEffect(() => {
     deckRef.current?.setVolume(volume);
+    night.setVolume(volume);
     try {
       localStorage.setItem('setcraft-volume', String(volume));
     } catch {
@@ -401,8 +414,6 @@ function TrackCueWorkspace({
   // carries on from the new spot when you let go. (Restarting playback on every
   // mouse move is what made scrubbing stutter.)
   const hold = useRef<{ resume: boolean } | null>(null);
-  /** Scrubbing the journey of the night (audible, see the transport handler below). */
-  const nightScrub = useRef<{ lastAt: number; pending: number | null; timer: number } | null>(null);
   const scrubStart = useCallback(() => {
     const d = deckRef.current;
     if (hold.current || !d) return;
@@ -420,6 +431,8 @@ function TrackCueWorkspace({
   }, []);
 
   const togglePlay = useCallback(() => {
+    // The bar is on the night: play / pause that instead.
+    if (night.active) return night.toggle();
     const d = deckRef.current;
     if (!d || !deckReady) return;
     // Play / pause after an FX means "stay on this track": cancel playing on into the next one.
@@ -445,53 +458,6 @@ function TrackCueWorkspace({
   const nextRef = useRef(next);
   nextRef.current = next;
 
-  // The next track's waveform runs underneath on the same clock, so the handover is visible
-  // as it happens: it scrolls in where the night brings it in, and the two overlap in a blend.
-  const link = useMemo(
-    () => nextTransition(buildTimeline(activeSet(project), project.library), track.id),
-    [project, track.id],
-  );
-  const linkTrack = link ? project.library.tracks[link.trackId] : undefined;
-  const linkWave = link ? (attached[link.trackId] ?? remembered[link.trackId]) : undefined;
-  useEffect(() => {
-    if (!link || !linkTrack || attached[link.trackId] || remembered[link.trackId] || loading[link.trackId]) return;
-    if (rememberedIds.has(link.trackId)) {
-      void loadRemembered(link.trackId);
-      return;
-    }
-    if (folder.status !== 'ready') return;
-    let cancelled = false;
-    folder
-      .findFile(linkTrack.path)
-      .then((f) => (!cancelled && f ? attach(link.trackId, f) : undefined))
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [link?.trackId, linkTrack?.path, folder.status, rememberedIds]);
-  const linkBpm = linkTrack?.bpm;
-  const linkGrid = linkTrack?.gridStart ?? 0;
-  const linkSections = useMemo(
-    () =>
-      linkWave?.bands
-        ? detectSections(linkWave.bands, linkWave.peaksPerSecond, linkWave.duration, linkBpm, linkGrid)
-        : [],
-    [linkWave, linkBpm, linkGrid],
-  );
-  /** Seconds to add to a spot in this track to get the same moment in the next one. */
-  const linkShift = link ? link.at - link.inAt : 0;
-  const linkShiftRef = useRef(linkShift);
-  linkShiftRef.current = linkShift;
-  const linkLive = useCallback(() => livePlayhead() + linkShiftRef.current, [livePlayhead]);
-  const linkMarks = useMemo(
-    () => (link ? [{ at: link.inAt, label: '▸ NEXT IN', color: '#22d3ee' }] : undefined),
-    [link],
-  );
-  const linkLaneMarks = useMemo(
-    () => (link ? [{ at: link.outAt + link.at - link.inAt, label: '◂ OUT', color: '#f472b6' }] : undefined),
-    [link],
-  );
   const prewarmed = useRef<string | null>(null);
   const prewarm = useCallback(() => {
     const n = nextRef.current;
@@ -545,9 +511,24 @@ function TrackCueWorkspace({
   const fxTimer = useRef(0);
   const fireFx = useCallback(
     (kind: OutFx) => {
+      window.clearTimeout(fxTimer.current);
+      if (night.active) {
+        // On the night, the effect plays the outgoing track out while the next one carries on.
+        const flash = () => {
+          if (!night.outFx(kind, fxBeats, fxMix)) return;
+          setFxActive(kind);
+          window.setTimeout(() => setFxActive((k) => (k === kind ? null : k)), 1800);
+        };
+        if (night.playing) flash();
+        else {
+          night.play();
+          setFxActive(kind);
+          fxTimer.current = window.setTimeout(flash, 2000);
+        }
+        return;
+      }
       const d = deckRef.current;
       if (!d || !deckReady) return;
-      window.clearTimeout(fxTimer.current);
       const go = () => {
         if (!d.playing) return;
         // An out-effect plays through, not round a loop.
@@ -557,7 +538,7 @@ function TrackCueWorkspace({
         // Fired mid-scrub: the track is played out, so it doesn't pick up again on release.
         if (hold.current) hold.current.resume = false;
         // While a hand is on the night or the waveform, the pointer decides where the night is.
-        const scrubbing = !!hold.current || !!nightScrub.current;
+        const scrubbing = !!hold.current;
         if (nextIn !== undefined && playOnRef.current && n && !scrubbing) {
           prewarm();
           window.clearTimeout(playOnTimer.current);
@@ -567,7 +548,7 @@ function TrackCueWorkspace({
         window.setTimeout(() => setFxActive((k) => (k === kind ? null : k)), 1800);
       };
       if (d.playing) go();
-      else if (hold.current || nightScrub.current) {
+      else if (hold.current) {
         // On a scrub: straight out from the spot under the pointer, no bar of run-up.
         d.play(playheadRef.current);
         setPlaying(true);
@@ -774,68 +755,23 @@ function TrackCueWorkspace({
   useEffect(() => {
     if (!playing) transport.publish({ trackId: track.id, pos: playhead, playing: false });
   }, [playhead, playing, track.id]);
-  // Scrubbing the night plays as you drag: the deck re-cues to the pointer at most every
-  // SCRUB_EVERY ms (like a CD player's needle search), then plays on or stops on release.
-  const transportHandlers = useRef({ seek, scrubSeek, deckReady });
-  transportHandlers.current = { seek, scrubSeek, deckReady };
-  useEffect(() => {
-    const SCRUB_EVERY = 70;
-    const flush = () => {
-      const ns = nightScrub.current;
-      if (!ns || ns.pending === null) return;
-      transportHandlers.current.scrubSeek(ns.pending);
-      // Moving on after an FX has played the track out picks the sound back up.
-      const d = deckRef.current;
-      if (d && !d.playing && !d.fxBusy && transportHandlers.current.deckReady) {
-        d.play(ns.pending);
-        setPlaying(true);
-      }
-      ns.pending = null;
-      ns.lastAt = performance.now();
-    };
-    const off = transport.onRequest((r) => {
-      const h = transportHandlers.current;
-      const d = deckRef.current;
-      if (r.type === 'scrubStart') {
-        if (!d || !h.deckReady) return;
-        nightScrub.current ??= { lastAt: 0, pending: null, timer: 0 };
-        if (!d.playing) {
-          d.play(playheadRef.current);
-          setPlaying(true);
-        }
-      } else if (r.type === 'scrubEnd') {
-        const ns = nightScrub.current;
-        if (!ns) return;
-        window.clearTimeout(ns.timer);
-        flush();
-        nightScrub.current = null;
-        if (!r.resume && d?.playing) {
+  // The night player taking over the speakers pauses the deck.
+  useEffect(
+    () =>
+      transport.onClaim((owner) => {
+        const d = deckRef.current;
+        if (owner === 'deck' || !d) return;
+        window.clearTimeout(playOnTimerRef.current);
+        window.clearTimeout(fxTimer.current);
+        if (hold.current) hold.current.resume = false;
+        if (d.playing) {
           d.pause();
           setPlaying(false);
           setPlayhead(d.position());
         }
-      } else if (r.trackId === track.id) {
-        const ns = nightScrub.current;
-        if (ns) {
-          ns.pending = r.pos;
-          const wait = SCRUB_EVERY - (performance.now() - ns.lastAt);
-          window.clearTimeout(ns.timer);
-          if (wait <= 0) flush();
-          else ns.timer = window.setTimeout(flush, wait);
-          return;
-        }
-        h.seek(r.pos);
-        if (r.play && d && !d.playing && !hold.current && h.deckReady) {
-          d.play(r.pos);
-          setPlaying(true);
-        }
-      }
-    });
-    return () => {
-      off();
-      if (nightScrub.current) window.clearTimeout(nightScrub.current.timer);
-    };
-  }, [track.id]);
+      }),
+    [],
+  );
 
   const selected = track.cues.find((c) => c.id === selectedId);
   const sortedCues = [...track.cues].sort((a, b) => a.start - b.start);
@@ -991,35 +927,7 @@ function TrackCueWorkspace({
           }}
           snap={dragSnap}
           onCueDrag={(id, change) => updateCue(id, change)}
-          marks={linkMarks}
         />
-        {link && linkTrack && (
-          <Waveform
-            duration={linkWave?.duration ?? linkTrack.duration ?? DEFAULT_TRACK_SECONDS}
-            peaks={linkWave?.peaks}
-            bands={linkWave?.bands}
-            sections={linkSections}
-            peaksPerSecond={linkWave?.peaksPerSecond}
-            cues={linkTrack.cues}
-            playhead={playhead + linkShift}
-            livePlayhead={linkLive}
-            playing={playing}
-            bpm={linkBpm}
-            gridStart={linkGrid}
-            selectedCueId={null}
-            windowSeconds={beat ? zoomBars * 4 * beat : zoomBars * 2}
-            fill
-            className="next-lane"
-            label={`NEXT · ${linkTrack.artist ? `${linkTrack.artist} – ` : ''}${linkTrack.title}${linkWave ? '' : loading[link.trackId] ? ' · loading…' : ' · no waveform yet'}`}
-            marks={linkLaneMarks}
-            // The lane moves with this deck: dragging it scrubs the current track.
-            scrubRange={[linkShift, duration + linkShift]}
-            onSeek={(s) => seek(q(s - linkShift))}
-            onScrub={(s) => scrubSeek(s - linkShift)}
-            onScrubStart={scrubStart}
-            onScrubEnd={scrubEnd}
-          />
-        )}
         <Waveform
           duration={duration}
           peaks={wave?.peaks}
@@ -1258,6 +1166,11 @@ function TrackCueWorkspace({
         // The player bar floats along the bottom of the whole app.
         <div className="transport-bar" role="region" aria-label="Player">
           <div className="tb-left">
+            <SourceSwitch />
+            {nightState.active ? (
+              <NightNow />
+            ) : (
+              <>
             <div className="tb-track">
               <b>{track.title}</b>
               <span>
@@ -1278,32 +1191,42 @@ function TrackCueWorkspace({
                 ↻ {activeLoop.name || 'Loop'} · exit
               </button>
             )}
+              </>
+            )}
           </div>
           <div className="transport">
-            <button className="small" onClick={() => seek(q(now() - (beat ?? 0.5) * 4))} title="Back one bar (Shift+←)">
-              −1 bar
-            </button>
-            <button
-              className={`play-btn ${playing ? 'playing' : ''}`}
-              onClick={togglePlay}
-              disabled={!deckReady}
-              title={playing ? 'Pause (Space)' : 'Play (Space)'}
-              aria-label={playing ? 'Pause' : 'Play'}
-            >
-              {playing ? (
-                <svg viewBox="0 0 24 24" aria-hidden>
-                  <rect x="6" y="5" width="4.2" height="14" rx="1" />
-                  <rect x="13.8" y="5" width="4.2" height="14" rx="1" />
-                </svg>
-              ) : (
-                <svg viewBox="0 0 24 24" aria-hidden>
-                  <path d="M8.5 5.2v13.6a.8.8 0 0 0 1.2.7l10.6-6.8a.8.8 0 0 0 0-1.4L9.7 4.5a.8.8 0 0 0-1.2.7z" />
-                </svg>
-              )}
-            </button>
-            <button className="small" onClick={() => seek(q(now() + (beat ?? 0.5) * 4))} title="Forward one bar (Shift+→)">
-              +1 bar
-            </button>
+            {nightState.active ? (
+              <button className="small" onClick={() => night.jumpMix(-1)} title="To just before the previous mix">
+                ◂ Mix
+              </button>
+            ) : (
+              <button className="small" onClick={() => seek(q(now() - (beat ?? 0.5) * 4))} title="Back one bar (Shift+←)">
+                −1 bar
+              </button>
+            )}
+            {(() => {
+              const on = nightState.active ? nightState.playing : playing;
+              return (
+                <button
+                  className={`play-btn ${on ? 'playing' : ''}`}
+                  onClick={togglePlay}
+                  disabled={!nightState.active && !deckReady}
+                  title={on ? 'Pause (Space)' : 'Play (Space)'}
+                  aria-label={on ? 'Pause' : 'Play'}
+                >
+                  <PlayIcon playing={on} />
+                </button>
+              );
+            })()}
+            {nightState.active ? (
+              <button className="small" onClick={() => night.jumpMix(1)} title="To just before the next mix">
+                Mix ▸
+              </button>
+            ) : (
+              <button className="small" onClick={() => seek(q(now() + (beat ?? 0.5) * 4))} title="Forward one bar (Shift+→)">
+                +1 bar
+              </button>
+            )}
           </div>
           <div className="tb-right">
             <div className="snap-control fx-group" role="group" aria-label="Out effects">
@@ -1700,5 +1623,18 @@ function TrackFields({ track }: { track: Track }) {
         />
       </label>
     </div>
+  );
+}
+
+function PlayIcon({ playing }: { playing: boolean }) {
+  return playing ? (
+    <svg viewBox="0 0 24 24" aria-hidden>
+      <rect x="6" y="5" width="4.2" height="14" rx="1" />
+      <rect x="13.8" y="5" width="4.2" height="14" rx="1" />
+    </svg>
+  ) : (
+    <svg viewBox="0 0 24 24" aria-hidden>
+      <path d="M8.5 5.2v13.6a.8.8 0 0 0 1.2.7l10.6-6.8a.8.8 0 0 0 0-1.4L9.7 4.5a.8.8 0 0 0-1.2.7z" />
+    </svg>
   );
 }

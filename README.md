@@ -20,7 +20,7 @@ npm run build    # static site in dist/ – host anywhere
 
 ## One-page workspace
 
-Everything happens on one page, in three stacked panels. Drag the handles between them to resize; the sizes
+Everything happens on one page, in four stacked panels. Drag the handles between them to resize; the sizes
 are remembered. Every panel always shows all of its controls without scrolling: a taller deck gets a taller
 waveform and a taller timeline gets taller lanes, and when a panel gets too small for everything at full size,
 its contents scale down to fit. Only long lists (library tracks, playlists, a track's cue list) scroll within
@@ -28,15 +28,9 @@ their own space. Earlier versions of a track's cues open from **History** in the
 
 | Panel | What it's for |
 |-------|---------------|
-| **Deck** (top) | The loaded track: a full-width colour waveform with its sections, and underneath it the eight hot cue pads in one row, the loop and memory cue buttons, and the cue list on the right. ‹ › steps through the night. |
-| **Journey of the night** (centre) | A zoomable timeline of the set, from the whole night down to seconds, shown in clock time once the set has a start time. Drag tracks here from the library at the exact moment they should start, and drag them along to move them. Tracks snap to whole seconds and to neighbouring tracks' edges; hold **Shift** for free placement. Alternating lanes show overlaps as blends. It's also a **scrubbable timeline of the night**: a playhead shows where
-the deck is, and clicking or dragging the background (the ruler, bands or empty lanes) jumps there, loading that
-track at the matching spot (during a blend, the incoming track). Dragging plays as you go, like a CD player's
-needle search, even from pause: let go and it plays on if it was playing, or stops where it landed. Rest on
-another track for a moment and it loads and carries on playing from the pointer, so you can scrub straight across
-the night; a quick drag past it just loads it when you let go. The FX keys (`E`, `R`, `L`, `B`, or the FX on your
-controller) work mid-drag: the effect plays out from the spot under the pointer, and moving on picks the sound
-back up. Chapter bands and the energy line sit above, and the dot on each track shows its key compatibility with the previous one. Click a track to load it into the deck and edit its start time, chapter, energy, transition, notes and mix points; **Delete** removes it. |
+| **Transition** (top) | Two decks on one clock: the outgoing track (A) on the left, the incoming one (B) on the right, and both waveforms in between, lined up exactly as the night plays them. Where both play is highlighted (a gap in red), **A OUT** and **B IN** mark the handover, and the parts of each file the night doesn't play are ghosted. Chips show the blend length in bars, the tempo change, whether the keys fit, and where B comes in on A's grid (on a phrase, on the bar, or off the beat). **Drag B's waveform** to move where it comes in: it snaps to A's beats (**Shift** for free), with a live readout, and ⌘Z undoes it. **▶ Preview transition** plays the night from a few bars before B. ‹ › steps through the night's transitions; it follows the track you open in the deck, and the night while it plays. **Edit cues** opens either track in the deck. |
+| **Deck** | The loaded track: a full-width colour waveform with its sections, and underneath it the eight hot cue pads in one row, the loop and memory cue buttons, and the cue list on the right. ‹ › steps through the night. |
+| **Journey of the night** (centre) | A zoomable timeline of the set, from the whole night down to seconds, shown in clock time once the set has a start time. Drag tracks here from the library at the exact moment they should start, and drag them along to move them. Tracks snap to whole seconds and to neighbouring tracks' edges; hold **Shift** for free placement. Alternating lanes show overlaps as blends. It **plays the night as planned**: **▶ Play night** plays every track at its place, from its mix-in, and tracks that overlap on the timeline play together, so what you see is what you hear; one runs straight into the next without stopping. Each block shows the waveform of the part of the track that plays. Click the timeline's background (the ruler, bands or empty lanes) to jump there, or drag along it to scrub the night with sound, even from pause: let go and it plays on if it was playing, or stops where it landed. Opening tracks in the deck while the night plays doesn't stop the music. Chapter bands and the energy line sit above, and the dot on each track shows its key compatibility with the previous one. Click a track to load it into the deck and edit its start time, chapter, energy, transition, notes and mix points; **Delete** removes it. |
 | **Library** (bottom) | Your imported collection and playlists. Click a row to load it into the deck, drag it onto the timeline, or double-click to add it at the end of the night. |
 
 A **player bar** floats along the bottom of the whole app: the loaded track with a big clock on the left, a large
@@ -164,11 +158,7 @@ cues go straight through. Re-importing the same file changes nothing.
 
 - **Waveforms** in rekordbox-style three-band colour (bass blue, mids amber, highs white), normalised so quiet
   masters still fill the view and smooth at every zoom level. There's a detail view with the beat grid and bar
-  numbers, and an overview below it for navigating. When the track is in the night, the **next track's
-  waveform runs underneath on the same clock**: a dashed **▸ NEXT IN** line marks where the night brings it in,
-  its waveform scrolls in from there (overlapping during a blend, after a gap if there is one), and **◂ OUT**
-  on it marks where this track hands over. It's the two decks of the transition side by side, and dragging it
-  scrubs the current track. Both redraw every frame while playing from an interpolated
+  numbers, and an overview below it for navigating. Both redraw every frame while playing from an interpolated
   audio clock, and the shape is sampled at fixed points in the track, so it glides without flickering. Analysis runs in a background worker so the page stays responsive.
 - **Easy navigation.** Grab the zoomed waveform and pull it like a record (drag left to go forward), or drag along
   the overview. Scroll the wheel/trackpad over the waveform to move through the track, and **⌘/Ctrl + scroll**
@@ -216,8 +206,14 @@ cues go straight through. Re-importing the same file changes nothing.
   backspin that winds the record down). **Beats** sets the echo time, the reverb swell, the loop length or the
   length of the spin (1/4 to 4 beats), and the **D/W** knob sets dry/wet (left mostly the track, middle both,
   right only the effect; on the loop, how far the filter sweeps). When the deck is stopped, an FX plays one bar
-  from the playhead first, so you can park on your mix-out point and hear it. While scrubbing (the waveform or
-  the night), the FX keys fire straight away from the spot you're on, and the track stays out when you let go.
+  from the playhead first, so you can park on your mix-out point and hear it. While scrubbing the waveform,
+  the FX keys fire straight away from the spot you're on, and the track stays out when you let go.
+- **Deck or Night.** The player bar drives one of two players, picked with the **Deck | Night** switch on its
+  left: the deck (the loaded track, for cues, loops and FX) or the whole night. On the night, the play button,
+  `Space` and your controller's play play the night, **◂ Mix / Mix ▸** jump to just before the previous or next
+  track coming in, and the bar shows what's playing (both titles during a blend). Only one plays at a time:
+  starting one pauses the other. The out FX work on the night too: they play the outgoing track out while the
+  incoming one carries on.
 - **▸ Next** plays on through the night: after an out FX the next track in the set comes in while the tail rings
   (from its mix-in cue, or its first downbeat), and when a track ends the next one starts. Its audio is loaded
   ahead of time so there's no gap. Pressing play/pause during an FX stays on the current track.
