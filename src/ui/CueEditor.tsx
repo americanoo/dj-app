@@ -1054,21 +1054,27 @@ function TrackCueWorkspace({
               Drop here to make it a memory cue
             </div>
           )}
-          <div className="row wrap">
-            <span className="muted">Loop at playhead:</span>
-            {LOOP_BEATS.map((b) => (
-              <button key={b} className="small" disabled={!beat} onClick={() => addLoop(b)} title={beat ? '' : 'Needs a BPM'}>
-                {b < 4 ? `${b} beat${b > 1 ? 's' : ''}` : `${b / 4} bar${b > 4 ? 's' : ''}`}
-              </button>
-            ))}
-            <label className="inline toggle">
+          <div className="row wrap pad-actions">
+            <div className="seg" role="group" aria-label="Loop at playhead">
+              <span className="seg-label">Loop</span>
+              {LOOP_BEATS.map((b) => (
+                <button
+                  key={b}
+                  disabled={!beat}
+                  onClick={() => addLoop(b)}
+                  title={beat ? `Loop ${b} beat${b > 1 ? 's' : ''} at the playhead` : 'Needs a BPM'}
+                >
+                  {b}
+                </button>
+              ))}
+            </div>
+            <label className="inline toggle small-text muted" title="Put new loops on the next free pad">
               <input type="checkbox" checked={hotLoops} onChange={(e) => setHotLoops(e.target.checked)} />
               on a pad
             </label>
-          </div>
-          <div className="row">
-            <button className="small" onClick={addMemory} title="M">
-              + Memory cue at playhead
+            <span className="grow" />
+            <button className="small" onClick={addMemory} title="Memory cue at the playhead (M)">
+              + Memory cue
             </button>
             <button
               className="small danger"

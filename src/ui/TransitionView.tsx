@@ -192,20 +192,21 @@ export function TransitionView({ selectedTrackId, onSelectTrack }: Props) {
             ›
           </button>
         </div>
-        <button className={`small tv-preview ${nightState.playing ? 'on' : ''}`} onClick={preview} title="Play the night from a few bars before the incoming track">
-          {nightState.playing ? '❚❚ Pause' : '▶ Preview transition'}
-        </button>
-        <button
-          className={`small tv-loop ${looping ? 'on' : ''}`}
-          onClick={toggleLoop}
-          title="Loop the transition, so you can hear your changes over and over"
-          aria-pressed={looping}
-        >
-          ⟲ Loop
-        </button>
+        <div className="seg" role="group" aria-label="Preview">
+          <button className={`small tv-preview ${nightState.playing ? 'on' : ''}`} onClick={preview} title="Play the night from a few bars before the incoming track">
+            {nightState.playing ? '❚❚ Pause' : '▶ Preview'}
+          </button>
+          <button
+            className={`small tv-loop ${looping ? 'on' : ''}`}
+            onClick={toggleLoop}
+            title="Loop the transition, so you can hear your changes over and over"
+            aria-pressed={looping}
+          >
+            ⟲ Loop
+          </button>
+        </div>
         <label className="inline small-text tv-blend" title={custom ? 'The fader and bass follow your keyframes' : BLEND_STYLES.find((x) => x.id === plan.style)?.hint}>
-          Blend
-          <select value={custom ? 'custom' : (plan.chosen ?? plan.style)} onChange={(e) => setBlend(e.target.value as BlendStyle)}>
+          <select aria-label="Blend" value={custom ? 'custom' : (plan.chosen ?? plan.style)} onChange={(e) => setBlend(e.target.value as BlendStyle)}>
             {custom && <option value="custom">Custom (keyframes)</option>}
             {BLEND_STYLES.map((x) => (
               <option key={x.id} value={x.id}>
@@ -215,6 +216,15 @@ export function TransitionView({ selectedTrackId, onSelectTrack }: Props) {
             ))}
           </select>
         </label>
+        <div className="seg" role="group" aria-label="Mix">
+        <button
+          className={`small tv-sync ${syncOn ? 'on' : ''}`}
+          onClick={() => dispatch({ type: 'updateEntry', id: b.id, patch: { sync: !syncOn } })}
+          title="Sync: the outgoing track rides into the incoming tempo over the 8 bars before it comes in, so the beats lock (it changes pitch a little, like a turntable)"
+          aria-pressed={syncOn}
+        >
+          Sync
+        </button>
         <button
           className={`small tv-keys ${editParam ? 'on' : ''}`}
           onClick={() => setEditParam(editParam ? null : 'level')}
@@ -223,6 +233,7 @@ export function TransitionView({ selectedTrackId, onSelectTrack }: Props) {
         >
           ✎ Keyframes
         </button>
+        </div>
         {editParam ? (
           <span className="tv-params" role="group" aria-label="Parameter">
             {AUTO_PARAMS.map((pr) => {
@@ -246,14 +257,6 @@ export function TransitionView({ selectedTrackId, onSelectTrack }: Props) {
           </span>
         ) : (
           <>
-        <button
-          className={`small tv-sync ${syncOn ? 'on' : ''}`}
-          onClick={() => dispatch({ type: 'updateEntry', id: b.id, patch: { sync: !syncOn } })}
-          title="Sync: the outgoing track rides into the incoming tempo over the 8 bars before it comes in, so the beats lock (it changes pitch a little, like a turntable)"
-          aria-pressed={syncOn}
-        >
-          Sync
-        </button>
         <span className="tv-chips">
           <span className={`chip ${blend ? 'ok' : gap ? 'bad' : ''}`}>
             {blend

@@ -254,8 +254,8 @@ export function Timeline({ selectedTrackId, onSelectTrack, onOpenStory }: Props)
           Story &amp; chapters
         </button>
         <span className="grow" />
-        <span className="muted small-text">Drag tracks from the library onto the timeline · ⌘/Ctrl + scroll to zoom</span>
-        <div className="zoom-controls">
+        {!items.length && <span className="muted small-text">Drag tracks from the library onto the timeline</span>}
+        <div className="zoom-controls" title="Zoom the night (or ⌘/Ctrl + scroll)">
           <button className="icon" onClick={() => zoomTo(pxps / 2)} title="Zoom out">
             −
           </button>

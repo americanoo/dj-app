@@ -20,6 +20,8 @@ import { defaultVersionName, VersionsPanel } from './VersionsPanel';
 import { StoryPanel } from './StoryPanel';
 import { Timeline } from './Timeline';
 import { TransitionView } from './TransitionView';
+import { MenuButton } from './Menu';
+import { useMusicFolder } from './musicFolder';
 import { activeSet, reducer, useStore } from './store';
 
 
@@ -43,6 +45,7 @@ export function App() {
   const [foundingOpen, setFoundingOpen] = useState(false);
   const [controllerOpen, setControllerOpen] = useState(false);
   const midi = useMidi();
+  const folder = useMusicFolder();
   const { founding } = useLicense();
   const [loadedTrackId, setLoadedTrackId] = useState<string | null>(null);
   const [storyOpen, setStoryOpen] = useState(false);
@@ -302,28 +305,61 @@ export function App() {
             <option value="__new">+ New set…</option>
             <option value="__dup">⧉ Duplicate "{set.name}"</option>
           </select>
-          <button onClick={() => setStoryOpen(true)} title="Story, venue, start time and chapters of this set">
-            Story &amp; chapters
-          </button>
-          <LinkFolderButton topbar />
-          <button
-            onClick={() => setControllerOpen(true)}
-            title={midi.status === 'on' && midi.devices.length ? `Controller: ${midi.devices.join(', ')}` : 'Connect and map a DJ controller'}
-          >
-            <span className={`status-dot ${midi.status === 'on' && midi.devices.length ? 'ok' : ''}`} /> Controller
-          </button>
-          <button onClick={() => setVersionsOpen(true)} title="Save and restore versions (⌘/Ctrl+S saves one)">
-            Versions
-          </button>
+          {/* Until a folder is linked (or it needs a click to reconnect), linking it is front and centre. */}
+          {folder.status !== 'ready' && <LinkFolderButton topbar />}
+          <MenuButton label="⋯" title="More: story, music folder, controller, versions">
+            {(close) => (
+              <>
+                <button
+                  className="menu-item"
+                  onClick={() => {
+                    close();
+                    setStoryOpen(true);
+                  }}
+                >
+                  Story &amp; chapters
+                  <span className="menu-hint">venue, start time, chapters</span>
+                </button>
+                {folder.status === 'ready' && (
+                  <div className="menu-item-wrap" onClick={close}>
+                    <LinkFolderButton topbar />
+                  </div>
+                )}
+                <button
+                  className="menu-item"
+                  onClick={() => {
+                    close();
+                    setControllerOpen(true);
+                  }}
+                  title={midi.status === 'on' && midi.devices.length ? `Controller: ${midi.devices.join(', ')}` : 'Connect and map a DJ controller'}
+                >
+                  <span className={`status-dot ${midi.status === 'on' && midi.devices.length ? 'ok' : ''}`} /> Controller
+                  <span className="menu-hint">{midi.status === 'on' && midi.devices.length ? midi.devices[0] : 'MIDI mapping'}</span>
+                </button>
+                <button
+                  className="menu-item"
+                  onClick={() => {
+                    close();
+                    setVersionsOpen(true);
+                  }}
+                >
+                  Versions
+                  <span className="menu-hint">⌘S saves one</span>
+                </button>
+                <button
+                  className={`menu-item founding-item ${founding ? 'is-founder' : ''}`}
+                  onClick={() => {
+                    close();
+                    setFoundingOpen(true);
+                  }}
+                >
+                  ★ {founding ? `Founding DJ${founding.no ? ` #${founding.no}` : ''}` : 'Founding DJ'}
+                </button>
+              </>
+            )}
+          </MenuButton>
           <button onClick={() => setExportOpen(true)} title="Export to rekordbox, Traktor, Serato, djay Pro or M3U8">
             Export
-          </button>
-          <button
-            className={`founding-btn ${founding ? 'is-founder' : ''}`}
-            onClick={() => setFoundingOpen(true)}
-            title={founding ? `Founding DJ${founding.no ? ` #${founding.no}` : ''}: ${founding.n}` : 'Become a Founding DJ'}
-          >
-            ★ {founding ? `Founding DJ${founding.no ? ` #${founding.no}` : ''}` : 'Founding DJ'}
           </button>
           <button className="primary" onClick={() => fileInput.current?.click()}>
             Import

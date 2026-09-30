@@ -129,9 +129,9 @@ button {
   height: 30px;
   padding: 0 12px;
   border-radius: var(--radius-sm);
-  border: 1px solid var(--line-strong);
-  background: var(--surface-2);
-  color: var(--text);
+  border: 0;
+  background: var(--fill);
+  color: var(--text-2);
   font-weight: 550;
   letter-spacing: 0.005em;
   cursor: pointer;
@@ -148,8 +148,8 @@ button {
     color 0.14s;
 }
 button:hover:not(:disabled) {
-  background: var(--surface-3);
-  border-color: rgba(255, 255, 255, 0.22);
+  background: var(--fill-hover);
+  color: var(--text);
 }
 button:active:not(:disabled) {
   transform: translateY(1px) scale(0.985);
@@ -2066,13 +2066,6 @@ table.tracks td {
   border-color: rgba(255, 255, 255, 0.035);
 }
 
-/* controls: quieter edges, a touch more on hover */
-button {
-  border-color: rgba(255, 255, 255, 0.075);
-}
-button:hover:not(:disabled) {
-  border-color: rgba(255, 255, 255, 0.16);
-}
 input,
 select,
 textarea {
@@ -3392,4 +3385,335 @@ table.midi-map tr.learning td {
   border-radius: 6px;
   background: rgba(251, 191, 36, 0.2);
   color: #fbbf24;
+}
+
+/* ==========================================================================
+   Design pass: borderless controls
+   No outlines anywhere on controls. Buttons, fields and menus are soft fills
+   that brighten under the pointer; anything switched on (a mode, a toggle, a
+   playing transport, the chosen option) is inverted — light on dark becomes
+   dark on light — so state reads at a glance without a single border.
+   Keyboard focus still shows, as a soft ring, only when using the keyboard.
+   ========================================================================== */
+:root {
+  --fill: rgba(255, 255, 255, 0.055);
+  --fill-hover: rgba(255, 255, 255, 0.1);
+  --fill-press: rgba(255, 255, 255, 0.16);
+  --on-bg: #ecebf4;
+  --on-bg-hover: #ffffff;
+  --on-fg: #0b0b12;
+  --focus-ring: 0 0 0 2px rgba(236, 235, 244, 0.55);
+}
+
+:where(button, input, select, textarea) {
+  border: 0;
+  outline: none;
+}
+:where(button:active:not(:disabled)) {
+  background: var(--fill-press);
+}
+button:focus-visible {
+  box-shadow: var(--focus-ring);
+}
+button.icon {
+  background: transparent;
+}
+button.icon:hover:not(:disabled) {
+  background: var(--fill);
+}
+button.link,
+button.link:hover:not(:disabled) {
+  background: none;
+}
+button.danger {
+  background: transparent;
+  color: var(--danger);
+}
+button.danger:hover:not(:disabled) {
+  background: rgba(255, 77, 106, 0.12);
+  color: var(--danger);
+}
+button.primary {
+  color: #fff;
+  box-shadow: none;
+}
+button.primary:hover:not(:disabled) {
+  color: #fff;
+  box-shadow: 0 4px 18px -4px rgba(166, 107, 255, 0.55);
+}
+
+/* On / chosen / pressed: inverted. */
+button.on,
+button.active,
+button[aria-pressed='true'],
+button[aria-checked='true'],
+.snap-control button.on,
+.fx-group button.on,
+.fx-group button.then-next.on,
+.source-switch button.on,
+.tv-params button.on,
+.tv-loop.on,
+.tv-keys.on,
+.tv-sync.on,
+.tv-preview.on,
+.night-play.on,
+.side-item.active {
+  background: var(--on-bg);
+  color: var(--on-fg);
+  font-weight: 650;
+  text-shadow: none;
+}
+button.on:hover:not(:disabled),
+button.active:hover:not(:disabled),
+button[aria-pressed='true']:hover:not(:disabled),
+button[aria-checked='true']:hover:not(:disabled),
+.snap-control button.on:hover:not(:disabled),
+.fx-group button.on:hover:not(:disabled),
+.fx-group button.then-next.on:hover:not(:disabled),
+.source-switch button.on:hover:not(:disabled),
+.tv-params button.on:hover:not(:disabled),
+.side-item.active:hover:not(:disabled) {
+  background: var(--on-bg-hover);
+  color: var(--on-fg);
+}
+.tv-count {
+  background: rgba(0, 0, 0, 0.08);
+  color: inherit;
+}
+.tv-params button:not(.on) .tv-count {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* Groups (segmented controls): one soft track, the chosen segment inverted. */
+.snap-control,
+.source-switch,
+.zoom-controls,
+.seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  padding: 2px;
+  border: 0;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.04);
+  overflow: visible;
+}
+.snap-control button,
+.source-switch button,
+.zoom-controls button,
+.seg button {
+  background: transparent;
+  border-radius: 7px;
+}
+.snap-control button:hover:not(:disabled),
+.source-switch button:hover:not(:disabled),
+.zoom-controls button:hover:not(:disabled),
+.seg button:hover:not(:disabled) {
+  background: var(--fill-hover);
+}
+.seg-label {
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-3);
+  padding: 0 6px 0 5px;
+}
+.seg button {
+  height: 22px;
+  padding: 0 8px;
+  font-size: 11.5px;
+  font-family: var(--mono);
+  color: var(--text-2);
+}
+
+/* Fields and menus: filled, no edge; focus lifts the fill. */
+input,
+select,
+textarea {
+  background-color: var(--fill);
+}
+input:hover,
+select:hover,
+textarea:hover {
+  background-color: var(--fill-hover);
+}
+input:focus,
+select:focus,
+textarea:focus {
+  border: 0;
+  background-color: rgba(255, 255, 255, 0.12);
+  box-shadow: none;
+}
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  box-shadow: var(--focus-ring);
+}
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 24px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%239a9aae' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+}
+select option {
+  background: #15151c;
+  color: var(--text);
+}
+
+/* Section chips: tinted, no edge; the current one filled. */
+.section-chip,
+.section-chip:hover:not(:disabled) {
+  border: 0;
+}
+
+/* Pads: soft wells when empty, colour when set; selection brightens rather than outlines. */
+.pad,
+.deck-pane .pad {
+  border: 0;
+  background: rgba(255, 255, 255, 0.035);
+}
+.pad:hover:not(.filled) {
+  background: rgba(255, 255, 255, 0.07);
+}
+.pad.filled {
+  border: 0;
+}
+.pad.selected {
+  outline: none;
+  filter: brightness(1.25) saturate(1.1);
+  box-shadow: 0 0 22px -6px var(--pad, #fff);
+}
+.pad.selected .pad-letter {
+  background: var(--on-bg);
+  color: var(--on-fg);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+.pad.looping {
+  outline: none;
+  box-shadow: 0 0 20px -4px var(--warn);
+}
+.pad.drop-target {
+  outline: none;
+  background: rgba(34, 211, 238, 0.16);
+}
+
+/* Colour swatches: the chosen one gets a ring of the page colour, not a border. */
+.swatch-btn,
+.swatch-btn.active {
+  border: 0;
+}
+.swatch-btn.active {
+  box-shadow:
+    0 0 0 2px var(--surface),
+    0 0 0 4px var(--on-bg);
+}
+
+/* Option cards (export target, auto-cue strategy): chosen = lifted fill. */
+.target,
+.strategy {
+  border: 0;
+  background: rgba(255, 255, 255, 0.04);
+}
+.target.active,
+.strategy.active {
+  background: rgba(255, 255, 255, 0.11);
+  box-shadow: none;
+}
+
+/* The play button: the one gradient on the bar; while playing it inverts to light with a dark pause. */
+button.play-btn,
+button.play-btn:hover:not(:disabled) {
+  background: radial-gradient(circle at 30% 25%, rgba(255, 255, 255, 0.18), transparent 60%), var(--grad);
+  color: #fff;
+}
+button.play-btn.playing,
+button.play-btn.playing:hover:not(:disabled) {
+  background: var(--on-bg);
+  color: var(--on-fg);
+  box-shadow: 0 6px 26px -8px rgba(236, 235, 244, 0.55);
+}
+
+/* The ⋯ menu: the less-used actions, out of the way. */
+.menu {
+  position: relative;
+  display: inline-flex;
+}
+.menu-btn {
+  font-size: 18px;
+  letter-spacing: 0.05em;
+  line-height: 1;
+  min-width: 32px;
+  height: 30px;
+}
+.menu-pop {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 90;
+  min-width: 240px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px;
+  border-radius: 12px;
+  background: #121219;
+  box-shadow:
+    0 18px 50px -12px rgba(0, 0, 0, 0.85),
+    0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+.menu-pop[hidden] {
+  display: none;
+}
+.menu-item,
+.menu-item-wrap > button {
+  width: 100%;
+  height: 34px;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 0 10px;
+  background: transparent;
+  color: var(--text);
+  font-weight: 500;
+  border-radius: 8px;
+}
+.menu-item:hover:not(:disabled),
+.menu-item-wrap > button:hover:not(:disabled) {
+  background: var(--fill-hover);
+}
+.menu-hint {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-3);
+  font-weight: 400;
+}
+.menu-item.founding-item {
+  color: #ffd76a;
+}
+
+/* inside segmented groups, a chosen segment stays inverted under the pointer too */
+.seg button.on,
+.seg button[aria-pressed='true'],
+.zoom-controls button.on {
+  background: var(--on-bg);
+  color: var(--on-fg);
+}
+.seg button.on:hover:not(:disabled),
+.seg button[aria-pressed='true']:hover:not(:disabled) {
+  background: var(--on-bg-hover);
+  color: var(--on-fg);
+}
+.seg button.small {
+  height: 24px;
+  font-family: var(--font);
+  font-size: 12px;
+}
+.transition-view .seg {
+  flex: none;
+}
+.pad-actions {
+  align-items: center;
 }

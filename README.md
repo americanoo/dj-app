@@ -37,8 +37,10 @@ A **player bar** floats along the bottom of the whole app: the loaded track with
 play / pause with −1 / +1 bar in the middle, and the out FX strip over the volume and level meter on the right. The
 panels keep room for it, and on a short window the deck and timeline give way so the library stays usable.
 
-The top bar holds **Story & chapters** (story, venue, start time, target length, chapters and the energy arc),
-the music folder, **Versions**, **Export** and **Import**. Keys are colour-coded on the Camelot wheel everywhere:
+The top bar keeps it to undo/redo, the set, **Export** and **Import**; the less-used actions live under **⋯**:
+**Story & chapters** (story, venue, start time, target length, chapters and the energy arc), the music folder,
+**Controller**, **Versions** and ★ Founding DJ. Controls have no outlines: they're soft fills that brighten under the
+pointer, and anything switched on (a mode, a toggle, the playing transport) is inverted, light on dark. Keys are colour-coded on the Camelot wheel everywhere:
 neighbouring (compatible) keys get neighbouring colours, and minor keys are deeper than major ones.
 
 ## The workflow
@@ -66,7 +68,7 @@ point to the same file path. Their cues are combined with a **smart merge** (bel
 Your library export only holds file paths, so Setcraft needs the audio to draw waveforms. There are three ways to
 give it:
 
-- **Link your music folder** with **♫ Link music folder** in the top bar (also on the start screen, in the
+- **Link your music folder** with **♫ Link music folder** in the top bar (once linked, it moves under **⋯**) (also on the start screen, in the
   Library sidebar and in the cue editor). Setcraft
   finds each track's file by name, using parent folders to tell apart files with the same name. Waveforms then load
   automatically when you open a track. Every subfolder is searched, at any depth. The only folders skipped are
@@ -124,7 +126,7 @@ cues go straight through. Re-importing the same file changes nothing.
   key edits, timeline moves, imports, BPM fixes and more; **⇧⌘Z** (Ctrl+Y) redoes. A whole drag or a typed value
   undoes as one step. The ↶ ↷ buttons in the top bar do the same and show what they'll undo. Inside a text field,
   ⌘Z undoes your typing as usual.
-- **Save versions.** Open *Versions* in the top bar, or press **⌘/Ctrl+S** anywhere. A version is a named snapshot
+- **Save versions.** Open *Versions* under **⋯** in the top bar, or press **⌘/Ctrl+S** anywhere. A version is a named snapshot
   of the whole project: library, cues and sets.
 - **Use an old version** in one of three ways:
   - **Restore all** returns to it completely.
@@ -265,7 +267,7 @@ Export has two modes:
 
 ## DJ controllers
 
-Plug a MIDI DJ controller in over USB, open **Controller** in the top bar and click *Connect controller* (Chrome or
+Plug a MIDI DJ controller in over USB, open **Controller** under **⋯** in the top bar and click *Connect controller* (Chrome or
 Edge; Safari has no MIDI support). Map it by learning: click **Learn** next to an action and press the button,
 move the fader or turn the jog wheel. You can map play/pause, hot cues A–H, the jog wheel (holds the track and
 scrubs, playing on when you let go; its encoding is detected while learning, and there's a sensitivity setting),
@@ -276,7 +278,7 @@ the night and the snap mode. Mappings are saved in the browser, and the controll
 
 Everything is free except full export: without a pass, an export holds up to 3 tracks (enough to check it works
 with your DJ software). The **Founding DJ pass** is a one-time purchase that unlocks it, activated by pasting a key
-(★ Founding DJ in the top bar). Keys are signed and checked offline. Selling is off until it's set up: see
+(★ Founding DJ under **⋯** in the top bar). Keys are signed and checked offline. Selling is off until it's set up: see
 [SELLING.md](SELLING.md).
 
 ## Architecture
