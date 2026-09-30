@@ -2,7 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { keyColor, keyRelation, toCamelot, type KeyRelation } from '../core/keys';
 import type { Track } from '../core/model';
 import type { Section } from '../core/sections';
-import { buildTimeline, describeTransition, nightSlots, transitionsOf, type NightSlot } from '../core/setplan';
+import { BLEND_STYLES, MAX_PITCH, snapIncoming, valueAt, type BlendStyle, type TransitionPlan } from '../core/mixplan';
+import { buildTimeline, describeTransition, nightSlots, slotPos, transitionsOf, type NightSlot } from '../core/setplan';
 import { formatTime } from '../core/time';
 import type { WaveformData } from '../core/waveform';
 import { useFitZoom, zoomOf } from './fit';
@@ -80,6 +81,7 @@ export function TransitionView({ selectedTrackId, onSelectTrack }: Props) {
   const pair = pairs[i];
   const a = pair?.a;
   const b = pair?.b;
+  const plan = pair?.plan;
   const ta = a ? project.library.tracks[a.trackId] : undefined;
   const tb = b ? project.library.tracks[b.trackId] : undefined;
   const waveA = useTrackWave(a?.trackId);
@@ -103,7 +105,7 @@ export function TransitionView({ selectedTrackId, onSelectTrack }: Props) {
     night.play(Math.max(a.startsAt, Math.min(info.inAt, info.outAt) - Math.min(pad, 8 * 4 * beatA)));
   };
 
-  if (!pair || !a || !b || !info) {
+  if (!pair || !a || !b || !info || !plan) {
     return (
       <div className="transition-view empty" ref={fitRef}>
         <div className="pane-head">
@@ -120,8 +122,10 @@ export function TransitionView({ selectedTrackId, onSelectTrack }: Props) {
   const rel = keyRelation(ta?.key, tb?.key);
   const blend = info.overlap > 0.05;
   const gap = info.overlap < -0.05;
-  const bpmWarn = info.bpmChange !== undefined && Math.abs(info.bpmChange) > 6;
   const lands = info.landsOn;
+  const setBlend = (blend: BlendStyle) => dispatch({ type: 'updateEntry', id: b.id, patch: { blend } });
+  const syncOn = b.sync !== false;
+  const tempoChip = tempoText(plan, ta, tb);
 
   return (
     <div className="transition-view" ref={fitRef}>
@@ -146,22 +150,42 @@ export function TransitionView({ selectedTrackId, onSelectTrack }: Props) {
         <button className={`small tv-preview ${nightState.playing ? 'on' : ''}`} onClick={preview} title="Play the night from a few bars before the incoming track">
           {nightState.playing ? '❚❚ Pause' : '▶ Preview transition'}
         </button>
+        <label className="inline small-text tv-blend" title={BLEND_STYLES.find((x) => x.id === plan.style)?.hint}>
+          Blend
+          <select value={plan.chosen ?? plan.style} onChange={(e) => setBlend(e.target.value as BlendStyle)}>
+            {BLEND_STYLES.map((x) => (
+              <option key={x.id} value={x.id}>
+                {x.label}
+                {!plan.chosen && x.id === plan.style ? ' (auto)' : ''}
+              </option>
+            ))}
+          </select>
+        </label>
+        <button
+          className={`small tv-sync ${syncOn ? 'on' : ''}`}
+          onClick={() => dispatch({ type: 'updateEntry', id: b.id, patch: { sync: !syncOn } })}
+          title="Sync: the outgoing track rides into the incoming tempo over the 8 bars before it comes in, so the beats lock (it changes pitch a little, like a turntable)"
+          aria-pressed={syncOn}
+        >
+          Sync
+        </button>
         <span className="tv-chips">
           <span className={`chip ${blend ? 'ok' : gap ? 'bad' : ''}`}>
             {blend
-              ? `Blend · ${info.overlapBars !== undefined ? `${info.overlapBars} bars` : `${info.overlap.toFixed(1)} s`}`
+              ? info.overlapBars !== undefined
+                ? `${info.overlapBars}-bar blend`
+                : `${info.overlap.toFixed(1)} s blend`
               : gap
-                ? `Gap · ${(-info.overlap).toFixed(1)} s of silence`
+                ? `${(-info.overlap).toFixed(1)} s gap`
                 : 'Cut'}
           </span>
-          {info.bpmChange !== undefined && (
-            <span className={`chip ${bpmWarn ? 'warn' : 'ok'}`}>
-              {ta?.bpm?.toFixed(0)} → {tb?.bpm?.toFixed(0)} BPM ({info.bpmChange > 0 ? '+' : ''}
-              {info.bpmChange}%)
+          {tempoChip && (
+            <span className={`chip ${tempoChip.tone}`} title={tempoChip.title}>
+              {tempoChip.text}
             </span>
           )}
           <span className={`chip ${rel === 'clash' ? 'bad' : rel === 'unknown' ? '' : rel === 'boost' ? 'warn' : 'ok'}`}>
-            {ta?.key ? toCamelot(ta.key) : '?'} → {tb?.key ? toCamelot(tb.key) : '?'} · {RELATION_TEXT[rel]}
+            {ta?.key ? toCamelot(ta.key) : '?'}→{tb?.key ? toCamelot(tb.key) : '?'} {RELATION_TEXT[rel]}
           </span>
           {lands && (
             <span
@@ -170,7 +194,7 @@ export function TransitionView({ selectedTrackId, onSelectTrack }: Props) {
             >
               In on bar {lands.bar}.{lands.beat}
               {Math.abs(lands.offBeats) > 0.05
-                ? ` · ${Math.abs(lands.offBeats)} beat off the grid`
+                ? ` · ${Math.abs(lands.offBeats)} beat off`
                 : lands.phrase
                   ? ' · on a phrase ✓'
                   : lands.beat === 1
@@ -181,7 +205,6 @@ export function TransitionView({ selectedTrackId, onSelectTrack }: Props) {
         </span>
         <span className="grow" />
         <label className="inline small-text muted" title="How much of each track to show around the join">
-          Show
           <select value={context} onChange={(e) => setContext(Number(e.target.value) as (typeof CONTEXT_BARS)[number])}>
             {CONTEXT_BARS.map((n) => (
               <option key={n} value={n}>
@@ -205,6 +228,7 @@ export function TransitionView({ selectedTrackId, onSelectTrack }: Props) {
           loadingA={waveA.loading}
           loadingB={waveB.loading}
           view={view}
+          plan={plan}
           inAt={info.inAt}
           outAt={info.outAt}
           slots={slots}
@@ -255,6 +279,7 @@ interface CanvasProps {
   loadingA: boolean;
   loadingB: boolean;
   view: { from: number; to: number };
+  plan: TransitionPlan;
   inAt: number;
   outAt: number;
   slots: NightSlot[];
@@ -328,14 +353,11 @@ function TransitionCanvas(p: CanvasProps) {
     return () => cancelAnimationFrame(raf);
   }, [night]);
 
-  /** Snap a start time for the incoming track onto the outgoing track's beats. */
+  /** Snap a start time for the incoming track onto the outgoing track's beats as they're played (after its tempo ride). */
   const snapIn = useCallback((t: number, free: boolean) => {
-    const { a } = props.current;
-    if (free || !a.bpm) return Math.max(0, Math.round(t * 1000) / 1000);
-    const beat = 60 / a.bpm;
-    // A's beat k is at night time a.startsAt + (grid + k·beat − mixIn).
-    const origin = a.startsAt + (a.gridStart ?? 0) - a.mixIn;
-    return Math.max(0, Math.round((origin + Math.round((t - origin) / beat) * beat) * 1000) / 1000);
+    const { a, b } = props.current;
+    if (free) return Math.max(0, Math.round(t * 1000) / 1000);
+    return snapIncoming(a, b, t, b.sync !== false);
   }, []);
 
   const showReadout = (text: string | null, x = 0) => {
@@ -449,8 +471,79 @@ function draw(ctx: CanvasRenderingContext2D, w: number, h: number, p: CanvasProp
     ctx.fillStyle = color;
     ctx.fillText(label, lx, ly + 10);
   };
-  line(outAt, OUT_COLOR, 'A OUT ◂', true);
+  const plan = p.plan;
+  // The tempo ride: a strip along the top of the outgoing deck, from where it starts riding.
+  if (plan.sync) {
+    const x0 = Math.max(0, xOf(plan.sync.rideFrom));
+    const x1 = Math.min(w, xOf(plan.sync.rideTo));
+    const x2 = Math.min(w, xOf(outAt));
+    const grad = ctx.createLinearGradient(x0, 0, Math.max(x0 + 1, x1), 0);
+    grad.addColorStop(0, 'rgba(167,139,250,0)');
+    grad.addColorStop(1, 'rgba(167,139,250,0.9)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(x0, rowH - 5, Math.max(0, x1 - x0), 3);
+    ctx.fillStyle = 'rgba(167,139,250,0.9)';
+    ctx.fillRect(x1, rowH - 5, Math.max(0, x2 - x1), 3);
+    if (x0 < w - 40) {
+      const text = `TEMPO RIDE → ${a.bpm ? (a.bpm * plan.sync.rate).toFixed(1) : ''} BPM`;
+      ctx.font = 'bold 9px system-ui';
+      ctx.fillStyle = 'rgba(0,0,0,0.7)';
+      ctx.fillRect(x0 + 2, rowH - 18, ctx.measureText(text).width + 6, 12);
+      ctx.fillStyle = '#c4b5fd';
+      ctx.fillText(text, x0 + 5, rowH - 9);
+    }
+  }
+  if (plan.swapAt !== undefined) {
+    const x = Math.round(xOf(plan.swapAt));
+    ctx.fillStyle = '#fbbf24';
+    for (let y = 0; y < h; y += 6) ctx.fillRect(x - 1, y, 2, 3);
+    ctx.font = 'bold 10px system-ui';
+    const text = '⇅ BASS SWAP';
+    const tw = ctx.measureText(text).width;
+    const lx = Math.min(Math.max(x + 4, 2), w - tw - 8);
+    ctx.fillStyle = 'rgba(0,0,0,0.75)';
+    ctx.fillRect(lx - 3, rowH + 6, tw + 6, 13);
+    ctx.fillStyle = '#fbbf24';
+    ctx.fillText(text, lx, rowH + 16);
+  }
+  line(outAt, OUT_COLOR, plan.style === 'echo' ? 'ECHO OUT ◂' : 'A OUT ◂', true);
   line(inAt, IN_COLOR, '▸ B IN', false);
+}
+
+/** The tempo chip: synced (and how far it pitches), or why not. */
+function tempoText(plan: TransitionPlan, ta?: Track, tb?: Track): { text: string; tone: string; title: string } | undefined {
+  const from = ta?.bpm?.toFixed(0);
+  const to = tb?.bpm?.toFixed(0);
+  if (plan.sync) {
+    const pct = Math.round((plan.sync.rate - 1) * 1000) / 10;
+    return {
+      text: `Synced ${from}→${to} (${pct > 0 ? '+' : ''}${pct}%)`,
+      tone: Math.abs(pct) > 8 ? 'warn' : 'ok',
+      title: `The outgoing track rides from ${from} into ${to} BPM over the 8 bars before the incoming one, so the beats lock. ${
+        Math.abs(pct) > 8 ? 'That much pitch change is noticeable; ' : ''
+      }Turn Sync off to hear them at their own tempos.`,
+    };
+  }
+  switch (plan.noSync) {
+    case 'same-tempo':
+      return { text: `Same tempo ${to}`, tone: 'ok', title: 'Both tracks are at the same tempo.' };
+    case 'off':
+      return {
+        text: `Not synced ${from}→${to}`,
+        tone: from && to && from !== to ? 'warn' : '',
+        title: 'Sync is off: both tracks play at their own tempo, so the beats drift apart during the blend.',
+      };
+    case 'too-far':
+      return {
+        text: `${from}→${to} too far to sync`,
+        tone: 'bad',
+        title: `More than ${Math.round(MAX_PITCH * 100)}% apart: a cut or an echo out suits this better than a blend.`,
+      };
+    case 'no-bpm':
+      return { text: 'No BPM to sync', tone: 'warn', title: 'Set both tracks’ BPM to sync their tempos.' };
+    default:
+      return from && to ? { text: `${from} → ${to} BPM`, tone: '', title: 'A cut: no overlap to sync.' } : undefined;
+  }
 }
 
 function drawRow(
@@ -470,21 +563,23 @@ function drawRow(
   const span = view.to - view.from;
   const start = slot.startsAt;
   const end = slot.startsAt + slot.playFor;
-  // Night time → spot in this track's file.
-  const posOf = (t: number) => slot.mixIn + (t - start);
   const mid = y0 + h / 2;
+  // Night time → spot in this track's file, following its tempo ride: where it speeds up,
+  // its waveform and grid squeeze together, so the beats visibly line up with the other deck.
+  const tOf = (x: number) => view.from + (x / w) * span;
+  const cols = new Float64Array(w + 1);
+  for (let x = 0; x <= w; x++) cols[x] = slotPos(slot, tOf(x));
 
   // Beat grid in this track's own tempo: bars faint, every 8 bars brighter.
   if (track?.bpm) {
-    const beat = 60 / track.bpm;
+    const bar = (60 / track.bpm) * 4;
     const grid = track.gridStart ?? 0;
-    const k0 = Math.ceil((posOf(view.from) - grid) / beat);
-    const k1 = Math.floor((posOf(view.to) - grid) / beat);
-    if ((k1 - k0) / 4 < w / 6) {
-      for (let k = k0; k <= k1; k++) {
-        if (k % 4) continue;
-        const x = Math.round(xOf(start + (grid + k * beat - slot.mixIn)));
-        ctx.fillStyle = k % 32 === 0 ? 'rgba(255,255,255,0.28)' : 'rgba(255,255,255,0.08)';
+    if ((cols[w] - cols[0]) / bar < w / 6) {
+      for (let x = 0; x < w; x++) {
+        const k0 = Math.floor((cols[x] - grid) / bar);
+        const k1 = Math.floor((cols[x + 1] - grid) / bar);
+        if (k1 === k0) continue;
+        ctx.fillStyle = k1 % 8 === 0 ? 'rgba(255,255,255,0.28)' : 'rgba(255,255,255,0.08)';
         ctx.fillRect(x, y0, 1, h);
       }
     }
@@ -492,41 +587,43 @@ function drawRow(
 
   if (wave) {
     // Sections as a thin coloured strip along the top of the row.
-    for (const s of sections) {
-      const x0 = xOf(start + s.start - slot.mixIn);
-      const x1 = xOf(start + s.end - slot.mixIn);
-      if (x1 < 0 || x0 > w) continue;
-      ctx.fillStyle = SECTION_COLORS[s.kind];
+    for (let x = 0; x < w; x++) {
+      const sec = sections.find((sc) => cols[x] >= sc.start && cols[x] < sc.end);
+      if (!sec) continue;
+      ctx.fillStyle = SECTION_COLORS[sec.kind];
       ctx.globalAlpha = 0.85;
-      ctx.fillRect(Math.max(0, x0), y0, Math.min(w, x1) - Math.max(0, x0), 3);
-      ctx.globalAlpha = 1;
+      ctx.fillRect(x, y0, 1, 3);
     }
+    ctx.globalAlpha = 1;
     const pps = wave.peaksPerSecond;
     let max = 0.05;
     for (const v of wave.peaks) if (v > max) max = v;
-    const layers: [Float32Array, string, number][] = wave.bands
+    const layers: [Float32Array, string, number, boolean][] = wave.bands
       ? [
-          [wave.bands.low, COLORS.low, 1],
-          [wave.bands.mid, COLORS.mid, 0.95],
-          [wave.bands.high, COLORS.high, 0.75],
+          [wave.bands.low, COLORS.low, 1, true],
+          [wave.bands.mid, COLORS.mid, 0.95, false],
+          [wave.bands.high, COLORS.high, 0.75, false],
         ]
-      : [[wave.peaks, COLORS.low, 1]];
+      : [[wave.peaks, COLORS.low, 1, false]];
     const amp = (h / 2 - 5) / max;
-    for (const [arr, color, boost] of layers) {
+    for (const [arr, color, boost, isBass] of layers) {
       ctx.fillStyle = color;
       for (let x = 0; x < w; x++) {
-        const t0 = view.from + (x / w) * span;
-        const t1 = view.from + ((x + 1) / w) * span;
-        const p0 = posOf(t0);
+        const t0 = tOf(x);
+        const p0 = cols[x];
         if (p0 < 0 || p0 > wave.duration) continue;
         const i0 = Math.max(0, Math.floor(p0 * pps));
-        const i1 = Math.max(i0 + 1, Math.floor(posOf(t1) * pps));
+        const i1 = Math.max(i0 + 1, Math.floor(cols[x + 1] * pps));
         let m = 0;
         for (let i = i0; i < i1 && i < arr.length; i++) if (arr[i] > m) m = arr[i];
-        const a = m * boost * amp;
+        // The fader shrinks the waveform; a bass cut dims the lows.
+        const playing = t0 >= start && t0 < end;
+        const level = playing ? valueAt(slot.curves.level, t0, 1) : 1;
+        const a = m * boost * amp * Math.max(0.08, level);
         if (a < 0.4) continue;
+        const bassCut = isBass && playing && valueAt(slot.curves.bass, t0, 0) < -10;
         // What the night plays is solid; the rest of the file (before the mix-in, after the out) is ghosted.
-        ctx.globalAlpha = t0 >= start && t0 < end ? 1 : 0.18;
+        ctx.globalAlpha = (playing ? 1 : 0.18) * (bassCut ? 0.16 : 1);
         ctx.fillRect(x, mid - a, 1, a * 2);
       }
     }

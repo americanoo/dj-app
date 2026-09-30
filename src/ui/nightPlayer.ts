@@ -1,4 +1,5 @@
-import type { NightSlot } from '../core/setplan';
+import { valueAt, type Env } from '../core/mixplan';
+import { slotPos, slotRate, type NightSlot } from '../core/setplan';
 import { playOutFx, type OutFx } from './deck';
 import { transport } from './transport';
 
@@ -23,12 +24,16 @@ const FADE = 0.012;
 
 interface Voice {
   src: AudioBufferSourceNode;
+  /** Start / stop fades (and where an FX cuts the track). */
   gain: GainNode;
   /** The slot as it was when scheduled: if the plan moves it, the voice is redone. */
   sig: string;
 }
 
-const sigOf = (s: NightSlot) => `${s.trackId}|${s.startsAt}|${s.playFor}|${s.mixIn}`;
+const sigOf = (s: NightSlot) => `${s.trackId}|${s.startsAt}|${s.playFor}|${s.mixIn}|${s.echoAt}|${JSON.stringify(s.curves)}`;
+
+/** Low EQ corner, like a DJ mixer's bass knob. */
+const BASS_HZ = 220;
 
 export class NightPlayer {
   private ctx: AudioContext;
@@ -51,6 +56,8 @@ export class NightPlayer {
   active = false;
   /** Slots an out-effect has played out: they stay silent until the next jump. */
   private cut = new Set<string>();
+  /** Slots whose planned echo out has been scheduled. */
+  private echoed = new Set<string>();
   private scrubbing: { wasPlaying: boolean; lastAt: number; pending: number | null; timer: number } | null = null;
 
   constructor(ctx: AudioContext, loader: NightLoader) {
@@ -127,6 +134,7 @@ export class NightPlayer {
     void this.ctx.resume();
     this.stopAll();
     this.cut.clear();
+    this.echoed.clear();
     this.active = true;
     transport.claim('night');
     this.isPlaying = true;
@@ -260,10 +268,22 @@ export class NightPlayer {
     const v = s && this.voices.get(s.id);
     const buf = s && this.ready.get(s.trackId);
     if (!s || !v || !buf) return undefined;
-    const posAt = (time: number) => s.mixIn + (this.startNight + (time - this.startCtx) - s.startsAt);
+    const posAt = (time: number) => slotPos(s, this.startNight + (time - this.startCtx));
     this.cut.add(s.id);
-    playOutFx(this.ctx, this.out, v, buf, posAt(now), posAt, kind, s.bpm, beats, mix);
+    // Beat-synced to the track as it's playing (it may be riding into the next one's tempo).
+    const bpm = s.bpm ? s.bpm * slotRate(s, t) : undefined;
+    playOutFx(this.ctx, this.out, v, buf, posAt(now), posAt, kind, bpm, beats, mix);
     return s.id;
+  }
+
+  /**
+   * Schedule an automation curve (night times) onto an audio parameter, for a
+   * voice that joins at night time `from` (audio-clock `when`).
+   */
+  private follow(param: AudioParam, env: Env, dflt: number, from: number, when: number) {
+    param.setValueAtTime(valueAt(env, from, dflt), when);
+    // The curve is straight between its points, so ramping point to point reproduces it.
+    for (const p of env) if (p.t > from) param.linearRampToValueAtTime(p.v, Math.max(when, this.ctxAt(p.t)));
   }
 
   /** Audio-clock time of a moment in the night (while playing). */
@@ -292,26 +312,51 @@ export class NightPlayer {
       if (buf === null) continue;
       // Joining late (a seek, or the audio was still decoding) starts part-way in.
       const from = Math.max(s.startsAt, t + 0.01);
-      const offset = s.mixIn + (from - s.startsAt);
+      const offset = slotPos(s, from);
       if (offset >= buf.duration) continue;
       const when = Math.max(now, this.ctxAt(from));
-      const stopAt = this.ctxAt(Math.min(end, s.startsAt + (buf.duration - s.mixIn)));
+      const stopAt = Math.max(when + FADE * 2, this.ctxAt(end));
+      // source → bass EQ → fader → start/stop fades → out
       const src = this.ctx.createBufferSource();
       src.buffer = buf;
+      const eq = this.ctx.createBiquadFilter();
+      eq.type = 'lowshelf';
+      eq.frequency.value = BASS_HZ;
+      const level = this.ctx.createGain();
       const gain = this.ctx.createGain();
+      // The mix automation: tempo ride, fader and bass, from wherever the voice joins.
+      this.follow(src.playbackRate, s.curves.rate, 1, from, when);
+      this.follow(level.gain, s.curves.level, 1, from, when);
+      this.follow(eq.gain, s.curves.bass, 0, from, when);
       gain.gain.setValueAtTime(0, when);
       gain.gain.linearRampToValueAtTime(1, when + FADE);
       gain.gain.setValueAtTime(1, Math.max(when + FADE, stopAt - FADE));
-      gain.gain.linearRampToValueAtTime(0, Math.max(when + FADE * 2, stopAt));
-      src.connect(gain).connect(this.out);
+      gain.gain.linearRampToValueAtTime(0, stopAt);
+      src.connect(eq).connect(level).connect(gain).connect(this.out);
       src.start(when, offset);
-      src.stop(Math.max(when + FADE * 2, stopAt) + 0.02);
+      src.stop(stopAt + 0.02);
       const id = s.id;
       src.onended = () => {
         if (this.voices.get(id)?.src === src) this.voices.delete(id);
         gain.disconnect();
+        level.disconnect();
+        eq.disconnect();
       };
       this.voices.set(id, { src, gain, sig: sigOf(s) });
+    }
+    // Planned echo outs: set off a beat before the out point, so the track cuts right on it.
+    for (const s of this.slots) {
+      if (s.echoAt === undefined || this.echoed.has(s.id) || this.cut.has(s.id)) continue;
+      const v = this.voices.get(s.id);
+      const buf = this.ready.get(s.trackId);
+      if (!v || !buf) continue;
+      const bpm = s.bpm ? s.bpm * slotRate(s, s.echoAt) : undefined;
+      const fireAt = s.echoAt - (bpm ? 60 / bpm : 0.5);
+      if (fireAt > t + HORIZON || s.echoAt <= t) continue;
+      this.echoed.add(s.id);
+      const posAt = (time: number) => slotPos(s, this.startNight + (time - this.startCtx));
+      const at = Math.max(now, this.ctxAt(fireAt));
+      playOutFx(this.ctx, this.out, v, buf, posAt(at), posAt, 'echo', bpm, 1, 0.5, at);
     }
     this.prefetch(t);
     // The end of the night: stop.

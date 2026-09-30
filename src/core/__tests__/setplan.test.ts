@@ -243,7 +243,11 @@ describe('night playback and transitions', () => {
     expect(t.overlap).toBeCloseTo(31.5);
     expect(t.overlapBars).toBeCloseTo(15.8);
     expect(t.bpmChange).toBe(5);
-    expect(t.landsOn).toEqual({ bar: 135, beat: 1, offBeats: 0, phrase: false });
+    // With the tempos synced, A rides from 120 to 126 over the 8 bars before B and gets 0.4 s
+    // further through its file: B, placed on A's unridden beat, now comes in 0.2 beat early.
+    expect(t.landsOn).toEqual({ bar: 135, beat: 2, offBeats: -0.2, phrase: false });
+    const unsynced = describeTransition(ab.a, { ...ab.b, sync: false });
+    expect(unsynced.landsOn).toEqual({ bar: 135, beat: 1, offBeats: 0, phrase: false });
     const g = describeTransition(bc.a, bc.b);
     expect(g.overlap).toBeCloseTo(-20);
     expect(g.overlapBars).toBeUndefined();

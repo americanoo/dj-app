@@ -71,153 +71,155 @@ export function playOutFx(
   bpm?: number,
   beats = 1,
   mix = 0.5,
+  /** Start the effect at this audio-clock time instead of straight away. */
+  at?: number,
 ): { cutAt: number; stopPos: number; tail: number; nextIn: number } {
-    const beat = bpm && bpm > 0 ? 60 / bpm : 0.5;
-    const now = ctx.currentTime;
-        const nodes: AudioNode[] = [];
-    const keep = <T extends AudioNode>(n: T) => (nodes.push(n), n);
-    let cutAt: number;
-    let stopPos: number;
-    let tail: number;
-    let nextIn: number;
-    const wetAmt = Math.min(1, Math.max(0, mix) * 2);
-    const dryAmt = Math.min(1, Math.max(0, 1 - mix) * 2);
-    // Until the cut, the track plays at the dry level.
-    let dryUntilCut = 1;
-    // The effects are fed the track at full level (whatever the dry level), faded out at the cut.
-    const feed = () => {
-      const pre = keep(ctx.createGain());
-      v.src.connect(pre);
-      return pre;
-    };
-    const feeds: GainNode[] = [];
+  const beat = bpm && bpm > 0 ? 60 / bpm : 0.5;
+  const now = Math.max(at ?? 0, ctx.currentTime);
+  const nodes: AudioNode[] = [];
+  const keep = <T extends AudioNode>(n: T) => (nodes.push(n), n);
+  let cutAt: number;
+  let stopPos: number;
+  let tail: number;
+  let nextIn: number;
+  const wetAmt = Math.min(1, Math.max(0, mix) * 2);
+  const dryAmt = Math.min(1, Math.max(0, 1 - mix) * 2);
+  // Until the cut, the track plays at the dry level.
+  let dryUntilCut = 1;
+  // The effects are fed the track at full level (whatever the dry level), faded out at the cut.
+  const feed = () => {
+    const pre = keep(ctx.createGain());
+    v.src.connect(pre);
+    return pre;
+  };
+  const feeds: GainNode[] = [];
 
-    if (kind === 'echo') {
-      // Classic echo out: 3/4-beat repeats, darker each time, then the track cuts on the beat.
-      const send = keep(ctx.createGain());
-      const delay = keep(ctx.createDelay(4));
-      const fb = keep(ctx.createGain());
-      const hp = keep(ctx.createBiquadFilter());
-      const lp = keep(ctx.createBiquadFilter());
-      const wet = keep(ctx.createGain());
-      delay.delayTime.value = Math.min(3.9, Math.max(0.03, beat * beats));
-      hp.type = 'highpass';
-      hp.frequency.value = 280;
-      lp.type = 'lowpass';
-      lp.frequency.value = 4200;
-      fb.gain.value = 0.62;
-      send.gain.setValueAtTime(0, now);
-      send.gain.linearRampToValueAtTime(1, now + 0.03);
-      const pre = feed();
-      feeds.push(pre);
-      pre.connect(send).connect(delay).connect(hp).connect(lp);
-      lp.connect(fb).connect(delay);
-      lp.connect(wet).connect(out);
-      // The track cuts on the first repeat (at least half a beat in, so the echo has something to repeat).
-      cutAt = now + Math.max(beat * 0.5, delay.delayTime.value);
-      stopPos = posAt(cutAt);
-      tail = 9 * delay.delayTime.value + 1;
-      nextIn = cutAt;
-      wet.gain.setValueAtTime(0.9 * wetAmt, now);
-      wet.gain.setValueAtTime(0.9 * wetAmt, cutAt);
-      wet.gain.linearRampToValueAtTime(0, cutAt + tail);
-      dryUntilCut = dryAmt;
-    } else if (kind === 'reverb') {
-      // Reverb out: the track swells into a big hall over a beat, cuts, and the hall rings out.
-      const send = keep(ctx.createGain());
-      const hp = keep(ctx.createBiquadFilter());
-      const verb = keep(ctx.createConvolver());
-      const wet = keep(ctx.createGain());
-      hp.type = 'highpass';
-      hp.frequency.value = 200;
-      verb.buffer = impulse(ctx);
-      const swell = Math.max(0.1, beat * beats);
-      send.gain.setValueAtTime(0.15, now);
-      send.gain.linearRampToValueAtTime(1.3, now + swell);
-      const pre = feed();
-      feeds.push(pre);
-      pre.connect(send).connect(hp).connect(verb).connect(wet).connect(out);
-      wet.gain.setValueAtTime(2.4 * wetAmt, now);
-      dryUntilCut = dryAmt;
-      cutAt = now + swell;
-      stopPos = posAt(cutAt);
-      tail = 5;
-      nextIn = cutAt;
-      wet.gain.setValueAtTime(2.4 * wetAmt, cutAt + 2);
-      wet.gain.linearRampToValueAtTime(0, cutAt + tail);
-    } else if (kind === 'loop') {
-      // Loop out: the next `beats` repeat as a loop roll that fades over two bars while a filter sweeps up.
-      const len = Math.max(0.05, beat * beats);
-      const fade = beat * 8;
-      const roll = keep(ctx.createBufferSource());
-      const hp = keep(ctx.createBiquadFilter());
-      const g = keep(ctx.createGain());
-      roll.buffer = buffer;
-      roll.loop = true;
-      roll.loopStart = pos;
-      roll.loopEnd = Math.min(buffer.duration, pos + len);
-      hp.type = 'highpass';
-      hp.frequency.setValueAtTime(20, now);
-      hp.frequency.exponentialRampToValueAtTime(40 + 1800 * Math.max(0, mix), now + fade);
-      g.gain.setValueAtTime(0.0001, now);
-      g.gain.exponentialRampToValueAtTime(1, now + 0.01);
-      g.gain.setValueAtTime(1, now + fade * 0.25);
-      g.gain.linearRampToValueAtTime(0, now + fade);
-      roll.connect(hp).connect(g).connect(out);
-      roll.start(now, pos);
-      roll.stop(now + fade + 0.05);
-      cutAt = now + 0.012;
-      stopPos = pos;
-      tail = fade + 0.2;
-      // The next track comes in while the loop fades.
-      nextIn = now + fade * 0.5;
-    } else {
-      // Backspin: the record is whipped backwards and winds down over half a bar.
-      const r0 = 3.2;
-      const r1 = 0.2;
-      const T = Math.max(0.25, Math.min(4, beat * beats));
-      const distance = (T * (r0 - r1)) / Math.log(r0 / r1); // seconds of track travelled backwards
-      const span = Math.min(pos, distance + 0.05);
-      const rev = reversed(ctx, buffer, pos - span, pos);
-      const spin = keep(ctx.createBufferSource());
-      const g = keep(ctx.createGain());
-      spin.buffer = rev;
-      spin.playbackRate.setValueAtTime(r0, now);
-      spin.playbackRate.exponentialRampToValueAtTime(r1, now + T);
-      g.gain.setValueAtTime(0.0001, now);
-      g.gain.exponentialRampToValueAtTime(1, now + 0.02);
-      g.gain.setValueAtTime(1, now + T * 0.6);
-      g.gain.linearRampToValueAtTime(0, now + T);
-      spin.connect(g).connect(out);
-      spin.start(now);
-      spin.stop(now + T + 0.05);
-      cutAt = now + 0.02;
-      stopPos = Math.max(0, pos - span);
-      tail = T + 0.2;
-      nextIn = now + T * 0.85;
-    }
+  if (kind === 'echo') {
+    // Classic echo out: 3/4-beat repeats, darker each time, then the track cuts on the beat.
+    const send = keep(ctx.createGain());
+    const delay = keep(ctx.createDelay(4));
+    const fb = keep(ctx.createGain());
+    const hp = keep(ctx.createBiquadFilter());
+    const lp = keep(ctx.createBiquadFilter());
+    const wet = keep(ctx.createGain());
+    delay.delayTime.value = Math.min(3.9, Math.max(0.03, beat * beats));
+    hp.type = 'highpass';
+    hp.frequency.value = 280;
+    lp.type = 'lowpass';
+    lp.frequency.value = 4200;
+    fb.gain.value = 0.62;
+    send.gain.setValueAtTime(0, now);
+    send.gain.linearRampToValueAtTime(1, now + 0.03);
+    const pre = feed();
+    feeds.push(pre);
+    pre.connect(send).connect(delay).connect(hp).connect(lp);
+    lp.connect(fb).connect(delay);
+    lp.connect(wet).connect(out);
+    // The track cuts on the first repeat (at least half a beat in, so the echo has something to repeat).
+    cutAt = now + Math.max(beat * 0.5, delay.delayTime.value);
+    stopPos = posAt(cutAt);
+    tail = 9 * delay.delayTime.value + 1;
+    nextIn = cutAt;
+    wet.gain.setValueAtTime(0.9 * wetAmt, now);
+    wet.gain.setValueAtTime(0.9 * wetAmt, cutAt);
+    wet.gain.linearRampToValueAtTime(0, cutAt + tail);
+    dryUntilCut = dryAmt;
+  } else if (kind === 'reverb') {
+    // Reverb out: the track swells into a big hall over a beat, cuts, and the hall rings out.
+    const send = keep(ctx.createGain());
+    const hp = keep(ctx.createBiquadFilter());
+    const verb = keep(ctx.createConvolver());
+    const wet = keep(ctx.createGain());
+    hp.type = 'highpass';
+    hp.frequency.value = 200;
+    verb.buffer = impulse(ctx);
+    const swell = Math.max(0.1, beat * beats);
+    send.gain.setValueAtTime(0.15, now);
+    send.gain.linearRampToValueAtTime(1.3, now + swell);
+    const pre = feed();
+    feeds.push(pre);
+    pre.connect(send).connect(hp).connect(verb).connect(wet).connect(out);
+    wet.gain.setValueAtTime(2.4 * wetAmt, now);
+    dryUntilCut = dryAmt;
+    cutAt = now + swell;
+    stopPos = posAt(cutAt);
+    tail = 5;
+    nextIn = cutAt;
+    wet.gain.setValueAtTime(2.4 * wetAmt, cutAt + 2);
+    wet.gain.linearRampToValueAtTime(0, cutAt + tail);
+  } else if (kind === 'loop') {
+    // Loop out: the next `beats` repeat as a loop roll that fades over two bars while a filter sweeps up.
+    const len = Math.max(0.05, beat * beats);
+    const fade = beat * 8;
+    const roll = keep(ctx.createBufferSource());
+    const hp = keep(ctx.createBiquadFilter());
+    const g = keep(ctx.createGain());
+    roll.buffer = buffer;
+    roll.loop = true;
+    roll.loopStart = pos;
+    roll.loopEnd = Math.min(buffer.duration, pos + len);
+    hp.type = 'highpass';
+    hp.frequency.setValueAtTime(20, now);
+    hp.frequency.exponentialRampToValueAtTime(40 + 1800 * Math.max(0, mix), now + fade);
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(1, now + 0.01);
+    g.gain.setValueAtTime(1, now + fade * 0.25);
+    g.gain.linearRampToValueAtTime(0, now + fade);
+    roll.connect(hp).connect(g).connect(out);
+    roll.start(now, pos);
+    roll.stop(now + fade + 0.05);
+    cutAt = now + 0.012;
+    stopPos = pos;
+    tail = fade + 0.2;
+    // The next track comes in while the loop fades.
+    nextIn = now + fade * 0.5;
+  } else {
+    // Backspin: the record is whipped backwards and winds down over half a bar.
+    const r0 = 3.2;
+    const r1 = 0.2;
+    const T = Math.max(0.25, Math.min(4, beat * beats));
+    const distance = (T * (r0 - r1)) / Math.log(r0 / r1); // seconds of track travelled backwards
+    const span = Math.min(pos, distance + 0.05);
+    const rev = reversed(ctx, buffer, pos - span, pos);
+    const spin = keep(ctx.createBufferSource());
+    const g = keep(ctx.createGain());
+    spin.buffer = rev;
+    spin.playbackRate.setValueAtTime(r0, now);
+    spin.playbackRate.exponentialRampToValueAtTime(r1, now + T);
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(1, now + 0.02);
+    g.gain.setValueAtTime(1, now + T * 0.6);
+    g.gain.linearRampToValueAtTime(0, now + T);
+    spin.connect(g).connect(out);
+    spin.start(now);
+    spin.stop(now + T + 0.05);
+    cutAt = now + 0.02;
+    stopPos = Math.max(0, pos - span);
+    tail = T + 0.2;
+    nextIn = now + T * 0.85;
+  }
 
-    // Cut the track itself.
-    // Dry level until the cut (a short glide to it), then a quick fade to silence.
-    const g = v.gain.gain;
-    const dryAt = Math.max(now, Math.min(now + 0.03, cutAt - 0.021));
-    g.cancelScheduledValues(now);
-    g.setValueAtTime(g.value, now);
-    if (dryAt > now) g.linearRampToValueAtTime(dryUntilCut, dryAt);
-    g.setValueAtTime(dryUntilCut, Math.max(dryAt, cutAt - 0.02));
-    g.linearRampToValueAtTime(0, cutAt);
-    for (const pre of feeds) {
-      pre.gain.setValueAtTime(1, Math.max(now, cutAt - 0.02));
-      pre.gain.linearRampToValueAtTime(0, cutAt);
-    }
-    try {
-      v.src.stop(cutAt + 0.01);
-    } catch {
-      // already scheduled to stop
-    }
-    // Tidy up the effect once its tail has died away.
-    window.setTimeout(() => nodes.forEach((n) => n.disconnect()), (cutAt - now + tail + 0.5) * 1000);
-    return { cutAt, stopPos, tail, nextIn };
+  // Cut the track itself.
+  // Dry level until the cut (a short glide to it), then a quick fade to silence.
+  const g = v.gain.gain;
+  const dryAt = Math.max(now, Math.min(now + 0.03, cutAt - 0.021));
+  g.cancelScheduledValues(now);
+  g.setValueAtTime(g.value, now);
+  if (dryAt > now) g.linearRampToValueAtTime(dryUntilCut, dryAt);
+  g.setValueAtTime(dryUntilCut, Math.max(dryAt, cutAt - 0.02));
+  g.linearRampToValueAtTime(0, cutAt);
+  for (const pre of feeds) {
+    pre.gain.setValueAtTime(1, Math.max(now, cutAt - 0.02));
+    pre.gain.linearRampToValueAtTime(0, cutAt);
+  }
+  try {
+    v.src.stop(cutAt + 0.01);
+  } catch {
+    // already scheduled to stop
+  }
+  // Tidy up the effect once its tail has died away.
+  window.setTimeout(() => nodes.forEach((n) => n.disconnect()), (cutAt - ctx.currentTime + tail + 0.5) * 1000);
+  return { cutAt, stopPos, tail, nextIn };
 }
 
 export class Deck {

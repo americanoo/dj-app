@@ -6,6 +6,8 @@
  * All positions are in seconds from the start of the audio file.
  */
 
+import type { BlendStyle } from './mixplan';
+
 export type SourceFormat = 'rekordbox' | 'traktor' | 'serato' | 'djay' | 'm3u' | 'csv' | 'manual';
 
 export type CueKind = 'cue' | 'loop';
@@ -106,6 +108,10 @@ export interface SetEntry {
   /** Cue ids on the track used as the mix-in / mix-out points. */
   mixInCueId?: string;
   mixOutCueId?: string;
+  /** How this track is mixed in from the previous one (default: a bass swap when they overlap). */
+  blend?: BlendStyle;
+  /** Ride the previous track's tempo into this one's so the beats lock (default on). */
+  sync?: boolean;
   /**
    * When this track starts, in seconds from the start of the set. Entries from
    * older versions don't have it and are laid out one after another.

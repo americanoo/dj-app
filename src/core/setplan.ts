@@ -3,6 +3,19 @@ import type { Library, SetEntry, SetPlan, Track } from './model';
 import { keyRelation, toCamelot, type KeyRelation } from './keys';
 import { effectiveBpmDelta } from './tempo';
 import { formatTime } from './time';
+import {
+  incomingCurves,
+  incomingPhase,
+  integrate,
+  mergeCurves,
+  outgoingCurves,
+  planTransition,
+  rideOffset,
+  valueAt,
+  type BlendStyle,
+  type Curves,
+  type TransitionPlan,
+} from './mixplan';
 
 export const DEFAULT_TRACK_SECONDS = 5 * 60;
 
@@ -220,13 +233,50 @@ export interface NightSlot {
   mixIn: number;
   bpm?: number;
   gridStart?: number;
+  /** How it's mixed in from the previous track (as chosen on its entry). */
+  blend?: BlendStyle;
+  sync?: boolean;
+  /** Tempo, fader and bass automation across both of its transitions. */
+  curves: Curves;
+  /** Echo out: when the track cuts, leaving its echoes. */
+  echoAt?: number;
 }
 
-/** What plays when: every track of the night, overlapping ones together. */
+/** What plays when: every track of the night, overlapping ones together, with its mix automation. */
 export function nightSlots(items: TimelineItem[]): NightSlot[] {
-  return items
+  const slots: NightSlot[] = items
     .filter((it) => it.track && it.playFor > 0)
-    .map((it) => ({ id: it.entry.id, trackId: it.entry.trackId, startsAt: it.startsAt, playFor: it.playFor, mixIn: itemMixIn(it), bpm: it.track!.bpm, gridStart: it.track!.gridStart }));
+    .map((it) => ({
+      id: it.entry.id,
+      trackId: it.entry.trackId,
+      startsAt: it.startsAt,
+      playFor: it.playFor,
+      mixIn: itemMixIn(it),
+      bpm: it.track!.bpm,
+      gridStart: it.track!.gridStart,
+      blend: it.entry.blend,
+      sync: it.entry.sync,
+      curves: { rate: [], level: [], bass: [] },
+    }));
+  const parts = new Map<string, Curves[]>();
+  const add = (id: string, c: Curves) => parts.set(id, [...(parts.get(id) ?? []), c]);
+  for (const { a, b, plan } of transitionsOf(slots)) {
+    add(a.id, outgoingCurves(plan, a));
+    add(b.id, incomingCurves(plan, b));
+    if (plan.echoAt !== undefined) a.echoAt = plan.echoAt;
+  }
+  for (const s of slots) s.curves = mergeCurves(...(parts.get(s.id) ?? []));
+  return slots;
+}
+
+/** Where a slot's track is in its file at night time `t`, following its tempo automation. */
+export function slotPos(s: NightSlot, t: number): number {
+  return s.mixIn + integrate(s.curves.rate, s.startsAt, t, 1);
+}
+
+/** A slot's playback rate at night time `t` (1 = as recorded). */
+export function slotRate(s: NightSlot, t: number): number {
+  return valueAt(s.curves.rate, t, 1);
 }
 
 /** The slots sounding at `t` (more than one during a blend). */
@@ -234,16 +284,17 @@ export function slotsAt(slots: NightSlot[], t: number): NightSlot[] {
   return slots.filter((s) => t >= s.startsAt && t < s.startsAt + s.playFor);
 }
 
-/** Consecutive tracks of the night, as outgoing (a) → incoming (b) pairs. */
-export function transitionsOf(slots: NightSlot[]): { a: NightSlot; b: NightSlot }[] {
+/** Consecutive tracks of the night, as outgoing (a) → incoming (b) pairs, with how each transition plays. */
+export function transitionsOf<S extends Omit<NightSlot, 'curves'>>(slots: S[]): { a: S; b: S; plan: TransitionPlan }[] {
   const sorted = [...slots].sort((x, y) => x.startsAt - y.startsAt);
-  const out: { a: NightSlot; b: NightSlot }[] = [];
+  const out: { a: S; b: S; plan: TransitionPlan }[] = [];
   for (let i = 1; i < sorted.length; i++) {
-    if (sorted[i].trackId !== sorted[i - 1].trackId) out.push({ a: sorted[i - 1], b: sorted[i] });
+    const a = sorted[i - 1];
+    const b = sorted[i];
+    if (b.trackId !== a.trackId) out.push({ a, b, plan: planTransition(a, b, { blend: b.blend, sync: b.sync }) });
   }
   return out;
 }
-
 export interface TransitionInfo {
   /** Night time the incoming track comes in, and the outgoing one ends. */
   inAt: number;
@@ -258,8 +309,8 @@ export interface TransitionInfo {
   landsOn?: { bar: number; beat: number; offBeats: number; phrase: boolean };
 }
 
-/** How a transition lines up: overlap, tempo change, and whether it comes in on the beat. */
-export function describeTransition(a: NightSlot, b: NightSlot): TransitionInfo {
+/** How a transition lines up: overlap, tempo change, and whether it comes in on the beat (after the tempo ride). */
+export function describeTransition(a: Omit<NightSlot, 'curves'>, b: Omit<NightSlot, 'curves'>): TransitionInfo {
   const inAt = b.startsAt;
   const outAt = a.startsAt + a.playFor;
   const overlap = outAt - inAt;
@@ -267,9 +318,12 @@ export function describeTransition(a: NightSlot, b: NightSlot): TransitionInfo {
   if (a.bpm && a.bpm > 0) {
     const beat = 60 / a.bpm;
     if (overlap > 0) info.overlapBars = Math.round((overlap / beat / 4) * 10) / 10;
-    // B's start, as a spot in A's file, counted in A's beats from its grid.
-    const posInA = a.mixIn + (inAt - a.startsAt);
-    const beats = (posInA - (a.gridStart ?? 0)) / beat;
+    // B's start, as a spot in A's file (after A's tempo ride), counted in A's beats from its
+    // grid; with the tempos synced, relative to where B's mix-in sits on its own beat.
+    const plan = planTransition(a, b, { blend: b.blend, sync: b.sync });
+    const posInA = a.mixIn + (inAt - a.startsAt) + rideOffset(plan, inAt);
+    const phase = plan.sync ? incomingPhase(a, b, plan.sync.rate) : 0;
+    const beats = (posInA - (a.gridStart ?? 0)) / beat - phase;
     const whole = Math.round(beats);
     info.landsOn = {
       bar: Math.floor(whole / 4) + 1,

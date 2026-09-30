@@ -3341,3 +3341,18 @@ table.midi-map tr.learning td {
     display: none;
   }
 }
+.tv-blend {
+  flex: none;
+  gap: 6px;
+}
+.tv-blend select {
+  font-size: 12px;
+}
+.tv-sync {
+  flex: none;
+}
+.tv-sync.on {
+  border-color: #a78bfa;
+  color: #c4b5fd;
+  background: rgba(167, 139, 250, 0.12);
+}
