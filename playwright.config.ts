@@ -13,7 +13,8 @@ export default defineConfig({
   workers: 1,
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
-  reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
+  // On CI, failures also show up as annotations on the check, readable without downloading the log.
+  reporter: process.env.CI ? [['list'], ['github'], ['html', { open: 'never' }]] : 'list',
   globalSetup: './e2e/global-setup.ts',
   use: {
     baseURL: 'http://localhost:5174',
