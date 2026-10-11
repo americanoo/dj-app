@@ -17,6 +17,8 @@ test('the ⋯ menu holds the less-used actions', async ({ page }) => {
   await page.click('.menu-btn');
   await expect(page.locator('.menu-pop')).toBeVisible();
   await expect(page.locator('.menu-item')).toContainText(['Story & chapters', 'Controller', 'Versions']);
+  // Which build this is, so a phone and a Mac can be compared.
+  await expect(page.locator('.menu-build')).toHaveText(/^Build \w+ · \d{4}-\d{2}-\d{2}$/);
   await page.keyboard.press('Escape');
   await expect(page.locator('.menu-pop')).toBeHidden();
   await page.click('.menu-btn');

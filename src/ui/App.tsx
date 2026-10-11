@@ -410,6 +410,7 @@ export function App() {
                 >
                   ★ {founding ? `Founding DJ${founding.no ? ` #${founding.no}` : ''}` : 'Founding DJ'}
                 </button>
+                <div className="menu-build">Build {__BUILD__}</div>
               </>
             )}
           </MenuButton>
