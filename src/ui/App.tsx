@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { importFile } from '../core/formats';
 import { planMerge, type MergeChoices, type MergePlan } from '../core/merge';
 import { uid, type Project } from '../core/model';
@@ -54,7 +54,6 @@ export function App() {
   // Phones: one panel at a time, picked from tabs along the bottom.
   const isPhone = useIsPhone();
   const install = useInstall();
-  const touchPicker = useMemo(() => typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches, []);
   const [installHelp, setInstallHelp] = useState(false);
   const [tab, setTab] = useState<PhoneTab>(() => (Object.keys(project.library.tracks).length ? 'night' : 'library'));
   // The player bar and pop-ups live outside the app's element: the phone styles hang off <html>.
@@ -425,9 +424,8 @@ export function App() {
             type="file"
             multiple
             hidden
-            // Phones and tablets don't know file types like .nml or .crate and grey them out, so
-            // there any file can be picked (Setcraft recognises them by what's inside).
-            accept={touchPicker ? undefined : '.xml,.nml,.crate,.m3u,.m3u8,.csv,.tsv,.txt,.json,audio/*'}
+            // No file-type filter: Safari and phones don't know types like .nml or .crate and grey
+            // them out. Setcraft recognises each file by what's inside.
             onChange={(e) => {
               void handleFiles(Array.from(e.target.files ?? []));
               e.target.value = '';

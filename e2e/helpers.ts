@@ -90,7 +90,7 @@ export async function instrument(page: Page) {
 export async function openApp(page: Page) {
   await instrument(page);
   await page.goto('/');
-  await page.setInputFiles('input[type=file][accept*=".xml"]', [NML, STEADY]);
+  await page.setInputFiles('.topbar-right > input[type=file]:not([webkitdirectory])', [NML, STEADY]);
   const merge = page.locator('.modal button.primary');
   if (await merge.count()) await merge.first().click();
   await page.setInputFiles('.topbar-right input[webkitdirectory]', MUSIC);

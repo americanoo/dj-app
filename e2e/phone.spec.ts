@@ -97,7 +97,7 @@ test('the app can be installed: manifest and icons', async ({ request }) => {
   expect((await request.get('/sw.js')).ok()).toBe(true);
 });
 
-test('on a phone the import picker lets any file be chosen (iPhones grey out .nml and .crate otherwise)', async ({ page }) => {
+test('the import picker lets any file be chosen (Safari and iPhones grey out .nml and .crate otherwise)', async ({ page }) => {
   await instrument(page);
   await page.goto('/');
   const picker = page.locator('.topbar-right > input[type=file]:not([webkitdirectory])');

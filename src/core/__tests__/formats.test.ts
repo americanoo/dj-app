@@ -101,6 +101,18 @@ describe('Traktor NML', () => {
     expect(again.tracks[0].gridStart).toBeCloseTo(0.12);
     expect(again.playlists[0].trackIds).toHaveLength(2);
   });
+
+  it('still reads a collection whose tags carry characters XML forbids', () => {
+    const dirty = fixture('traktor.nml')
+      .replace('GENRE="Deep House"', 'GENRE="Deep\u0001 House" COMMENT="from &#x1;beatport&#27;"')
+      .replace('ARTIST="Delta"', 'ARTIST="Delta\u001f"');
+    const again = importFile('collection.nml', new TextEncoder().encode(dirty));
+    expect(again.format).toBe('traktor');
+    expect(again.tracks).toHaveLength(2);
+    expect(again.tracks[0]).toMatchObject({ genre: 'Deep House', comment: 'from beatport' });
+    expect(again.tracks[1].artist).toBe('Delta');
+    expect(again.playlists[0].trackIds).toHaveLength(2);
+  });
 });
 
 describe('cross-software conversion', () => {

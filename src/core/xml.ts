@@ -1,10 +1,31 @@
 /** Small XML + path helpers shared by the format adapters. */
 
 export function parseXml(text: string): Document {
-  const doc = new DOMParser().parseFromString(text, 'application/xml');
-  const err = doc.getElementsByTagName('parsererror')[0];
+  const parse = (t: string) => {
+    const doc = new DOMParser().parseFromString(t, 'application/xml');
+    return { doc, err: doc.getElementsByTagName('parsererror')[0] };
+  };
+  let { doc, err } = parse(text);
+  // DJ software copies tags straight from the audio files, so a collection can carry control
+  // characters that XML forbids (often in comments). Drop them and try again rather than refuse
+  // the whole library.
+  if (err) ({ doc, err } = parse(stripIllegalXmlChars(text)));
   if (err) throw new Error('Not valid XML: ' + (err.textContent ?? '').slice(0, 200));
   return doc;
+}
+
+/** Remove characters XML 1.0 doesn't allow, written raw or as character references. */
+export function stripIllegalXmlChars(text: string): string {
+  return (
+    text
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\ufffe\uffff]/g, '')
+      .replace(/&#(x[0-9a-f]+|[0-9]+);/gi, (ref, code: string) => {
+        const n = code[0].toLowerCase() === 'x' ? parseInt(code.slice(1), 16) : Number(code);
+        const ok = n === 0x9 || n === 0xa || n === 0xd || (n >= 0x20 && n <= 0xd7ff) || (n >= 0xe000 && n <= 0xfffd) || (n >= 0x10000 && n <= 0x10ffff);
+        return ok ? ref : '';
+      })
+  );
 }
 
 export function escapeXml(s: string): string {
