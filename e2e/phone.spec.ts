@@ -96,3 +96,13 @@ test('the app can be installed: manifest and icons', async ({ request }) => {
   for (const icon of manifest.icons) expect((await request.get(`/${icon.src}`)).ok()).toBe(true);
   expect((await request.get('/sw.js')).ok()).toBe(true);
 });
+
+test('on a phone the import picker lets any file be chosen (iPhones grey out .nml and .crate otherwise)', async ({ page }) => {
+  await instrument(page);
+  await page.goto('/');
+  const picker = page.locator('.topbar-right > input[type=file]:not([webkitdirectory])');
+  expect(await picker.getAttribute('accept')).toBeNull();
+  // A Traktor collection still imports from it.
+  await picker.setInputFiles('src/core/__tests__/fixtures/traktor.nml');
+  await expect(page.locator('tr:has-text("Warehouse")')).toHaveCount(1, { timeout: 15_000 });
+});
