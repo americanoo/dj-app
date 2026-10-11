@@ -1,0 +1,98 @@
+import { expect, test, type Page } from '@playwright/test';
+import { instrument, peak } from './helpers';
+
+// An iPhone-sized touch screen (Safari's user agent, so the iPhone install help shows).
+test.use({
+  viewport: { width: 390, height: 844 },
+  isMobile: true,
+  hasTouch: true,
+  deviceScaleFactor: 3,
+  userAgent:
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+});
+
+const shown = (page: Page) =>
+  page.locator('.workspace-layout > .pane').evaluateAll((ps) => ps.filter((p) => getComputedStyle(p).display !== 'none').map((p) => p.classList[1]));
+
+async function demoNight(page: Page) {
+  await instrument(page);
+  await page.goto('/');
+  await page.tap('.empty-state button:has-text("Try it with demo tracks")');
+  await expect(page.locator('tr:has-text("Setcraft Demo")')).toHaveCount(3, { timeout: 20_000 });
+  await page.tap('tr:has-text("Night Drive") button:has-text("+ Set")');
+  await page.tap('tr:has-text("Warehouse Lights") button:has-text("+ Set")');
+}
+
+test('one panel at a time, picked from the tabs; everything fits the width', async ({ page }) => {
+  await demoNight(page);
+  expect(await shown(page)).toEqual(['library-pane']);
+  for (const [tab, pane] of [
+    ['Night', 'timeline-host'],
+    ['Mix', 'transition-pane'],
+    ['Deck', 'deck-pane'],
+    ['Library', 'library-pane'],
+  ]) {
+    await page.tap(`.phone-tabs button:has-text("${tab}")`);
+    expect(await shown(page)).toEqual([pane]);
+  }
+  // Nothing sideways: the page is exactly the screen's width, and the top bar's buttons are on screen.
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390);
+  const importBox = (await page.locator('.topbar button.primary').boundingBox())!;
+  expect(importBox.x + importBox.width).toBeLessThanOrEqual(390);
+  // Export lives in the menu on a phone.
+  await expect(page.locator('.export-btn')).toBeHidden();
+  await page.tap('.menu-btn');
+  await expect(page.locator('.menu-item:has-text("Export")')).toBeVisible();
+});
+
+test('opening a track from the library goes to the deck, and it plays', async ({ page }) => {
+  await demoNight(page);
+  await page.tap('tr:has-text("Night Drive") td:nth-child(3)');
+  await expect(page.locator('.phone-tabs button.on')).toContainText('Deck');
+  await expect(page.locator('button.play-btn')).toBeEnabled({ timeout: 20_000 });
+  await page.tap('button.play-btn');
+  await expect(page.locator('button.play-btn')).toHaveAttribute('aria-label', 'Pause');
+  expect(await peak(page, 600)).toBeGreaterThan(0.02);
+  // Switching tabs doesn't stop the music.
+  await page.tap('.phone-tabs button:has-text("Night")');
+  expect(await peak(page, 400)).toBeGreaterThan(0.02);
+});
+
+test('the night fits the screen, so the tracks can be grabbed and blended', async ({ page }) => {
+  await demoNight(page);
+  await page.tap('.phone-tabs button:has-text("Night")');
+  const blocks = await page.locator('.tl-block').evaluateAll((bs) => bs.map((b) => b.getBoundingClientRect().width));
+  // Fitted to what's planned (about 4½ minutes), not the hour-long target.
+  expect(blocks[0]).toBeGreaterThan(120);
+});
+
+test('on an iPhone, Install app explains Add to Home Screen', async ({ page }) => {
+  await instrument(page);
+  await page.goto('/');
+  await page.tap('.menu-btn');
+  await page.tap('.menu-item:has-text("Install app")');
+  await expect(page.getByRole('dialog', { name: 'Install Setcraft' })).toContainText('Add to Home Screen');
+});
+
+test('the tour shows each step on its own tab', async ({ page }) => {
+  await page.addInitScript(() => sessionStorage.setItem('keep-tour', '1'));
+  await instrument(page);
+  await page.goto('/');
+  await page.tap('.tour-welcome button:has-text("Try it with demo tracks")');
+  await expect(page.locator('.tour-card h3')).toHaveText('Your library', { timeout: 20_000 });
+  expect(await shown(page)).toEqual(['library-pane']);
+  await page.tap('tr:has-text("Night Drive") button:has-text("+ Set")');
+  await page.tap('tr:has-text("Warehouse Lights") button:has-text("+ Set")');
+  await expect(page.locator('.tour-card h3')).toHaveText('The journey of the night');
+  expect(await shown(page)).toEqual(['timeline-host']);
+  await page.locator('.tour-card button:has-text("Skip")').tap();
+  await expect(page.locator('.tour-card h3')).toHaveText('Two decks, one transition');
+  expect(await shown(page)).toEqual(['transition-pane']);
+});
+
+test('the app can be installed: manifest and icons', async ({ request }) => {
+  const manifest = await (await request.get('/manifest.webmanifest')).json();
+  expect(manifest).toMatchObject({ name: 'Setcraft', display: 'standalone', start_url: './' });
+  for (const icon of manifest.icons) expect((await request.get(`/${icon.src}`)).ok()).toBe(true);
+  expect((await request.get('/sw.js')).ok()).toBe(true);
+});

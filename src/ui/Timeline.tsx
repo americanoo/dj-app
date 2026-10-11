@@ -5,6 +5,7 @@ import { buildTimeline, formatSetTime, itemMixIn, nightAtTrack, parseClock, tota
 import { transport } from './transport';
 import { useNight, useNightState } from './night';
 import { useAudio } from './audio';
+import { useIsPhone } from './phone';
 import { formatTime, parseTime } from '../core/time';
 import { activeSet, useStore } from './store';
 import { useFitZoom, zoomOf } from './fit';
@@ -53,7 +54,10 @@ export function Timeline({ selectedTrackId, onSelectTrack, onOpenStory }: Props)
   const [viewHeight, setViewHeight] = useState(200);
   const fitRef = useFitZoom<HTMLDivElement>(0.5);
   const [zoom, setZoom] = useState<number | 'fit'>('fit');
-  const fitPx = Math.max(0.02, (viewWidth - 24) / length);
+  // On a phone, "Fit" fits what's planned, not the whole target length, so the tracks are big enough to grab.
+  const isPhone = useIsPhone();
+  const fitLength = isPhone && end > 0 ? Math.max(end + 30, 120) : length;
+  const fitPx = Math.max(0.02, (viewWidth - 24) / fitLength);
   const pxps = zoom === 'fit' ? fitPx : zoom;
   const anchor = useRef<{ t: number; x: number } | null>(null);
 

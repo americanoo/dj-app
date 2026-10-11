@@ -11,6 +11,9 @@ import { NightProvider } from './ui/night';
 import '@fontsource-variable/inter';
 import '@fontsource-variable/jetbrains-mono';
 import './ui/styles.css';
+import { registerServiceWorker } from './ui/install';
+
+registerServiceWorker();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

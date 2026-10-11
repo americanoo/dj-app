@@ -3877,3 +3877,275 @@ button.play-btn.playing:hover:not(:disabled) {
   align-items: center;
   gap: 6px;
 }
+
+/* ==========================================================================
+   Phones: one panel at a time, picked from tabs along the bottom; a compact
+   top bar and player bar; panels reflow to the width; bigger touch targets.
+   (The class is on <html>, so the player bar and pop-ups follow too.)
+   ========================================================================== */
+html.phone {
+  --tabs-h: calc(58px + env(safe-area-inset-bottom));
+  --tb-h: 62px;
+}
+html.phone .app {
+  height: 100dvh;
+}
+html.phone .topbar {
+  height: calc(52px + env(safe-area-inset-top));
+  padding: env(safe-area-inset-top) 8px 0 12px;
+  gap: 8px;
+}
+html.phone .brand {
+  font-size: 0;
+  gap: 0;
+}
+html.phone .topbar-right {
+  flex: 1;
+  min-width: 0;
+  gap: 2px;
+  justify-content: flex-end;
+}
+html.phone .topbar-right > select {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  max-width: 190px;
+}
+html.phone .export-btn {
+  display: none;
+}
+html.phone .undo-redo button.icon {
+  min-width: 34px;
+  height: 34px;
+}
+
+/* One panel at a time */
+html.phone .workspace-layout {
+  padding: 6px 6px calc(var(--tabs-h) + var(--tb-h) + 14px);
+}
+html.phone .workspace-layout > .splitter,
+html.phone .workspace-layout > .pane {
+  display: none;
+}
+html.phone .workspace-layout > .pane {
+  height: auto !important;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+html.phone .workspace-layout.tab-mix > .transition-pane,
+html.phone .workspace-layout.tab-deck > .deck-pane,
+html.phone .workspace-layout.tab-night > .timeline-host,
+html.phone .workspace-layout.tab-library > .library-pane {
+  display: block;
+}
+
+/* The tabs */
+.phone-tabs {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 70;
+  height: var(--tabs-h);
+  padding-bottom: env(safe-area-inset-bottom);
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  background: rgba(6, 6, 10, 0.94);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 -1px 0 var(--line);
+}
+.phone-tabs button,
+.phone-tabs button:hover:not(:disabled),
+.phone-tabs button.on,
+.phone-tabs button.on:hover:not(:disabled) {
+  height: 58px;
+  flex-direction: column;
+  gap: 3px;
+  border-radius: 0;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 600;
+}
+.phone-tabs button.on,
+.phone-tabs button.on:hover:not(:disabled) {
+  color: var(--text);
+}
+.phone-tab-icon {
+  font-size: 17px;
+  line-height: 24px;
+  height: 26px;
+  padding: 0 16px;
+  border-radius: 13px;
+}
+.phone-tabs button.on .phone-tab-icon {
+  background: var(--on-bg);
+  color: var(--on-fg);
+}
+
+/* The player bar: compact, above the tabs */
+html.phone .transport-bar {
+  left: 6px;
+  right: 6px;
+  bottom: calc(var(--tabs-h) + 6px);
+  height: var(--tb-h);
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: none;
+  gap: 8px;
+  padding: 0 8px 0 10px;
+  border-radius: 16px;
+}
+html.phone .tb-right,
+html.phone .tb-track,
+html.phone .looping-btn {
+  display: none;
+}
+html.phone .tb-left {
+  gap: 8px;
+}
+html.phone .transport-bar .clock {
+  font-size: 15px;
+}
+html.phone .transport-bar .clock .muted {
+  display: none;
+}
+html.phone .transport-bar .transport {
+  gap: 4px;
+}
+html.phone .transport-bar button.play-btn {
+  width: 46px;
+  height: 46px;
+}
+html.phone .transport-bar button.play-btn svg {
+  width: 21px;
+  height: 21px;
+}
+html.phone .transport-bar .transport button.small {
+  height: 34px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+html.phone .source-switch button {
+  padding: 6px 9px;
+}
+html.phone .toasts {
+  bottom: calc(var(--tabs-h) + var(--tb-h) + 16px) !important;
+  left: 8px !important;
+  right: 8px !important;
+}
+
+/* Panels reflow to the width */
+html.phone .pane-head {
+  height: auto;
+  min-height: 40px;
+  flex-wrap: wrap;
+  row-gap: 6px;
+  padding: 8px 10px;
+}
+html.phone .transition-view .pane-head,
+html.phone .tv-chips {
+  flex-wrap: wrap;
+  overflow: visible;
+}
+html.phone .tv-body {
+  grid-template-columns: 1fr;
+  padding: 6px;
+}
+html.phone .tv-deck {
+  display: none;
+}
+html.phone .tv-canvas-wrap {
+  min-height: 180px;
+}
+html.phone .track-head,
+html.phone .track-fields,
+html.phone .deck-bar,
+html.phone .deck-left,
+html.phone .deck-right {
+  flex-wrap: wrap;
+}
+html.phone .cue-columns {
+  grid-template-columns: 1fr !important;
+  display: grid;
+}
+html.phone .library .sidebar {
+  display: none;
+}
+html.phone table.tracks th:nth-child(1),
+html.phone table.tracks td:nth-child(1),
+html.phone table.tracks th:nth-child(2),
+html.phone table.tracks td:nth-child(2),
+html.phone table.tracks th:nth-child(6),
+html.phone table.tracks td:nth-child(6),
+html.phone table.tracks th:nth-child(7),
+html.phone table.tracks td:nth-child(7) {
+  display: none;
+}
+
+/* Touch: bigger targets */
+html.phone button.small {
+  min-height: 32px;
+}
+html.phone .menu-pop {
+  position: fixed;
+  left: 8px;
+  right: 8px;
+  top: calc(56px + env(safe-area-inset-top));
+  min-width: 0;
+}
+html.phone .menu-item,
+html.phone .menu-item-wrap > button {
+  height: 44px;
+}
+
+/* Tour cards fit the screen */
+html.phone .tour-card {
+  width: calc(100vw - 16px);
+}
+html.phone .library .toolbar {
+  flex-wrap: wrap;
+  row-gap: 6px;
+  height: auto;
+}
+html.phone .library .toolbar input[type='search'] {
+  flex: 1 1 100%;
+  width: 100%;
+}
+html.phone .library .toolbar .add-selected {
+  display: none;
+}
+html.phone .tl-inspector {
+  flex-wrap: wrap;
+}
+html.phone .tl-inspector input.grow {
+  flex: 1 1 100%;
+}
+.menu-item.install-item {
+  color: var(--cyan);
+}
+.install-help {
+  max-width: 420px;
+}
+.install-help h3 {
+  font-size: 16px;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--text);
+  margin-bottom: 10px;
+}
+.install-help ol {
+  margin: 0 0 12px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+.share-glyph {
+  display: inline-block;
+  padding: 0 5px;
+  border-radius: 5px;
+  background: var(--fill);
+  color: var(--cyan);
+}

@@ -217,7 +217,7 @@ export function LibraryView({
               ))}
             </select>
           </label>
-          <button disabled={!selected.size} onClick={() => add([...selected])}>
+          <button className="add-selected" disabled={!selected.size} onClick={() => add([...selected])}>
             Add {selected.size || ''} selected
           </button>
           {playlist && (

@@ -19,6 +19,23 @@ npm run build    # static site in dist/ – host anywhere
 
 ---
 
+## On your phone
+
+Setcraft works on phones too. On a phone-sized screen it shows **one panel at a time**, picked from tabs along
+the bottom: **Night** (the journey of the night, fitted to what's planned so the tracks are big enough to drag),
+**Mix** (the transition), **Deck** (one track: waveform, pads, loops) and **Library**. The player sits just above
+the tabs, Export and the rest are under **⋯**, and opening a track from the library or the mix takes you to the
+deck. Switching tabs never stops the music.
+
+**Install it like an app**: open Setcraft from its web address and choose **⋯ → Install app**. On Android (and
+desktop Chrome) that's Chrome's own install; on iPhone and iPad it shows how: **Share → Add to Home Screen**. It
+then opens full screen from its icon and keeps working without internet. (Installing needs the https address of
+a hosted copy; opening it over your Wi-Fi from your computer works, but can't install.)
+
+What phones can't do (yet): Safari can't link a whole music folder, so on an iPhone attach tracks one at a time
+from the Files app (or start with the demo tracks); DJ controllers need Chrome on Android over USB-C. A phone's
+library and cues are its own, separate from your computer's.
+
 ## First time? The tutorial
 
 The first time you open Setcraft, a short welcome offers a **hands-on tour**. Pick **Try it with demo tracks**

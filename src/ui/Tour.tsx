@@ -6,6 +6,7 @@ import { makeDemoTracks } from './demo';
 import { useMusicFolder } from './musicFolder';
 import { useNightState } from './night';
 import { activeSet, useStore } from './store';
+import type { PhoneTab } from './phone';
 
 /**
  * The first-run tutorial: a guided tour that spotlights one part of the screen
@@ -48,6 +49,8 @@ interface TourCtx {
 
 interface Step {
   id: string;
+  /** On a phone, the panel (tab) the step is about. */
+  tab?: PhoneTab;
   /** What to spotlight (a CSS selector); none: a card in the middle of the screen. */
   target?: string;
   title: string;
@@ -95,6 +98,7 @@ const STEPS: Step[] = [
   },
   {
     id: 'library',
+    tab: 'library',
     target: '.library-pane',
     title: 'Your library',
     body: (
@@ -109,6 +113,7 @@ const STEPS: Step[] = [
   },
   {
     id: 'journey',
+    tab: 'night',
     target: '.timeline-host',
     title: 'The journey of the night',
     body: (
@@ -123,6 +128,7 @@ const STEPS: Step[] = [
   },
   {
     id: 'transition',
+    tab: 'mix',
     target: '.transition-pane',
     title: 'Two decks, one transition',
     body: (
@@ -137,6 +143,7 @@ const STEPS: Step[] = [
   },
   {
     id: 'blend',
+    tab: 'mix',
     target: '.tv-blend',
     title: 'How the two tracks meet',
     body: (
@@ -149,6 +156,7 @@ const STEPS: Step[] = [
   },
   {
     id: 'keyframes',
+    tab: 'mix',
     target: '.tv-keys',
     title: 'Draw your own moves',
     body: (
@@ -162,6 +170,7 @@ const STEPS: Step[] = [
   },
   {
     id: 'deck',
+    tab: 'deck',
     target: '.deck-pane',
     title: 'The deck',
     body: (
@@ -176,6 +185,7 @@ const STEPS: Step[] = [
   },
   {
     id: 'pads',
+    tab: 'deck',
     target: '.pads',
     title: 'Hot cues',
     body: (
@@ -230,10 +240,13 @@ export function Tour({
   state,
   setState,
   loadedTrackId,
+  onTab,
 }: {
   state: TourState;
   setState: (s: TourState) => void;
   loadedTrackId: string | null;
+  /** Phones: show the panel a step is about. */
+  onTab?: (tab: PhoneTab) => void;
 }) {
   const { project } = useStore();
   const folder = useMusicFolder();
@@ -295,6 +308,11 @@ export function Tour({
     const t = window.setTimeout(() => goToRef.current(stepKey + 1, 1), 700);
     return () => window.clearTimeout(t);
   }, [stepDone, stepKey]);
+  // On a phone, bring up the panel the step is about.
+  useEffect(() => {
+    if (step?.tab) onTab?.(step.tab);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stepKey, !!onTab]);
   // Arriving on a step that isn't needed: pass it.
   useEffect(() => {
     if (step?.skip?.(ctx)) goTo(state.step, 1);

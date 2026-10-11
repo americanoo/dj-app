@@ -23,6 +23,9 @@ import { TransitionView } from './TransitionView';
 import { MenuButton } from './Menu';
 import { useMusicFolder } from './musicFolder';
 import { Tour, useDemoLoader, useTour } from './Tour';
+import { useIsPhone, type PhoneTab } from './phone';
+import { PhoneTabs } from './PhoneTabs';
+import { useInstall } from './install';
 import { activeSet, reducer, useStore } from './store';
 
 
@@ -48,6 +51,20 @@ export function App() {
   const midi = useMidi();
   const folder = useMusicFolder();
   const tour = useTour();
+  // Phones: one panel at a time, picked from tabs along the bottom.
+  const isPhone = useIsPhone();
+  const install = useInstall();
+  const [installHelp, setInstallHelp] = useState(false);
+  const [tab, setTab] = useState<PhoneTab>(() => (Object.keys(project.library.tracks).length ? 'night' : 'library'));
+  // The player bar and pop-ups live outside the app's element: the phone styles hang off <html>.
+  useEffect(() => {
+    document.documentElement.classList.toggle('phone', isPhone);
+  }, [isPhone]);
+  /** Open a track in the deck; on a phone, from the library or the mix, go and show it. */
+  const openTrack = (id: string, showDeck = false) => {
+    setLoadedTrackId(id);
+    if (isPhone && showDeck) setTab('deck');
+  };
   const demo = useDemoLoader();
   const { founding } = useLicense();
   const [loadedTrackId, setLoadedTrackId] = useState<string | null>(null);
@@ -260,7 +277,7 @@ export function App() {
   const set = activeSet(project);
 
   return (
-    <div className="app">
+    <div className={`app${isPhone ? ' phone' : ''}`}>
       <header className="topbar">
         <div className="brand">
           <span className="logo" aria-hidden>
@@ -309,7 +326,7 @@ export function App() {
             <option value="__dup">⧉ Duplicate "{set.name}"</option>
           </select>
           {/* Until a folder is linked (or it needs a click to reconnect), linking it is front and centre. */}
-          {folder.status !== 'ready' && <LinkFolderButton topbar />}
+          {folder.status !== 'ready' && !isPhone && <LinkFolderButton topbar />}
           <MenuButton label="⋯" title="More: story, music folder, controller, versions">
             {(close) => (
               <>
@@ -323,7 +340,19 @@ export function App() {
                   Story &amp; chapters
                   <span className="menu-hint">venue, start time, chapters</span>
                 </button>
-                {folder.status === 'ready' && (
+                {isPhone && (
+                  <button
+                    className="menu-item"
+                    onClick={() => {
+                      close();
+                      setExportOpen(true);
+                    }}
+                  >
+                    Export
+                    <span className="menu-hint">back to your DJ software</span>
+                  </button>
+                )}
+                {(folder.status === 'ready' || isPhone) && (
                   <div className="menu-item-wrap" onClick={close}>
                     <LinkFolderButton topbar />
                   </div>
@@ -349,6 +378,19 @@ export function App() {
                   Versions
                   <span className="menu-hint">⌘S saves one</span>
                 </button>
+                {(install.canPrompt || install.iosHint) && (
+                  <button
+                    className="menu-item install-item"
+                    onClick={() => {
+                      close();
+                      if (install.canPrompt) void install.install();
+                      else setInstallHelp(true);
+                    }}
+                  >
+                    ⤓ Install app
+                    <span className="menu-hint">home screen, works offline</span>
+                  </button>
+                )}
                 <button
                   className="menu-item"
                   onClick={() => {
@@ -391,9 +433,9 @@ export function App() {
         </div>
       </header>
 
-      <main ref={mainRef} className="workspace-layout">
+      <main ref={mainRef} className={`workspace-layout${isPhone ? ` phone tab-${tab}` : ''}`}>
         <section className="pane transition-pane" style={{ height: transitionH }}>
-          <TransitionView selectedTrackId={loadedTrackId} onSelectTrack={setLoadedTrackId} />
+          <TransitionView selectedTrackId={loadedTrackId} onSelectTrack={(id) => openTrack(id, true)} />
         </section>
         <Splitter
           value={transitionH}
@@ -412,7 +454,7 @@ export function App() {
         <section className="pane library-pane">
           <LibraryView
             selectedTrackId={loadedTrackId}
-            onSelectTrack={setLoadedTrackId}
+            onSelectTrack={(id) => openTrack(id, true)}
             onImport={() => fileInput.current?.click()}
             onDemo={() => void demo.load()}
             demoBusy={demo.busy}
@@ -420,7 +462,32 @@ export function App() {
           />
         </section>
       </main>
+      {isPhone && <PhoneTabs tab={tab} onTab={setTab} />}
 
+      {installHelp && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Install Setcraft" onClick={() => setInstallHelp(false)}>
+          <div className="modal install-help" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-body">
+              <h3>Put Setcraft on your home screen</h3>
+              <ol>
+                <li>
+                  Tap <b>Share</b> <span className="share-glyph" aria-hidden>⬆︎</span> at the bottom of Safari (top right on iPad).
+                </li>
+                <li>
+                  Scroll down and tap <b>Add to Home Screen</b>, then <b>Add</b>.
+                </li>
+                <li>Open Setcraft from its icon: full screen, and it keeps working without internet.</li>
+              </ol>
+              <p className="muted small-text">Your library and cues stay on this device, in Setcraft's own storage.</p>
+            </div>
+            <footer className="modal-foot">
+              <button className="primary" onClick={() => setInstallHelp(false)}>
+                Got it
+              </button>
+            </footer>
+          </div>
+        </div>
+      )}
       {bpmFixOpen && <BpmFixPanel onClose={() => setBpmFixOpen(false)} toast={toast} />}
       {controllerOpen && <ControllerPanel onClose={() => setControllerOpen(false)} />}
       {foundingOpen && <FoundingPanel onClose={() => setFoundingOpen(false)} toast={toast} />}
@@ -465,7 +532,7 @@ export function App() {
           </div>
         </div>
       )}
-      <Tour state={tour.state} setState={tour.setState} loadedTrackId={loadedTrackId} />
+      <Tour state={tour.state} setState={tour.setState} loadedTrackId={loadedTrackId} onTab={isPhone ? setTab : undefined} />
       <div className="toasts" aria-live="polite">
         {toasts.map((t) => (
           <div key={t.id} className={`toast ${t.kind}`}>
