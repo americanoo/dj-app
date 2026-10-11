@@ -32,7 +32,7 @@ export function NightProvider({ children }: { children: ReactNode }) {
       const { audio: attached, folder: f, tracks } = refs.current;
       const a = attached[trackId];
       if (a) return (await fetch(a.url)).arrayBuffer();
-      if (f.status === 'ready') return (await f.findFile(tracks[trackId]?.path))?.arrayBuffer();
+      if (f.hasMusic) return (await f.findFile(tracks[trackId]))?.arrayBuffer();
       return undefined;
     }),
   );
@@ -52,7 +52,7 @@ export function NightProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [audio]);
   // Newly attached files or a linked folder: tracks that had no audio can be tried again.
-  useEffect(() => player.forget(), [player, audio, folder.status]);
+  useEffect(() => player.forget(), [player, audio, folder.revision]);
 
   return <Ctx.Provider value={player}>{children}</Ctx.Provider>;
 }

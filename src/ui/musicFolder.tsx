@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { del, get, set as idbSet } from 'idb-keyval';
-import { buildIndex, resolveTrackFile, type FileIndex } from '../core/pathmatch';
+import { clear, createStore, del, get, keys, set as idbSet } from 'idb-keyval';
+import { buildIndex, findTrackFile, type FileIndex, type TrackRef } from '../core/pathmatch';
 import { AUDIO_EXTENSIONS } from './audio';
 
 /**
@@ -11,7 +11,14 @@ import { AUDIO_EXTENSIONS } from './audio';
  * - Safari / Firefox: a folder <input>. Works the same, but only for the
  *   current visit.
  *
+ * - Anywhere, and the only way on a phone: songs added with "Add music" are
+ *   kept on this device (in the browser's storage), so they're there on every
+ *   visit with nothing to link. Picked from the Files app, they can come from
+ *   iCloud, the phone itself or a drive plugged into it.
+ *
  * Only a list of file paths is kept in memory; audio is read when a track needs it.
+ * Tracks are matched to files by name, loosely (see core/pathmatch), never by
+ * where the DJ software said the file was.
  */
 
 // Minimal typings for the parts of the File System Access API we use.
@@ -31,6 +38,16 @@ type Picker = (o?: { id?: string; mode?: 'read' }) => Promise<DirHandle>;
 
 const HANDLE_KEY = 'setcraft-music-folder-v1';
 
+/** Songs kept on this device, by file name. A store of its own, so it's never mixed up with project data. */
+const deviceStore = createStore('setcraft-music', 'files');
+
+export interface AddMusicResult {
+  /** Names of the songs now kept on this device. */
+  added: string[];
+  /** Songs that couldn't be kept (storage full): they still play until the page is closed. */
+  notKept: number;
+}
+
 export type FolderStatus = 'none' | 'needs-permission' | 'indexing' | 'ready';
 
 interface MusicFolderStore {
@@ -45,8 +62,16 @@ interface MusicFolderStore {
   /** Fallback for browsers without the picker: files from <input webkitdirectory>. */
   linkFiles: (files: FileList) => void;
   unlink: () => void;
-  /** The track's audio file from the linked folder, if it's there. */
-  findFile: (trackPath: string | undefined) => Promise<File | undefined>;
+  /** Songs kept on this device ("Add music"). */
+  deviceCount: number;
+  addMusic: (files: File[]) => Promise<AddMusicResult>;
+  removeDeviceMusic: () => Promise<void>;
+  /** A linked folder or songs on this device: somewhere tracks' audio can come from. */
+  hasMusic: boolean;
+  /** Changes whenever the music available changes, so missing tracks are looked for again. */
+  revision: number;
+  /** The track's audio file from the linked folder or this device, if it's there. */
+  findFile: (track: TrackRef | undefined) => Promise<File | undefined>;
 }
 
 const Ctx = createContext<MusicFolderStore | null>(null);
@@ -77,6 +102,24 @@ export function MusicFolderProvider({ children }: { children: ReactNode }) {
   const handle = useRef<DirHandle | null>(null);
   const files = useRef<Map<string, FileHandle | File>>(new Map());
   const index = useRef<FileIndex>(buildIndex([]));
+  const [deviceCount, setDeviceCount] = useState(0);
+  const deviceIndex = useRef<FileIndex>(buildIndex([]));
+  /** Songs added this visit, so they aren't read back from storage. Also holds any that couldn't be kept. */
+  const deviceFiles = useRef<Map<string, File>>(new Map());
+  const [revision, setRevision] = useState(0);
+  const bump = useCallback(() => setRevision((r) => r + 1), []);
+
+  // The songs kept on this device: only their names are read now.
+  useEffect(() => {
+    keys(deviceStore)
+      .then((names) => {
+        const list = names.filter((k): k is string => typeof k === 'string');
+        deviceIndex.current = buildIndex(list);
+        setDeviceCount(list.length);
+        if (list.length) bump();
+      })
+      .catch(() => undefined);
+  }, [bump]);
 
   const indexHandle = useCallback(async (dir: DirHandle) => {
     setStatus('indexing');
@@ -88,7 +131,8 @@ export function MusicFolderProvider({ children }: { children: ReactNode }) {
     index.current = buildIndex(found.keys());
     setFileCount(found.size);
     setStatus('ready');
-  }, []);
+    bump();
+  }, [bump]);
 
   // Restore the remembered folder. Browsers need a click before granting access again.
   useEffect(() => {
@@ -145,7 +189,8 @@ export function MusicFolderProvider({ children }: { children: ReactNode }) {
     setFileCount(found.size);
     setPersistent(false);
     setStatus('ready');
-  }, []);
+    bump();
+  }, [bump]);
 
   const unlink = useCallback(() => {
     handle.current = null;
@@ -156,13 +201,55 @@ export function MusicFolderProvider({ children }: { children: ReactNode }) {
     setFolderName('');
     setFileCount(0);
     setPersistent(false);
-  }, []);
+    bump();
+  }, [bump]);
 
-  const findFile = useCallback(async (trackPath: string | undefined) => {
-    const rel = resolveTrackFile(trackPath, index.current);
+  const addMusic = useCallback(
+    async (picked: File[]): Promise<AddMusicResult> => {
+      const songs = picked.filter((f) => AUDIO_EXTENSIONS.test(f.name));
+      // Ask the browser not to clear these when space runs low (granted for installed apps).
+      void navigator.storage?.persist?.().catch(() => undefined);
+      const added: string[] = [];
+      let notKept = 0;
+      for (const f of songs) {
+        deviceFiles.current.set(f.name, f);
+        added.push(f.name);
+        try {
+          await idbSet(f.name, f, deviceStore);
+        } catch {
+          notKept++;
+        }
+      }
+      const kept = await keys<string>(deviceStore).catch((): string[] => []);
+      const names = new Set([...kept.filter((k) => typeof k === 'string'), ...added]);
+      deviceIndex.current = buildIndex(names);
+      setDeviceCount(names.size);
+      bump();
+      return { added, notKept };
+    },
+    [bump],
+  );
+
+  const removeDeviceMusic = useCallback(async () => {
+    await clear(deviceStore).catch(() => undefined);
+    deviceFiles.current = new Map();
+    deviceIndex.current = buildIndex([]);
+    setDeviceCount(0);
+    bump();
+  }, [bump]);
+
+  const findFile = useCallback(async (track: TrackRef | undefined) => {
+    if (!track) return undefined;
+    const rel = findTrackFile(track, index.current);
     const entry = rel ? files.current.get(rel) : undefined;
-    if (!entry) return undefined;
-    return entry instanceof File ? entry : entry.getFile();
+    if (entry) return entry instanceof File ? entry : entry.getFile();
+    const name = findTrackFile(track, deviceIndex.current);
+    if (!name) return undefined;
+    const here = deviceFiles.current.get(name);
+    if (here) return here;
+    const kept = await get<Blob>(name, deviceStore).catch(() => undefined);
+    if (!kept) return undefined;
+    return kept instanceof File ? kept : new File([kept], name, { type: kept.type });
   }, []);
 
   return (
@@ -177,6 +264,11 @@ export function MusicFolderProvider({ children }: { children: ReactNode }) {
         reconnect,
         linkFiles,
         unlink,
+        deviceCount,
+        addMusic,
+        removeDeviceMusic,
+        hasMusic: status === 'ready' || deviceCount > 0,
+        revision,
         findFile,
       }}
     >

@@ -12,7 +12,7 @@ import { ControllerPanel } from './ControllerPanel';
 import { useMidi } from './midi';
 import { useLicense } from './license';
 import { ExportPanel } from './ExportPanel';
-import { LibraryView } from './LibraryView';
+import { LibraryView, useClearLibrary } from './LibraryView';
 import { MergeReview } from './MergeReview';
 import { LinkFolderButton } from './MusicFolderControl';
 import { useVersions } from './versions';
@@ -26,6 +26,7 @@ import { Tour, useDemoLoader, useTour } from './Tour';
 import { useIsPhone, type PhoneTab } from './phone';
 import { PhoneTabs } from './PhoneTabs';
 import { useInstall } from './install';
+import { onNotify } from './toastBus';
 import { activeSet, reducer, useStore } from './store';
 
 
@@ -51,6 +52,7 @@ export function App() {
   const midi = useMidi();
   const folder = useMusicFolder();
   const tour = useTour();
+  const clearLibrary = useClearLibrary();
   // Phones: one panel at a time, picked from tabs along the bottom.
   const isPhone = useIsPhone();
   const install = useInstall();
@@ -113,6 +115,7 @@ export function App() {
     setToasts((t) => [...t, { id, text, kind }]);
     window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), kind === 'error' ? 9000 : 5000);
   }, []);
+  useEffect(() => onNotify(toast), [toast]);
 
   const undoRef = useRef({ undoLabel, redoLabel });
   undoRef.current = { undoLabel, redoLabel };
@@ -391,6 +394,16 @@ export function App() {
                     <span className="menu-hint">home screen, works offline</span>
                   </button>
                 )}
+                <button
+                  className="menu-item"
+                  onClick={() => {
+                    close();
+                    void clearLibrary();
+                  }}
+                >
+                  Clear library…
+                  <span className="menu-hint">start over; a version is saved first</span>
+                </button>
                 <button
                   className="menu-item"
                   onClick={() => {

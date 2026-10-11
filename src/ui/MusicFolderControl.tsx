@@ -1,17 +1,106 @@
 import { useRef, useState } from 'react';
-import { useAudio } from './audio';
-import { useMusicFolder } from './musicFolder';
+import type { Track } from '../core/model';
+import { buildIndex, findTrackFile } from '../core/pathmatch';
+import { AUDIO_EXTENSIONS, useAudio } from './audio';
+import { useMusicFolder, type AddMusicResult } from './musicFolder';
+import { useIsPhone } from './phone';
 import { activeSet, useStore } from './store';
+import { notify } from './toastBus';
+
+/** Audio types for the picker. Listed by extension too, so phones offer every kind. */
+const AUDIO_ACCEPT = 'audio/*,.mp3,.m4a,.aac,.mp4,.wav,.aif,.aiff,.flac,.ogg,.opus';
+
+/** What adding songs did, in one sentence or two. */
+export function describeAdded(res: AddMusicResult, tracks: Record<string, Track>, where: string): string {
+  const added = buildIndex(res.added);
+  const used = new Set<string>();
+  let matched = 0;
+  for (const t of Object.values(tracks)) {
+    const name = findTrackFile(t, added);
+    if (name) {
+      matched++;
+      used.add(name);
+    }
+  }
+  const n = res.added.length;
+  const parts = [`${n} song${n === 1 ? '' : 's'} added to ${where}.`];
+  if (Object.keys(tracks).length) {
+    parts.push(`${matched} track${matched === 1 ? '' : 's'} in your library now ${matched === 1 ? 'has its' : 'have their'} audio.`);
+    const unmatched = res.added.filter((name) => !used.has(name));
+    if (unmatched.length) parts.push(`${unmatched.length} didn't match a track (like “${unmatched[0]}”).`);
+  }
+  if (res.notKept) parts.push(`${res.notKept} couldn't be kept (storage full) and play only until the page is closed.`);
+  return parts.join(' ');
+}
 
 /**
- * Link / reconnect the music folder.
+ * Add songs that stay on this device: the way to get music onto a phone, where
+ * folders can't be linked. Picked from the Files app they can come from the
+ * phone, iCloud or a drive plugged into it; each is matched to its track by name.
+ */
+export function AddMusicButton({ label = '♫ Add music', className = 'folder-btn' }: { label?: string; className?: string }) {
+  const folder = useMusicFolder();
+  const { project } = useStore();
+  const isPhone = useIsPhone();
+  const input = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState<number | null>(null);
+
+  const run = async (files: File[]) => {
+    const songs = files.filter((f) => AUDIO_EXTENSIONS.test(f.name));
+    if (!songs.length) {
+      notify('Those weren’t audio files. Pick songs (MP3, M4A, WAV, AIFF, FLAC…).', 'error');
+      return;
+    }
+    setBusy(songs.length);
+    try {
+      const res = await folder.addMusic(songs);
+      notify(describeAdded(res, project.library.tracks, isPhone ? 'this phone' : 'this device'));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <>
+      <button
+        className={`add-music ${className}`}
+        onClick={() => input.current?.click()}
+        disabled={busy !== null}
+        title="Pick songs: from this phone, iCloud or a drive plugged in. They stay in Setcraft on this device and are matched to your tracks by name, wherever your DJ software kept them."
+      >
+        {busy !== null ? `Adding ${busy} song${busy === 1 ? '' : 's'}…` : label}
+      </button>
+      <input
+        ref={input}
+        type="file"
+        multiple
+        hidden
+        accept={AUDIO_ACCEPT}
+        onChange={(e) => {
+          void run(Array.from(e.target.files ?? []));
+          e.target.value = '';
+        }}
+      />
+    </>
+  );
+}
+
+/**
+ * Link / reconnect the music folder (on a phone: add music instead).
  * - default: "Link music folder…" / "Change folder…"
  * - compact: hidden once linked (for the cue editor toolbar)
  * - topbar: always visible and shows the linked folder's name
  */
 export function LinkFolderButton({ compact = false, topbar = false }: { compact?: boolean; topbar?: boolean }) {
   const folder = useMusicFolder();
+  const isPhone = useIsPhone();
   const input = useRef<HTMLInputElement>(null);
+
+  // Phones can't link a folder: songs are added instead, and stay.
+  if (isPhone) {
+    if (compact && folder.deviceCount) return null;
+    return <AddMusicButton className={topbar ? 'folder-btn' : 'folder-btn small'} />;
+  }
 
   const pick = () => (folder.supportsPicker ? void folder.link() : input.current?.click());
   const fallbackInput = (
@@ -64,6 +153,7 @@ export function LinkFolderButton({ compact = false, topbar = false }: { compact?
 /** Sidebar panel: folder status plus "analyse the set's waveforms". */
 export function MusicFolderPanel() {
   const folder = useMusicFolder();
+  const isPhone = useIsPhone();
   const { project, dispatch } = useStore();
   const { audio, rememberedIds, outdatedIds, attach } = useAudio();
   const [progress, setProgress] = useState<{ done: number; total: number; missing: number } | null>(null);
@@ -81,7 +171,7 @@ export function MusicFolderPanel() {
     let missing = 0;
     setProgress({ done: 0, total: todo.length, missing });
     for (let i = 0; i < todo.length; i++) {
-      const file = await folder.findFile(todo[i].path).catch(() => undefined);
+      const file = await folder.findFile(todo[i]).catch(() => undefined);
       if (file) {
         const info = await attach(todo[i].id, file).catch(() => undefined);
         if (!info) missing++;
@@ -93,7 +183,7 @@ export function MusicFolderPanel() {
 
   return (
     <div className="folder-panel">
-      <h3>Music folder</h3>
+      <h3>{isPhone ? 'Music' : 'Music folder'}</h3>
       {folder.status === 'ready' && (
         <p className="small-text">
           <b>{folder.folderName}</b>
@@ -104,17 +194,50 @@ export function MusicFolderPanel() {
           </span>
         </p>
       )}
-      {folder.status === 'none' && (
+      {folder.status === 'none' && !isPhone && (
         <p className="muted small-text">Link the folder your music lives in and Setcraft finds each track's audio for waveforms.</p>
+      )}
+      {isPhone && !folder.deviceCount && (
+        <p className="muted small-text">
+          Add your songs from the Files app (this phone, iCloud or a drive plugged in). They stay here and are matched
+          to your tracks by name.
+        </p>
       )}
       {folder.status === 'needs-permission' && (
         <p className="muted small-text">Your browser needs a click to open “{folder.folderName}” again.</p>
       )}
+      {!isPhone && (
+        <div className="row wrap">
+          <LinkFolderButton />
+          {folder.status === 'ready' && (
+            <button className="small danger" onClick={folder.unlink}>
+              Unlink
+            </button>
+          )}
+        </div>
+      )}
+      {folder.deviceCount > 0 && (
+        <p className="small-text device-music">
+          <b>
+            {folder.deviceCount.toLocaleString()} song{folder.deviceCount === 1 ? '' : 's'}
+          </b>
+          <span className="muted"> on this {isPhone ? 'phone' : 'device'}</span>
+        </p>
+      )}
       <div className="row wrap">
-        <LinkFolderButton />
-        {folder.status === 'ready' && (
-          <button className="small danger" onClick={folder.unlink}>
-            Unlink
+        <AddMusicButton
+          className="small"
+          label={isPhone ? (folder.deviceCount ? '♫ Add more' : '♫ Add music') : '♫ Add songs to this device'}
+        />
+        {folder.deviceCount > 0 && (
+          <button
+            className="small danger"
+            onClick={() => {
+              if (confirm(`Remove the ${folder.deviceCount} songs kept on this ${isPhone ? 'phone' : 'device'}? Your tracks and cues stay.`))
+                void folder.removeDeviceMusic();
+            }}
+          >
+            Remove
           </button>
         )}
       </div>
@@ -123,7 +246,7 @@ export function MusicFolderPanel() {
           <span className="muted" title={`Colour waveforms for the tracks in “${set.name}”`}>
             Waveforms {withWave}/{setTracks.length} in set
           </span>
-          {folder.status === 'ready' && todo.length > 0 && !progress && (
+          {folder.hasMusic && todo.length > 0 && !progress && (
             <button className="small" onClick={() => void analyseSet()}>
               Analyse {todo.length}
             </button>
@@ -132,7 +255,7 @@ export function MusicFolderPanel() {
             <div className="muted">
               {progress.done < progress.total
                 ? `Analysing ${progress.done + 1} of ${progress.total}…`
-                : `Done.${progress.missing ? ` ${progress.missing} not found in the folder.` : ''}`}
+                : `Done.${progress.missing ? ` ${progress.missing} not found in your music.` : ''}`}
               {progress.done >= progress.total && (
                 <>
                   {' '}

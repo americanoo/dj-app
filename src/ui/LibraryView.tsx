@@ -9,6 +9,9 @@ import { useAudio } from './audio';
 import { LinkFolderButton, MusicFolderPanel } from './MusicFolderControl';
 import { useOddBpmIds } from './BpmFixPanel';
 import { useFitZoom } from './fit';
+import { useVersions } from './versions';
+import { useIsPhone } from './phone';
+import { notify } from './toastBus';
 
 type SortKey = 'order' | 'artist' | 'title' | 'bpm' | 'key' | 'duration';
 
@@ -33,10 +36,17 @@ export function LibraryView({
   onFixBpms: () => void;
 }) {
   const { project, dispatch } = useStore();
-  const { audio, rememberedIds, outdatedIds, forgetAll } = useAudio();
+  const { audio, rememberedIds, outdatedIds } = useAudio();
+  const clearLibrary = useClearLibrary();
   const { library } = project;
   const set = activeSet(project);
-  const [playlistId, setPlaylistId] = useState<string | 'all'>('all');
+  const [playlistId, setPlaylistIdRaw] = useState<string | 'all'>('all');
+  // Phones: the sidebar opens over the list, and picking a source closes it.
+  const [sideOpen, setSideOpen] = useState(false);
+  const setPlaylistId = (id: string | 'all') => {
+    setPlaylistIdRaw(id);
+    setSideOpen(false);
+  };
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<SortKey>('order');
   const [chapterId, setChapterId] = useState(set.chapters[0]?.id ?? '');
@@ -44,7 +54,9 @@ export function LibraryView({
 
   const oddIds = useOddBpmIds();
   // The sidebar always fits: the playlist list gives way first, then it scales down.
-  const sidebarFit = useFitZoom<HTMLDivElement>(0.5, Object.keys(library.tracks).length > 0);
+  // (Not on a phone: there it opens as a page of its own, at full size.)
+  const isPhone = useIsPhone();
+  const sidebarFit = useFitZoom<HTMLDivElement>(0.5, Object.keys(library.tracks).length > 0 && !isPhone);
   const oddBpms = oddIds.size;
   const inSet = useMemo(() => new Set(set.entries.map((e) => e.trackId)), [set.entries]);
   const playlist = library.playlists.find((p) => p.id === playlistId);
@@ -164,9 +176,14 @@ export function LibraryView({
 
   return (
     <div className="library">
-      <aside className="sidebar">
+      <aside className={`sidebar${sideOpen ? ' open' : ''}`}>
         <div className="sidebar-fit" ref={sidebarFit}>
-        <h3>Sources</h3>
+        <div className="sidebar-head">
+          <h3>Sources</h3>
+          <button className="small sidebar-close" onClick={() => setSideOpen(false)}>
+            Done
+          </button>
+        </div>
         <div className="sources-list">
         <button className={playlistId === 'all' ? 'side-item active' : 'side-item'} onClick={() => setPlaylistId('all')}>
           All tracks <span className="count">{Object.keys(library.tracks).length}</span>
@@ -185,15 +202,8 @@ export function LibraryView({
         </div>
         <MusicFolderPanel />
         <div className="sidebar-footer">
-          <button
-            className="danger small"
-            onClick={() => {
-              if (!confirm('Remove all tracks, playlists and set entries?')) return;
-              dispatch({ type: 'clearLibrary' });
-              forgetAll();
-            }}
-          >
-            Clear library
+          <button className="danger small" onClick={() => void clearLibrary()}>
+            Clear library…
           </button>
         </div>
         </div>
@@ -201,6 +211,9 @@ export function LibraryView({
 
       <section className="library-main">
         <div className="toolbar">
+          <button className="sources-toggle small" onClick={() => setSideOpen(true)} title="Playlists, music, clear the library">
+            ☰ {playlist ? playlist.name : 'All tracks'}
+          </button>
           <input
             type="search"
             placeholder="Search artist, title, genre, key (8A), BPM…"
@@ -384,3 +397,34 @@ const TrackRow = memo(function TrackRow({
     </tr>
   );
 });
+
+/**
+ * Start the library over: every track, playlist and the night's tracklists go.
+ * A version is saved first (and it's one undo step), so nothing is lost for good.
+ * Songs kept on this device and remembered waveforms stay, for when the
+ * collection is imported again.
+ */
+export function useClearLibrary(): () => Promise<void> {
+  const { project, dispatch } = useStore();
+  const { save } = useVersions();
+  const projectRef = useRef(project);
+  projectRef.current = project;
+  return useCallback(async () => {
+    const p = projectRef.current;
+    const n = Object.keys(p.library.tracks).length;
+    if (!n) {
+      notify('The library is already empty.');
+      return;
+    }
+    const playlists = p.library.playlists.length;
+    if (
+      !confirm(
+        `Clear the library? ${n} track${n === 1 ? '' : 's'}${playlists ? `, ${playlists} playlist${playlists === 1 ? '' : 's'}` : ''} and the night's tracklists are removed.\n\nA version is saved first, so you can bring it all back from ⋯ → Versions.`,
+      )
+    )
+      return;
+    await save(p, 'Before clearing the library', true).catch(() => undefined);
+    dispatch({ type: 'clearLibrary' });
+    notify('Library cleared. To bring it back: Undo, or ⋯ → Versions → “Before clearing the library”.');
+  }, [dispatch, save]);
+}

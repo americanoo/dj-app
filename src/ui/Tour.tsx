@@ -84,14 +84,15 @@ const STEPS: Step[] = [
   {
     id: 'folder',
     target: '.folder-btn',
-    title: 'Link your music folder',
+    title: 'Bring in your music',
     body: (
       <>
-        Point Setcraft at the folder your music lives in (subfolders too). It finds each track's audio for waveforms
-        and playback. Your files stay where they are.
+        Point Setcraft at the folder your music lives in (subfolders too, any drive). On a phone, add your songs from
+        the Files app instead; they stay in Setcraft. Each track's audio is found by its name, wherever your DJ
+        software kept it.
       </>
     ),
-    todo: 'Click “Link music folder” and pick the folder. (You can do this later.)',
+    todo: 'Click “Link music folder” (on a phone: “Add music”) and pick your music. (You can do this later.)',
     done: (c) => c.folderReady,
     needs: (c) => !c.folderReady,
     skip: (c) => c.demo,
@@ -263,7 +264,7 @@ export function Tour({
       trackCount: Object.keys(project.library.tracks).length,
       setCount: set.entries.length,
       hasBlend: items.some((it, i) => i > 0 && it.gap < -0.5),
-      folderReady: folder.status === 'ready',
+      folderReady: folder.hasMusic,
       loadedTrackId,
       hotCues: loaded ? loaded.cues.filter((c) => c.slot !== null).length : 0,
       deckPlaying: !!document.querySelector('.transport-bar button.play-btn.playing') && !nightState.active,
@@ -272,7 +273,7 @@ export function Tour({
     };
     // the DOM part (deck playing) is re-read on the poll below
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project, folder.status, loadedTrackId, nightState.playing, nightState.active, state.demo, tick]);
+  }, [project, folder.hasMusic, loadedTrackId, nightState.playing, nightState.active, state.demo, tick]);
 
   const running = state.status === 'running';
   const step = running ? STEPS[state.step] : undefined;

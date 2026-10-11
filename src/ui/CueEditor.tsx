@@ -19,8 +19,9 @@ import { NightStepper, TrackFields } from './TrackFields';
 import { CueForm } from './CueForm';
 import { PlayerBar } from './PlayerBar';
 import { PlayIcon } from './PlayIcon';
-import { LinkFolderButton } from './MusicFolderControl';
+import { AddMusicButton, LinkFolderButton } from './MusicFolderControl';
 import { activeSet, useStore } from './store';
+import { useIsPhone } from './phone';
 import { SECTION_COLORS, Waveform } from './Waveform';
 import { detectSections, SECTION_LABELS } from '../core/sections';
 
@@ -122,6 +123,7 @@ function TrackCueWorkspace({
   const { audio: attached, remembered, rememberedIds, loading, attach, loadRemembered, getBuffer } = useAudio();
   const night = useNight();
   const folder = useMusicFolder();
+  const isPhone = useIsPhone();
   const audioInfo = attached[track.id];
   // Playable audio from this visit, or the waveform remembered from an earlier one.
   const wave = audioInfo ?? remembered[track.id];
@@ -206,10 +208,10 @@ function TrackCueWorkspace({
   useEffect(() => {
     if (audioInfo) return;
     if (rememberedIds.has(track.id) && !remembered[track.id]) void loadRemembered(track.id);
-    if (folder.status !== 'ready' || loading[track.id]) return;
+    if (!folder.hasMusic || loading[track.id]) return;
     let cancelled = false;
     folder
-      .findFile(track.path)
+      .findFile(track)
       .then((file) => {
         if (cancelled) return;
         setFolderMiss(!file);
@@ -224,7 +226,7 @@ function TrackCueWorkspace({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [track.id, track.path, folder.status, !!audioInfo, rememberedIds]);
+  }, [track.id, track.path, folder.revision, !!audioInfo, rememberedIds]);
 
   const duration =
     wave?.duration ?? track.duration ?? Math.max(360, ...track.cues.map((c) => (c.end ?? c.start) + 30));
@@ -475,9 +477,9 @@ function TrackCueWorkspace({
     if (!n || prewarmed.current === n.trackId) return;
     prewarmed.current = n.trackId;
     if (attached[n.trackId]) void getBuffer(n.trackId).catch(() => undefined);
-    else if (folder.status === 'ready' && !loading[n.trackId]) {
+    else if (folder.hasMusic && !loading[n.trackId]) {
       void folder
-        .findFile(project.library.tracks[n.trackId]?.path)
+        .findFile(project.library.tracks[n.trackId])
         .then((f) => f && attach(n.trackId, f))
         .catch(() => undefined);
     }
@@ -887,23 +889,27 @@ function TrackCueWorkspace({
         {!audioInfo && !loading[track.id] && remembered[track.id]?.bands && (
           <div className="hint-line info">
             Showing the remembered waveform of “{remembered[track.id].fileName}”. Attach the audio file
-            {folder.status === 'ready' ? '' : ' or link your music folder'} to play it.{' '}
-            {folder.status !== 'ready' && <LinkFolderButton />}
+            {folder.hasMusic ? '' : isPhone ? ' or add your music' : ' or link your music folder'} to play it.{' '}
+            {!folder.hasMusic && <LinkFolderButton />}
           </div>
         )}
-        {!audioInfo && !loading[track.id] && !remembered[track.id] && !wave && folder.status !== 'ready' && (
+        {!audioInfo && !loading[track.id] && !remembered[track.id] && !wave && !folder.hasMusic && (
           <div className="hint-line info">
             {folder.status === 'needs-permission'
               ? `Your browser needs one click to open “${folder.folderName}” again before this track can play.`
-              : 'No audio for this track yet. Link the folder your music lives in, or attach the file, to see and hear it.'}{' '}
+              : isPhone
+                ? 'No audio for this track yet. Add your songs (from Files: this phone, iCloud or a drive) to see and hear it.'
+                : 'No audio for this track yet. Link the folder your music lives in, or attach the file, to see and hear it.'}{' '}
             <LinkFolderButton />
           </div>
         )}
-        {!audioInfo && !loading[track.id] && folder.status === 'ready' && folderMiss && (
+        {!audioInfo && !loading[track.id] && folder.hasMusic && folderMiss && (
           <div className="hint-line">
-            {track.path
-              ? `Couldn't find “${track.path.split(/[\\/]/).pop()}” in ${folder.folderName}.`
-              : 'This track has no file location, so it can’t be found in the linked folder.'}
+            Couldn't find {track.path ? `“${track.path.split(/[\\/]/).pop()}”` : `“${track.artist} - ${track.title}”`} in{' '}
+            {folder.status === 'ready' ? folder.folderName : 'your music'}
+            {folder.status === 'ready' && folder.deviceCount ? ' or the songs on this device' : ''}. Add it, or attach the
+            file.{' '}
+            <AddMusicButton className="small" label="♫ Add it" />
           </div>
         )}
         {!bpm && (

@@ -32,9 +32,15 @@ desktop Chrome) that's Chrome's own install; on iPhone and iPad it shows how: **
 then opens full screen from its icon and keeps working without internet. (Installing needs the https address of
 a hosted copy; opening it over your Wi-Fi from your computer works, but can't install.)
 
-What phones can't do (yet): Safari can't link a whole music folder, so on an iPhone attach tracks one at a time
-from the Files app (or start with the demo tracks); DJ controllers need Chrome on Android over USB-C. A phone's
-library and cues are its own, separate from your computer's.
+**Your music on the phone**: phones can't link a folder, so add the songs instead: **♫ Add music** (under **⋯**,
+in the Library's **☰** panel, or on a track that has no audio). Pick them in the Files app (select several at
+once) from the phone, iCloud Drive or a drive plugged into it. They're kept in Setcraft on the phone, so you add
+them once, and each is matched to its track by name (see below), whatever path your DJ software had for it.
+**☰** in the Library also holds the playlists and *Clear library*.
+
+What phones can't do (yet): DJ controllers need Chrome on Android over USB-C. A phone's library and cues are its
+own, separate from your computer's. Safari may clear the songs it keeps for a website that isn't opened for
+weeks; installed on the Home Screen, they stay.
 
 ## First time? The tutorial
 
@@ -104,15 +110,25 @@ give it:
   hidden ones and `_Serato_` / `PIONEER`, which hold DJ-software databases rather than music. *Analyse N missing* prepares every track in the current set in one go.
   - In **Chrome/Edge** the folder is remembered. On later visits, one click on *Reconnect* is enough.
   - In **Safari/Firefox** the link lasts for the current visit.
-  - The folder doesn't need to be at the same path as in your DJ software (e.g. a USB copy works), as long as
-    file names match.
+  - The folder doesn't need to be at the same path as in your DJ software: an external drive, a USB copy or a
+    copy on another computer all work. Files are matched by **name**, never by path, and loosely: a copy in
+    another format (`.m4a` for `.aiff`), with a track number (`07 - …`), underscores or different capitals still
+    matches. Failing that, the track's *Artist - Title* (either way round), or the title inside a folder named
+    after the artist (`Artist/Album/01 Title.mp3`).
+- **♫ Add music** (on a phone, and *Add songs to this device* in the Library sidebar on a computer): pick songs
+  and Setcraft keeps them in the browser on this device, matched the same way. Nothing to link or reconnect on
+  later visits. *Remove* deletes them again; your tracks and cues stay.
 - **Drop audio files** on the page. They're linked to tracks by file name. A file that matches no track is added
   as a new track.
 - **Attach audio file…** in the cue editor, for one track.
 
 Waveforms are **remembered**. After the first analysis, each waveform's shape (about 50 KB per track, never the
 audio itself) is kept in the browser, so it appears immediately on later visits. Playing the track still needs the
-audio. Tracks with a waveform show a 〰 in the library. *Clear library* also forgets the waveforms.
+audio. Tracks with a waveform show a 〰 in the library.
+
+**Clear library…** (under **⋯**, and at the bottom of the Library sidebar) removes every track, playlist and the
+night's tracklists in one go, to start over or import a fresh collection. A version is saved first and it's one
+Undo step, so it can always be brought back. Songs added with *Add music* stay, and match the re-imported tracks.
 Single-colour waveforms saved by earlier versions show a grey 〰. They're upgraded to colour when the audio loads
 again, and *Analyse N tracks* includes them.
 
@@ -328,7 +344,7 @@ src/
     waveform.ts         compact (8-bit) waveform storage
     analysis.ts         three-band waveform analysis (biquad filters)
     sections.ts         intro / breakdown / build / drop / outro detection
-    pathmatch.ts        finding a track's file inside a linked music folder
+    pathmatch.ts        finding a track's file in a linked folder or added songs (by name, loosely)
     keys.ts             key parsing (standard, Camelot, Open Key, Traktor ids) + harmonic relations
     time.ts             time formatting, beat/bar snapping, bar.beat labels
     setplan.ts          set timeline, transition warnings, run-sheet generation
@@ -342,7 +358,7 @@ src/
   ui/                   React
     store.tsx           project state (reducer) persisted to IndexedDB
     audio.tsx           audio attachments, waveform analysis, remembered waveforms (IndexedDB)
-    musicFolder.tsx     linked music folder (File System Access API, folder-input fallback)
+    musicFolder.tsx     linked music folder (File System Access API, folder-input fallback) and songs kept on the device
     deck.ts             Web Audio playback: instant jumps, real loops, click-free fades
     analysisWorker.ts   waveform analysis off the main thread
     versions.tsx        version snapshots stored in IndexedDB

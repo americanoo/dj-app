@@ -22,17 +22,17 @@ export function useTrackWave(trackId: string | undefined): { wave?: WaveformData
       void loadRemembered(trackId);
       return;
     }
-    if (folder.status !== 'ready') return;
+    if (!folder.hasMusic) return;
     let cancelled = false;
     folder
-      .findFile(track.path)
+      .findFile(track)
       .then((f) => (!cancelled && f ? attach(trackId, f) : undefined))
       .catch(() => undefined);
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trackId, track?.path, folder.status, rememberedIds, !!wave]);
+  }, [trackId, track?.path, folder.revision, rememberedIds, !!wave]);
   const bpm = track?.bpm;
   const grid = track?.gridStart ?? 0;
   const sections = useMemo(
