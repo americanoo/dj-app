@@ -133,3 +133,28 @@ export async function nightTime(page: Page): Promise<number> {
   const [m, s] = text.replace(/[^\d:]/g, '').split(':').map(Number);
   return m * 60 + s;
 }
+
+/**
+ * Waits until the project saved in the browser has at least `entries` tracks in
+ * the night, so a reload that follows finds them (saving waits for an idle moment).
+ */
+export async function waitForSavedNight(page: Page, entries: number) {
+  await page.waitForFunction(
+    (n) =>
+      new Promise<boolean>((done) => {
+        const open = indexedDB.open('keyval-store');
+        open.onerror = () => done(false);
+        open.onsuccess = () => {
+          const req = open.result.transaction('keyval').objectStore('keyval').get('setcraft-project-v1');
+          req.onerror = () => done(false);
+          req.onsuccess = () => {
+            const p = req.result as { activeSetId: string; sets: { id: string; entries: unknown[] }[] } | undefined;
+            const set = p?.sets.find((s) => s.id === p.activeSetId) ?? p?.sets[0];
+            done((set?.entries.length ?? 0) >= n);
+          };
+        };
+      }),
+    entries,
+    { timeout: 15_000 },
+  );
+}

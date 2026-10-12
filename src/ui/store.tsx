@@ -19,6 +19,30 @@ import { initHistory, record, redo, undo, type History } from '../core/history';
 import { playLength, setEnd, withTimes } from '../core/setplan';
 
 const STORAGE_KEY = 'setcraft-project-v1';
+/**
+ * Changes not yet saved when the page was left. IndexedDB writes started while a
+ * page unloads can be dropped, so they're also written here, synchronously, and
+ * picked up on the next start. Cleared once a normal save has landed.
+ */
+const PENDING_KEY = 'setcraft-project-pending';
+
+function readPending(): Project | undefined {
+  try {
+    const raw = localStorage.getItem(PENDING_KEY);
+    const p = raw ? (JSON.parse(raw) as Project) : undefined;
+    return p?.version === 1 ? p : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function clearPending() {
+  try {
+    localStorage.removeItem(PENDING_KEY);
+  } catch {
+    // storage unavailable
+  }
+}
 
 export type Action =
   /** `fresh`: the saved project opened at start-up, which starts a new undo history. */
@@ -323,7 +347,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     get<Project>(STORAGE_KEY)
       .then((saved) => {
-        if (saved?.version === 1) dispatch({ type: 'load', project: saved, fresh: true });
+        const pending = readPending();
+        if (pending) {
+          // Left with changes unsaved: they're the latest. Save them properly now.
+          dispatch({ type: 'load', project: pending, fresh: true });
+          idbSet(STORAGE_KEY, pending).then(clearPending, () => undefined);
+        } else if (saved?.version === 1) dispatch({ type: 'load', project: saved, fresh: true });
       })
       .catch(() => {
         // IndexedDB unavailable (private mode) – run in-memory.
@@ -331,17 +360,50 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoaded(true));
   }, []);
 
+  // The project still to be saved, if a save is waiting.
+  const unsaved = useRef<Project | null>(null);
   useEffect(() => {
     if (!loaded) return;
     window.clearTimeout(saveTimer.current);
+    unsaved.current = project;
     // Saving copies the whole project; do it when the browser is idle so it
     // never competes with pads, drags or playback.
     saveTimer.current = window.setTimeout(() => {
-      const save = () => idbSet(STORAGE_KEY, project).catch(() => undefined);
+      const save = () => {
+        if (unsaved.current !== project) return; // a newer change is on its way
+        unsaved.current = null;
+        idbSet(STORAGE_KEY, project).then(() => {
+          if (!unsaved.current) clearPending();
+        }, () => undefined);
+      };
       if ('requestIdleCallback' in window) window.requestIdleCallback(save, { timeout: 2000 });
       else save();
     }, 600);
   }, [project, loaded]);
+
+  // Leaving (closing the tab, reloading, switching apps on a phone): save now,
+  // not after the idle wait, or the last few seconds of changes would be lost.
+  useEffect(() => {
+    const flush = () => {
+      const p = unsaved.current;
+      if (!p) return;
+      window.clearTimeout(saveTimer.current);
+      try {
+        localStorage.setItem(PENDING_KEY, JSON.stringify(p));
+      } catch {
+        // Too big for this storage (a huge library): the IndexedDB save below still usually lands.
+      }
+      unsaved.current = null;
+      idbSet(STORAGE_KEY, p).catch(() => undefined);
+    };
+    const onHidden = () => document.visibilityState === 'hidden' && flush();
+    window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', onHidden);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      document.removeEventListener('visibilitychange', onHidden);
+    };
+  }, []);
 
   return (
     <Ctx.Provider

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { openApp, peak } from './helpers';
+import { openApp, peak, waitForSavedNight } from './helpers';
 
 test('the deck plays the loaded track, and pauses', async ({ page }) => {
   await openApp(page);
@@ -21,6 +21,7 @@ test('a loop size from the loop group lands on the next free pad', async ({ page
 
 test('Space plays the night even with no track on the deck', async ({ page }) => {
   await openApp(page);
+  await waitForSavedNight(page, 2);
   await page.reload();
   await expect(page.locator('.deck-empty')).toBeVisible();
   await page.click('.source-switch button:has-text("Night")');
@@ -28,4 +29,13 @@ test('Space plays the night even with no track on the deck', async ({ page }) =>
   await expect(page.locator('button.night-play')).toHaveText(/Pause night/);
   await page.keyboard.press('Space');
   await expect(page.locator('button.night-play')).toHaveText(/Play night/);
+});
+
+test('a change made just before the page is closed or reloaded is kept', async ({ page }) => {
+  await openApp(page);
+  await waitForSavedNight(page, 2);
+  // Straight after a change, before the idle-time save: leaving saves it anyway.
+  await page.click('tr:has-text("Opening Theme") button:has-text("+ Set")');
+  await page.reload();
+  await expect(page.locator('.tl-block')).toHaveCount(3);
 });
