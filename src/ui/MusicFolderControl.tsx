@@ -6,9 +6,10 @@ import { useMusicFolder, type AddMusicResult } from './musicFolder';
 import { useIsPhone } from './phone';
 import { activeSet, useStore } from './store';
 import { notify } from './toastBus';
+import { songsInZip } from './unzipMusic';
 
-/** Audio types for the picker. Listed by extension too, so phones offer every kind. */
-const AUDIO_ACCEPT = 'audio/*,.mp3,.m4a,.aac,.mp4,.wav,.aif,.aiff,.flac,.ogg,.opus';
+/** Audio types (and zips of them) for the picker. Listed by extension too, so phones offer every kind. */
+const AUDIO_ACCEPT = 'audio/*,.mp3,.m4a,.aac,.mp4,.wav,.aif,.aiff,.flac,.ogg,.opus,.zip,application/zip';
 
 /** What adding songs did, in one sentence or two. */
 export function describeAdded(res: AddMusicResult, tracks: Record<string, Track>, where: string): string {
@@ -37,8 +38,17 @@ export function describeAdded(res: AddMusicResult, tracks: Record<string, Track>
  * Add songs that stay on this device: the way to get music onto a phone, where
  * folders can't be linked. Picked from the Files app they can come from the
  * phone, iCloud or a drive plugged into it; each is matched to its track by name.
+ * Everything at once: pick a whole folder (`folder`), or a .zip of one.
  */
-export function AddMusicButton({ label = '♫ Add music', className = 'folder-btn' }: { label?: string; className?: string }) {
+export function AddMusicButton({
+  label = '♫ Add music',
+  className = 'folder-btn',
+  folder: pickFolder = false,
+}: {
+  label?: string;
+  className?: string;
+  folder?: boolean;
+}) {
   const folder = useMusicFolder();
   const { project } = useStore();
   const isPhone = useIsPhone();
@@ -47,17 +57,39 @@ export function AddMusicButton({ label = '♫ Add music', className = 'folder-bt
 
   const run = async (files: File[]) => {
     const songs = files.filter((f) => AUDIO_EXTENSIONS.test(f.name));
-    if (!songs.length) {
-      notify('Those weren’t audio files. Pick songs (MP3, M4A, WAV, AIFF, FLAC…).', 'error');
+    const zips = files.filter((f) => /\.zip$/i.test(f.name));
+    if (!songs.length && !zips.length) {
+      notify('No songs in that. Pick songs (MP3, M4A, WAV, AIFF, FLAC…), a folder of them, or a .zip.', 'error');
       return;
     }
-    setBusy(songs.length);
+    const total: AddMusicResult = { added: [], notKept: 0 };
+    const add = async (batch: File[]) => {
+      const res = await folder.addMusic(batch);
+      total.added.push(...res.added);
+      total.notKept += res.notKept;
+      setBusy(total.added.length);
+    };
+    setBusy(0);
     try {
-      const res = await folder.addMusic(songs);
-      notify(describeAdded(res, project.library.tracks, isPhone ? 'this phone' : 'this device'));
+      for (let i = 0; i < songs.length; i += 25) await add(songs.slice(i, i + 25));
+      for (const zip of zips) {
+        let batch: File[] = [];
+        for await (const song of songsInZip(zip)) {
+          batch.push(song);
+          if (batch.length === 10) {
+            await add(batch);
+            batch = [];
+          }
+        }
+        if (batch.length) await add(batch);
+      }
+    } catch (e) {
+      notify((e as Error).message, 'error');
     } finally {
       setBusy(null);
     }
+    if (total.added.length) notify(describeAdded(total, project.library.tracks, isPhone ? 'this phone' : 'this device'));
+    else if (zips.length) notify(`No songs found in ${zips[0].name}.`, 'error');
   };
 
   return (
@@ -66,16 +98,20 @@ export function AddMusicButton({ label = '♫ Add music', className = 'folder-bt
         className={`add-music ${className}`}
         onClick={() => input.current?.click()}
         disabled={busy !== null}
-        title="Pick songs: from this phone, iCloud or a drive plugged in. They stay in Setcraft on this device and are matched to your tracks by name, wherever your DJ software kept them."
+        title={
+          pickFolder
+            ? 'Pick a folder: every song in it (and its subfolders) is added at once.'
+            : 'Pick songs, or a .zip of a whole folder: from this phone, iCloud or a drive plugged in. They stay in Setcraft on this device and are matched to your tracks by name, wherever your DJ software kept them.'
+        }
       >
-        {busy !== null ? `Adding ${busy} song${busy === 1 ? '' : 's'}…` : label}
+        {busy !== null ? `Adding… ${busy} song${busy === 1 ? '' : 's'}` : label}
       </button>
       <input
         ref={input}
         type="file"
         multiple
         hidden
-        accept={AUDIO_ACCEPT}
+        {...(pickFolder ? ({ webkitdirectory: '' } as Record<string, string>) : { accept: AUDIO_ACCEPT })}
         onChange={(e) => {
           void run(Array.from(e.target.files ?? []));
           e.target.value = '';
@@ -200,7 +236,7 @@ export function MusicFolderPanel() {
       {isPhone && !folder.deviceCount && (
         <p className="muted small-text">
           Add your songs from the Files app (this phone, iCloud or a drive plugged in). They stay here and are matched
-          to your tracks by name.
+          to your tracks by name. To add everything at once, pick a whole folder, or a .zip of it.
         </p>
       )}
       {folder.status === 'needs-permission' && (
@@ -227,8 +263,9 @@ export function MusicFolderPanel() {
       <div className="row wrap">
         <AddMusicButton
           className="small"
-          label={isPhone ? (folder.deviceCount ? '♫ Add more' : '♫ Add music') : '♫ Add songs to this device'}
+          label={isPhone ? (folder.deviceCount ? '♫ Add more songs' : '♫ Add songs') : '♫ Add songs to this device'}
         />
+        {isPhone && <AddMusicButton className="small add-folder" folder label="▤ Add a folder" />}
         {folder.deviceCount > 0 && (
           <button
             className="small danger"

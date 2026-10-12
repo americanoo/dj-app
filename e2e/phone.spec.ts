@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
+import { zipSync } from 'fflate';
 import { instrument, peak } from './helpers';
 
 // An iPhone-sized touch screen (Safari's user agent, so the iPhone install help shows).
@@ -121,7 +122,7 @@ test('songs added on the phone stay, are found by name wherever the collection s
   await page.tap('.sources-toggle');
   await expect(page.locator('.sidebar.open')).toBeVisible();
   await expect(page.locator('.sidebar.open .side-item:has-text("Saturday")')).toBeVisible();
-  await page.locator('.folder-panel .add-music + input').setInputFiles(song);
+  await page.locator('.folder-panel .add-music:not(.add-folder) + input').setInputFiles(song);
   await expect(page.locator('.toast').filter({ hasText: '1 song added to this phone' })).toContainText('1 track in your library now has its audio');
   await expect(page.locator('.device-music')).toContainText('1 song on this phone');
   await page.tap('.sidebar.open .side-item:has-text("Saturday")');
@@ -155,4 +156,32 @@ test('songs added on the phone stay, are found by name wherever the collection s
   await page.locator('.topbar-right > input[type=file]').first().setInputFiles('src/core/__tests__/fixtures/traktor.nml');
   await expect(page.locator('tr:has-text("Warehouse")')).toHaveCount(1, { timeout: 15_000 });
   await playsWarehouse();
+});
+
+test('a whole folder of songs, or a zip of one, is added in one pick', async ({ page }) => {
+  await instrument(page);
+  await page.goto('/');
+  await page.locator('.topbar-right > input[type=file]').first().setInputFiles(['src/core/__tests__/fixtures/traktor.nml', 'e2e/fixtures/steady.xml']);
+  await expect(page.locator('tr:has-text("Groove")')).toHaveCount(1, { timeout: 15_000 });
+  const merge = page.locator('.modal button.primary');
+  if (await merge.count()) await merge.first().tap();
+  await page.tap('.sources-toggle');
+
+  // A zip made on the Mac: songs in subfolders, plus the junk macOS adds.
+  const wav = (p: string) => new Uint8Array(readFileSync(p));
+  const zip = zipSync(
+    {
+      'Music/Techno/Delta - Warehouse.wav': [wav('e2e/.audio/Music/Techno/Delta - Warehouse.wav'), { level: 0 }],
+      '__MACOSX/Music/Techno/._Delta - Warehouse.wav': new Uint8Array(10),
+      'Music/notes.txt': new TextEncoder().encode('hi'),
+    },
+    { level: 6 },
+  );
+  await page.locator('.folder-panel .add-music:not(.add-folder) + input').setInputFiles({ name: 'Music.zip', mimeType: 'application/zip', buffer: Buffer.from(zip) });
+  await expect(page.locator('.toast').filter({ hasText: '1 song added to this phone' })).toContainText('1 track in your library now has its audio');
+
+  // A whole folder: both songs, from their subfolders.
+  await page.locator('.folder-panel .add-folder + input').setInputFiles('e2e/.audio/Music');
+  await expect(page.locator('.toast').filter({ hasText: '2 songs added to this phone' })).toContainText('2 tracks in your library now have their audio');
+  await expect(page.locator('.device-music')).toContainText('2 songs on this phone');
 });

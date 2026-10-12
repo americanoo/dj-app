@@ -33,8 +33,12 @@ then opens full screen from its icon and keeps working without internet. (Instal
 a hosted copy; opening it over your Wi-Fi from your computer works, but can't install.)
 
 **Your music on the phone**: phones can't link a folder, so add the songs instead: **♫ Add music** (under **⋯**,
-in the Library's **☰** panel, or on a track that has no audio). Pick them in the Files app (select several at
-once) from the phone, iCloud Drive or a drive plugged into it. They're kept in Setcraft on the phone, so you add
+in the Library's **☰** panel, or on a track that has no audio). Pick them in the Files app from the phone,
+iCloud Drive or a drive plugged into it. To add everything at once: **▤ Add a folder** (in the ☰ panel) takes a
+whole folder with its subfolders, where the phone allows picking folders; or zip your music folder on the
+computer (right-click → Compress), send the .zip to the phone and pick that: every song inside is added, one at a
+time so memory stays low. In the Files picker itself, *Select* lets you tap several songs, and dragging two
+fingers down the list selects a run of them. They're kept in Setcraft on the phone, so you add
 them once, and each is matched to its track by name (see below), whatever path your DJ software had for it.
 **☰** in the Library also holds the playlists and *Clear library*.
 
