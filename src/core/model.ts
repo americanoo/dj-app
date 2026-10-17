@@ -115,6 +115,11 @@ export interface SetEntry {
   /** Keyframes for the transition into this track (fader, EQ, filter, echo, reverb on either deck). */
   automation?: TransitionAutomation;
   /**
+   * Leave on a loop: the track plays up to this saved loop, then rolls it
+   * `times` times in all while the next one comes in. Overrides the mix-out cue.
+   */
+  endLoop?: { cueId: string; times: number };
+  /**
    * When this track starts, in seconds from the start of the set. Entries from
    * older versions don't have it and are laid out one after another.
    */

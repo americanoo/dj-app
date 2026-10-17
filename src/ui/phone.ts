@@ -15,4 +15,4 @@ export function useIsPhone(): boolean {
 }
 
 /** The panels, one per tab on a phone. */
-export type PhoneTab = 'night' | 'mix' | 'deck' | 'library';
+export type PhoneTab = 'night' | 'sheet' | 'mix' | 'deck' | 'library';

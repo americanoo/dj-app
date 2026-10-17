@@ -23,6 +23,7 @@ npm run build    # static site in dist/ – host anywhere
 
 Setcraft works on phones too. On a phone-sized screen it shows **one panel at a time**, picked from tabs along
 the bottom: **Night** (the journey of the night, fitted to what's planned so the tracks are big enough to drag),
+**Sheet** (the same night as typed times, see below),
 **Mix** (the transition), **Deck** (one track: waveform, pads, loops) and **Library**. The player sits just above
 the tabs, Export and the rest are under **⋯**, and opening a track from the library or the mix takes you to the
 deck. Switching tabs never stops the music.
@@ -56,6 +57,36 @@ player, and export. Most steps ask you to do the thing (add two tracks to the se
 transition, set a cue, press play) and move on by themselves once you have; a step you've already done is just
 read, and **Skip** / **Next** moves on anyway. **Esc** ends it. Replay it any time from **⋯ → Tutorial**. The
 demo tracks are also on offer on the empty library screen, and show a *demo* badge in the library.
+
+## The Sheet: the night as numbers
+
+For DJs who already know their marks, and for phones: the **Sheet** shows the night as a list of times you
+type, with no waveforms. On a phone it's the **☷ Sheet** tab; on a computer, **☷ Sheet** in the journey's header
+(and **◐ Timeline** to go back).
+
+Each track shows:
+
+- **Starts / Ends** in the night, and **From / Until** in the song: where it comes in and where it's mixed
+  out. Typing *From* or *Until* sets a *Mix in* / *Mix out* memory cue on the track, so it's exported like any
+  other cue. Typing the night's *Ends* moves the *Until* to match. Leave *From* / *Until* empty to play from the
+  start / to the end.
+- **Leave on loop**: pick one of the track's saved loops and how many times round. The track plays up to the
+  loop, then rolls it (sample-exact) while the next one comes in; its end follows from the loop.
+- **Cues & loops**: every hot cue, memory cue and loop with its name and times, editable, deletable, and
+  **+ Cue** (next free pad) / **+ Loop** (4 beats) to add one.
+
+Between two tracks, the transition:
+
+- **comes in at** a time in the outgoing song ("Groove comes in at 2:08 of Warehouse"), with how long they play
+  together or the gap between them.
+- **Blend** (auto, bass swap, crossfade, straight, echo out) and **Sync**.
+- **FX on/off**: *Echo out*, *Reverb out* and *Filter out* rise on the outgoing track over its last 4 bars;
+  *Filter in* starts the incoming track muffled and opens it up. They're keyframes, so the Mix view shows (and
+  can fine-tune) them.
+- **▶ Hear** plays from just before the transition.
+
+Times are minutes:seconds: `2:08`, `2:08.5`, `2 08`, or digits only on a phone's number pad, where the last two
+are seconds (`208` is 2:08, `45` is 0:45). Something unreadable goes back to what it was.
 
 ## One-page workspace
 

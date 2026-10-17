@@ -2,6 +2,7 @@ import type { PhoneTab } from './phone';
 
 const TABS: { id: PhoneTab; label: string; icon: string; hint: string }[] = [
   { id: 'night', label: 'Night', icon: '◐', hint: 'The journey of the night' },
+  { id: 'sheet', label: 'Sheet', icon: '☷', hint: 'The night as times: starts, ends, cues, loops, transitions and FX' },
   { id: 'mix', label: 'Mix', icon: '⇄', hint: 'The transition between two tracks' },
   { id: 'deck', label: 'Deck', icon: '◉', hint: 'One track: waveform, cues and loops' },
   { id: 'library', label: 'Library', icon: '≡', hint: 'Your tracks' },

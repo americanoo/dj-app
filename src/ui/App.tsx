@@ -19,6 +19,7 @@ import { useVersions } from './versions';
 import { defaultVersionName, VersionsPanel } from './VersionsPanel';
 import { StoryPanel } from './StoryPanel';
 import { Timeline } from './Timeline';
+import { SetSheet } from './SetSheet';
 import { TransitionView } from './TransitionView';
 import { MenuButton } from './Menu';
 import { useMusicFolder } from './musicFolder';
@@ -58,6 +59,22 @@ export function App() {
   const install = useInstall();
   const [installHelp, setInstallHelp] = useState(false);
   const [tab, setTab] = useState<PhoneTab>(() => (Object.keys(project.library.tracks).length ? 'night' : 'library'));
+  // On a computer the night's pane shows the timeline or the Sheet (the night as typed times); on a phone the Sheet has its own tab.
+  const [nightView, setNightViewState] = useState<'timeline' | 'sheet'>(() => {
+    try {
+      return localStorage.getItem('setcraft-night-view') === 'sheet' ? 'sheet' : 'timeline';
+    } catch {
+      return 'timeline';
+    }
+  });
+  const setNightView = (v: 'timeline' | 'sheet') => {
+    setNightViewState(v);
+    try {
+      localStorage.setItem('setcraft-night-view', v);
+    } catch {
+      // private mode
+    }
+  };
   // The player bar and pop-ups live outside the app's element: the phone styles hang off <html>.
   useEffect(() => {
     document.documentElement.classList.toggle('phone', isPhone);
@@ -463,8 +480,22 @@ export function App() {
         </section>
         <Splitter value={deckH} min={200} max={900} onChange={(deck) => setLayout({ transition: transitionH, deck, timeline: timelineH })} />
         <section className="pane timeline-host" style={{ height: timelineH }}>
-          <Timeline selectedTrackId={loadedTrackId} onSelectTrack={setLoadedTrackId} onOpenStory={() => setStoryOpen(true)} />
+          {!isPhone && nightView === 'sheet' ? (
+            <SetSheet onTimeline={() => setNightView('timeline')} />
+          ) : (
+            <Timeline
+              selectedTrackId={loadedTrackId}
+              onSelectTrack={setLoadedTrackId}
+              onOpenStory={() => setStoryOpen(true)}
+              onSheet={() => (isPhone ? setTab('sheet') : setNightView('sheet'))}
+            />
+          )}
         </section>
+        {isPhone && (
+          <section className="pane sheet-host">
+            <SetSheet />
+          </section>
+        )}
         <Splitter value={timelineH} min={150} max={700} onChange={(timeline) => setLayout({ transition: transitionH, deck: deckH, timeline })} />
         <section className="pane library-pane">
           <LibraryView

@@ -185,3 +185,50 @@ test('a whole folder of songs, or a zip of one, is added in one pick', async ({ 
   await expect(page.locator('.toast').filter({ hasText: '2 songs added to this phone' })).toContainText('2 tracks in your library now have their audio');
   await expect(page.locator('.device-music')).toContainText('2 songs on this phone');
 });
+
+test('the Sheet: the night as typed times, with loop endings and FX switches', async ({ page }) => {
+  await demoNight(page);
+  await page.tap('.phone-tabs button:has-text("Sheet")');
+  const first = page.locator('.sheet-track').nth(0);
+  const second = page.locator('.sheet-track').nth(1);
+  const mix = page.locator('.sheet-mix').first();
+  const type = async (field: ReturnType<Page['locator']>, text: string) => {
+    await field.fill(text);
+    await field.press('Enter');
+  };
+
+  // Night Drive plays until 1:30 of the song (typed on a number pad as 130).
+  await type(first.getByLabel('Until (song)'), '130');
+  await expect(first.getByLabel('Ends (night)')).toHaveValue('1:30');
+  // Warehouse Lights comes in at 1:14 of Night Drive: 16 seconds together.
+  await type(mix.locator('input.time-field'), '1:14');
+  await expect(second.getByLabel('Starts (night)')).toHaveValue('1:14');
+  await expect(mix).toContainText('0:16 together');
+  // Something unreadable goes back to what it was.
+  await type(second.getByLabel('Starts (night)'), '1:99');
+  await expect(second.getByLabel('Starts (night)')).toHaveValue('1:14');
+
+  // FX switches stay switched.
+  await mix.locator('button:has-text("Echo out")').tap();
+  await expect(mix.locator('button:has-text("Echo out")')).toHaveAttribute('aria-pressed', 'true');
+  await mix.locator('button:has-text("Filter in")').tap();
+  await page.tap('.phone-tabs button:has-text("Night")');
+  await page.tap('.phone-tabs button:has-text("Sheet")');
+  await expect(mix.locator('button:has-text("Echo out")')).toHaveAttribute('aria-pressed', 'true');
+  await expect(mix.locator('button:has-text("Filter in")')).toHaveAttribute('aria-pressed', 'true');
+  await expect(mix.locator('button:has-text("Reverb out")')).toHaveAttribute('aria-pressed', 'false');
+
+  // A loop at 1:00, and Night Drive leaves on it, twice round: it ends at the loop's end plus one more time round.
+  await first.locator('.sheet-cues summary').tap();
+  await first.locator('button:has-text("+ Loop")').tap();
+  await type(first.locator('.sheet-cue input.time-field').first(), '100');
+  await first.locator('.sheet-loopout select').selectOption({ index: 1 });
+  await first.getByLabel('Times round the loop').fill('2');
+  // 4 beats at 124 BPM = 1.94 s: 1:00 + 1.94 + 1.94 = 1:03.9
+  await expect(first.getByLabel('Ends (night)')).toHaveValue('1:03.9');
+  await expect(first.getByLabel('Until (song)')).toBeDisabled();
+
+  // Hear the transition: the night plays.
+  await mix.locator('button:has-text("Hear")').tap();
+  expect(await peak(page, 600)).toBeGreaterThan(0.02);
+});

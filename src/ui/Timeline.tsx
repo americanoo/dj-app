@@ -40,9 +40,11 @@ interface Props {
   selectedTrackId: string | null;
   onSelectTrack: (trackId: string) => void;
   onOpenStory: () => void;
+  /** Switch to the Sheet (the night as typed times). */
+  onSheet?: () => void;
 }
 
-export function Timeline({ selectedTrackId, onSelectTrack, onOpenStory }: Props) {
+export function Timeline({ selectedTrackId, onSelectTrack, onOpenStory, onSheet }: Props) {
   const { project, dispatch } = useStore();
   const set = activeSet(project);
   const items = useMemo(() => buildTimeline(set, project.library), [set, project.library]);
@@ -257,6 +259,11 @@ export function Timeline({ selectedTrackId, onSelectTrack, onOpenStory }: Props)
         <button className="small" onClick={onOpenStory} title="Story, venue, start time and chapters">
           Story &amp; chapters
         </button>
+        {onSheet && (
+          <button className="small sheet-btn" onClick={onSheet} title="The night as times you type: starts, ends, cues, loops, transitions and FX">
+            ☷ Sheet
+          </button>
+        )}
         <span className="grow" />
         {!items.length && <span className="muted small-text">Drag tracks from the library onto the timeline</span>}
         <div className="zoom-controls" title="Zoom the night (or ⌘/Ctrl + scroll)">

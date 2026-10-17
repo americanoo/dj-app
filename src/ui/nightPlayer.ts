@@ -40,7 +40,8 @@ interface Target {
   dflt: number;
 }
 
-const sigOf = (s: NightSlot) => `${s.trackId}|${s.startsAt}|${s.playFor}|${s.mixIn}|${s.echoAt}|${JSON.stringify(s.curves.rate)}`;
+const sigOf = (s: NightSlot) =>
+  `${s.trackId}|${s.startsAt}|${s.playFor}|${s.mixIn}|${s.echoAt}|${s.loop?.start}-${s.loop?.end}|${JSON.stringify(s.curves.rate)}`;
 const autoSigOf = (s: NightSlot) => JSON.stringify({ ...s.curves, rate: undefined });
 
 /** EQ corners, like a DJ mixer's three bands. */
@@ -340,6 +341,12 @@ export class NightPlayer {
     const ctx = this.ctx;
     const src = ctx.createBufferSource();
     src.buffer = buf;
+    if (s.loop) {
+      // Leaving on a loop: past its end the track goes round it again, sample-exact.
+      src.loop = true;
+      src.loopStart = s.loop.start;
+      src.loopEnd = s.loop.end;
+    }
     const band = (type: BiquadFilterType, hz: number, q = 0.8) => {
       const f = ctx.createBiquadFilter();
       f.type = type;

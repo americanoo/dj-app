@@ -39,9 +39,22 @@ export interface TimelineItem {
   gap: number;
 }
 
+/** The loop a track leaves on (see SetEntry.endLoop), in file seconds, if it still exists. */
+export function endLoopOf(entry: SetEntry, track: Track | undefined): { start: number; end: number; times: number } | undefined {
+  if (!entry.endLoop || !track) return undefined;
+  const c = track.cues.find((x) => x.id === entry.endLoop!.cueId);
+  if (!c || c.kind !== 'loop' || c.end === undefined || c.end <= c.start) return undefined;
+  return { start: c.start, end: c.end, times: Math.max(1, Math.round(entry.endLoop.times)) };
+}
+
 export function playLength(entry: SetEntry, track: Track | undefined): { seconds: number; estimated: boolean } {
   if (!track) return { seconds: DEFAULT_TRACK_SECONDS, estimated: true };
   const mixIn = track.cues.find((c) => c.id === entry.mixInCueId)?.start;
+  const loop = endLoopOf(entry, track);
+  if (loop) {
+    // Up to the loop's end once, then round again (times - 1) more.
+    return { seconds: Math.max(0, loop.end - (mixIn ?? 0) + (loop.times - 1) * (loop.end - loop.start)), estimated: false };
+  }
   const mixOut = track.cues.find((c) => c.id === entry.mixOutCueId)?.start;
   const end = mixOut ?? track.duration;
   if (end === undefined) return { seconds: DEFAULT_TRACK_SECONDS, estimated: true };
@@ -246,6 +259,8 @@ export interface NightSlot {
   curves: Curves;
   /** Echo out: when the track cuts, leaving its echoes. */
   echoAt?: number;
+  /** Leaving on a loop: once the track reaches `end` (file seconds) it repeats from `start`. */
+  loop?: { start: number; end: number };
 }
 
 /** What plays when: every track of the night, overlapping ones together, with its mix automation. */
@@ -263,6 +278,7 @@ export function nightSlots(items: TimelineItem[]): NightSlot[] {
       blend: it.entry.blend,
       sync: it.entry.sync,
       automation: it.entry.automation,
+      loop: loopRegion(endLoopOf(it.entry, it.track)),
       curves: emptyCurves(),
     }));
   const parts = new Map<string, Curves[]>();
@@ -276,9 +292,14 @@ export function nightSlots(items: TimelineItem[]): NightSlot[] {
   return slots;
 }
 
+const loopRegion = (l: { start: number; end: number } | undefined) => (l ? { start: l.start, end: l.end } : undefined);
+
 /** Where a slot's track is in its file at night time `t`, following its tempo automation. */
-export function slotPos(s: NightSlot, t: number): number {
-  return s.mixIn + integrate(s.curves.rate, s.startsAt, t, 1);
+export function slotPos(s: Pick<NightSlot, 'mixIn' | 'startsAt' | 'curves' | 'loop'>, t: number): number {
+  const p = s.mixIn + integrate(s.curves.rate, s.startsAt, t, 1);
+  if (!s.loop || p < s.loop.end) return p;
+  const len = s.loop.end - s.loop.start;
+  return s.loop.start + ((p - s.loop.start) % len);
 }
 
 /** A slot's playback rate at night time `t` (1 = as recorded). */
