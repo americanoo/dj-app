@@ -220,6 +220,18 @@ export function MusicFolderPanel() {
   return (
     <div className="folder-panel">
       <h3>{isPhone ? 'Music' : 'Music folder'}</h3>
+      {folder.helper &&
+        (folder.helper.paired ? (
+          <p className="small-text helper-status ok">
+            <span className="status-dot ok" /> Playing from <b>{folder.helper.name}</b>
+            <span className="muted"> · Setcraft helper: your tracks come straight from its drives</span>
+          </p>
+        ) : (
+          <p className="small-text helper-status">
+            <span className="status-dot" /> Setcraft helper on <b>{folder.helper.name}</b>, but this device isn’t paired yet.
+            Open the phone link the helper shows in Terminal (the one ending in <code>?pair=…</code>).
+          </p>
+        ))}
       {folder.status === 'ready' && (
         <p className="small-text">
           <b>{folder.folderName}</b>

@@ -27,6 +27,8 @@ self.addEventListener('fetch', (event) => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
+  // Music from the Setcraft helper is never cached here (it's big, and always fresh from the drive).
+  if (url.pathname.startsWith('/helper/')) return;
 
   if (req.mode === 'navigate') {
     event.respondWith(

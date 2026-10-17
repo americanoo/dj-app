@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { clear, createStore, del, get, keys, set as idbSet } from 'idb-keyval';
 import { buildIndex, findTrackFile, type FileIndex, type TrackRef } from '../core/pathmatch';
 import { AUDIO_EXTENSIONS } from './audio';
+import { detectHelper, helperFile, type HelperInfo } from './helper';
 
 /**
  * A linked music folder lets Setcraft find each track's audio by itself.
@@ -15,6 +16,10 @@ import { AUDIO_EXTENSIONS } from './audio';
  *   kept on this device (in the browser's storage), so they're there on every
  *   visit with nothing to link. Picked from the Files app, they can come from
  *   iCloud, the phone itself or a drive plugged into it.
+ *
+ * - The Setcraft helper on the computer with the music (helper/): when it's
+ *   serving the page, every track's audio comes straight from that computer's
+ *   drives, from where the DJ software saved it. Nothing to link or add.
  *
  * Only a list of file paths is kept in memory; audio is read when a track needs it.
  * Tracks are matched to files by name, loosely (see core/pathmatch), never by
@@ -66,7 +71,9 @@ interface MusicFolderStore {
   deviceCount: number;
   addMusic: (files: File[]) => Promise<AddMusicResult>;
   removeDeviceMusic: () => Promise<void>;
-  /** A linked folder or songs on this device: somewhere tracks' audio can come from. */
+  /** The Setcraft helper serving this page, if it is (see helper.ts). */
+  helper: HelperInfo | null;
+  /** A linked folder, songs on this device or the helper: somewhere tracks' audio can come from. */
   hasMusic: boolean;
   /** Changes whenever the music available changes, so missing tracks are looked for again. */
   revision: number;
@@ -108,6 +115,15 @@ export function MusicFolderProvider({ children }: { children: ReactNode }) {
   const deviceFiles = useRef<Map<string, File>>(new Map());
   const [revision, setRevision] = useState(0);
   const bump = useCallback(() => setRevision((r) => r + 1), []);
+  const [helper, setHelper] = useState<HelperInfo | null>(null);
+  const helperRef = useRef<HelperInfo | null>(null);
+  useEffect(() => {
+    void detectHelper().then((h) => {
+      helperRef.current = h;
+      setHelper(h);
+      if (h?.paired) bump();
+    });
+  }, [bump]);
 
   // The songs kept on this device: only their names are read now.
   useEffect(() => {
@@ -244,12 +260,12 @@ export function MusicFolderProvider({ children }: { children: ReactNode }) {
     const entry = rel ? files.current.get(rel) : undefined;
     if (entry) return entry instanceof File ? entry : entry.getFile();
     const name = findTrackFile(track, deviceIndex.current);
-    if (!name) return undefined;
-    const here = deviceFiles.current.get(name);
+    const here = name ? deviceFiles.current.get(name) : undefined;
     if (here) return here;
-    const kept = await get<Blob>(name, deviceStore).catch(() => undefined);
-    if (!kept) return undefined;
-    return kept instanceof File ? kept : new File([kept], name, { type: kept.type });
+    const kept = name ? await get<Blob>(name, deviceStore).catch(() => undefined) : undefined;
+    if (kept) return kept instanceof File ? kept : new File([kept], name!, { type: kept.type });
+    if (helperRef.current?.paired) return helperFile(track);
+    return undefined;
   }, []);
 
   return (
@@ -267,7 +283,8 @@ export function MusicFolderProvider({ children }: { children: ReactNode }) {
         deviceCount,
         addMusic,
         removeDeviceMusic,
-        hasMusic: status === 'ready' || deviceCount > 0,
+        helper,
+        hasMusic: status === 'ready' || deviceCount > 0 || !!helper?.paired,
         revision,
         findFile,
       }}
