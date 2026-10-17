@@ -6,7 +6,7 @@
  * All positions are in seconds from the start of the audio file.
  */
 
-import type { BlendStyle, TransitionAutomation } from './mixplan';
+import type { BlendStyle, TempoMode, TransitionAutomation } from './mixplan';
 
 export type SourceFormat = 'rekordbox' | 'traktor' | 'serato' | 'djay' | 'm3u' | 'csv' | 'manual';
 
@@ -110,8 +110,12 @@ export interface SetEntry {
   mixOutCueId?: string;
   /** How this track is mixed in from the previous one (default: a bass swap when they overlap). */
   blend?: BlendStyle;
-  /** Ride the previous track's tempo into this one's so the beats lock (default on). */
+  /** Ride the previous track's tempo into this one's so the beats lock (default on). Superseded by `tempo`. */
   sync?: boolean;
+  /** How the tempos meet in the transition into this track (default: ride, or free when `sync` is off). */
+  tempo?: TempoMode;
+  /** Key matching: transpose this track to mix smoothly with the key the previous one plays in. */
+  matchKey?: boolean;
   /** Keyframes for the transition into this track (fader, EQ, filter, echo, reverb on either deck). */
   automation?: TransitionAutomation;
   /**

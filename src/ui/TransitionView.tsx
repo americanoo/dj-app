@@ -12,14 +12,18 @@ import {
   outgoingCurves,
   seedKeyframes,
   snapIncoming,
+  TEMPO_MODES,
+  tempoMode,
   valueAt,
   type AutoParam,
+  type TempoMode,
   type BlendStyle,
   type Keyframe,
   type TransitionAutomation,
   type TransitionPlan,
 } from '../core/mixplan';
-import { buildTimeline, describeTransition, nightSlots, slotPos, transitionsOf, type NightSlot } from '../core/setplan';
+import { buildTimeline, describeTransition, nightSlots, slotKey, slotPos, transitionsOf, type NightSlot } from '../core/setplan';
+import { KeyLockButton } from './NightBar';
 import { formatTime } from '../core/time';
 import type { WaveformData } from '../core/waveform';
 import { useFitZoom, zoomOf } from './fit';
@@ -151,7 +155,10 @@ export function TransitionView({ selectedTrackId, onSelectTrack }: Props) {
     );
   }
 
-  const rel = keyRelation(ta?.key, tb?.key);
+  // Keys as they play: after any key matching.
+  const keyA = slotKey(a);
+  const keyB = slotKey(b);
+  const rel = keyRelation(keyA, keyB);
   const blend = info.overlap > 0.05;
   const gap = info.overlap < -0.05;
   const lands = info.landsOn;
@@ -169,7 +176,7 @@ export function TransitionView({ selectedTrackId, onSelectTrack }: Props) {
       patch: { automation: { ...auto, [deck]: { ...auto?.[deck], [param]: keys?.length ? keys : undefined } } },
     });
   const hasKeys = !!auto && Object.values({ ...auto.a, ...auto.b }).some((l) => l?.length);
-  const syncOn = b.sync !== false;
+  const tempo = tempoMode(b);
   const tempoChip = tempoText(plan, ta, tb);
 
   return (
@@ -217,14 +224,28 @@ export function TransitionView({ selectedTrackId, onSelectTrack }: Props) {
           </select>
         </label>
         <div className="seg" role="group" aria-label="Mix">
-        <button
-          className={`small tv-sync ${syncOn ? 'on' : ''}`}
-          onClick={() => dispatch({ type: 'updateEntry', id: b.id, patch: { sync: !syncOn } })}
-          title="Sync: the outgoing track rides into the incoming tempo over the 8 bars before it comes in, so the beats lock (it changes pitch a little, like a turntable)"
-          aria-pressed={syncOn}
+        <select
+          className="tv-tempo"
+          aria-label="Tempo"
+          value={tempo}
+          onChange={(e) => dispatch({ type: 'updateEntry', id: b.id, patch: { tempo: e.target.value as TempoMode, sync: undefined } })}
+          title={TEMPO_MODES.find((m) => m.id === tempo)?.hint}
         >
-          Sync
+          {TEMPO_MODES.map((m) => (
+            <option key={m.id} value={m.id}>
+              BPM: {m.label}
+            </option>
+          ))}
+        </select>
+        <button
+          className="small tv-matchkey"
+          aria-pressed={!!b.matchKey}
+          onClick={() => dispatch({ type: 'updateEntry', id: b.id, patch: { matchKey: !b.matchKey } })}
+          title="Match key: transpose the incoming track so it mixes smoothly with the key the outgoing one plays in (the smallest shift that does)"
+        >
+          Match key
         </button>
+        <KeyLockButton />
         <button
           className={`small tv-keys ${editParam ? 'on' : ''}`}
           onClick={() => setEditParam(editParam ? null : 'level')}
@@ -273,7 +294,8 @@ export function TransitionView({ selectedTrackId, onSelectTrack }: Props) {
             </span>
           )}
           <span className={`chip ${rel === 'clash' ? 'bad' : rel === 'unknown' ? '' : rel === 'boost' ? 'warn' : 'ok'}`}>
-            {ta?.key ? toCamelot(ta.key) : '?'}→{tb?.key ? toCamelot(tb.key) : '?'} {RELATION_TEXT[rel]}
+            {keyA ? toCamelot(keyA) : '?'}→{keyB ? toCamelot(keyB) : '?'} {RELATION_TEXT[rel]}
+            {b.semitones ? ` · ${b.semitones > 0 ? '+' : ''}${b.semitones} st` : ''}
           </span>
           {lands && (
             <span
@@ -453,7 +475,7 @@ function TransitionCanvas(p: CanvasProps) {
   const snapIn = useCallback((t: number, free: boolean) => {
     const { a, b } = props.current;
     if (free) return Math.max(0, Math.round(t * 1000) / 1000);
-    return snapIncoming(a, b, t, b.sync !== false);
+    return snapIncoming(a, b, t, tempoMode(b));
   }, []);
 
   /** The pointer in the canvas's own (CSS pixel) coordinates, whatever the panel's zoom. */
@@ -786,6 +808,14 @@ function drawKeys(ctx: CanvasRenderingContext2D, w: number, rowH: number, xOf: (
 function tempoText(plan: TransitionPlan, ta?: Track, tb?: Track): { text: string; tone: string; title: string } | undefined {
   const from = ta?.bpm?.toFixed(0);
   const to = tb?.bpm?.toFixed(0);
+  if (plan.match) {
+    const pct = Math.round((plan.match.rate - 1) * 1000) / 10;
+    return {
+      text: `Matched ${to}→${from} (${pct > 0 ? '+' : ''}${pct}%)`,
+      tone: Math.abs(pct) > 8 ? 'warn' : 'ok',
+      title: `The incoming track comes in at the playing tempo (${from} BPM), then settles back to its own ${to} over 8 bars after the outgoing one has gone.`,
+    };
+  }
   if (plan.sync) {
     const pct = Math.round((plan.sync.rate - 1) * 1000) / 10;
     return {
@@ -793,7 +823,7 @@ function tempoText(plan: TransitionPlan, ta?: Track, tb?: Track): { text: string
       tone: Math.abs(pct) > 8 ? 'warn' : 'ok',
       title: `The outgoing track rides from ${from} into ${to} BPM over the 8 bars before the incoming one, so the beats lock. ${
         Math.abs(pct) > 8 ? 'That much pitch change is noticeable; ' : ''
-      }Turn Sync off to hear them at their own tempos.`,
+      }Set BPM to Free to hear them at their own tempos.`,
     };
   }
   switch (plan.noSync) {
@@ -803,7 +833,7 @@ function tempoText(plan: TransitionPlan, ta?: Track, tb?: Track): { text: string
       return {
         text: `Not synced ${from}→${to}`,
         tone: from && to && from !== to ? 'warn' : '',
-        title: 'Sync is off: both tracks play at their own tempo, so the beats drift apart during the blend.',
+        title: 'BPM is set to Free: both tracks play at their own tempo, so the beats drift apart during the blend.',
       };
     case 'too-far':
       return {

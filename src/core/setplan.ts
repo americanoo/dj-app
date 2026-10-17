@@ -1,6 +1,6 @@
 /** Narrative analysis of a set: timeline, transition checks and a printable plan. */
 import type { Cue, Library, SetEntry, SetPlan, Track } from './model';
-import { keyRelation, toCamelot, type KeyRelation } from './keys';
+import { keyMatchShift, keyRelation, toCamelot, transposeKey, type KeyRelation } from './keys';
 import { effectiveBpmDelta } from './tempo';
 import { formatTime } from './time';
 import {
@@ -17,6 +17,7 @@ import {
   valueAt,
   type BlendStyle,
   type Curves,
+  type TempoMode,
   type TransitionAutomation,
   type TransitionPlan,
 } from './mixplan';
@@ -253,6 +254,11 @@ export interface NightSlot {
   /** How it's mixed in from the previous track (as chosen on its entry). */
   blend?: BlendStyle;
   sync?: boolean;
+  tempo?: TempoMode;
+  /** Transposed to mix smoothly with the key the previous track plays in (see `semitones`). */
+  matchKey?: boolean;
+  /** The track's key as written (before any transposition). */
+  key?: string;
   /** Keyframes of the transition into this track. */
   automation?: TransitionAutomation;
   /** Tempo, fader, EQ, filter and FX-send automation across both of its transitions. */
@@ -261,6 +267,8 @@ export interface NightSlot {
   echoAt?: number;
   /** Leaving on a loop: once the track reaches `end` (file seconds) it repeats from `start`. */
   loop?: { start: number; end: number };
+  /** Transposed by this many semitones for the whole of its play (key matching). */
+  semitones?: number;
 }
 
 /** What plays when: every track of the night, overlapping ones together, with its mix automation. */
@@ -277,6 +285,9 @@ export function nightSlots(items: TimelineItem[]): NightSlot[] {
       gridStart: it.track!.gridStart,
       blend: it.entry.blend,
       sync: it.entry.sync,
+      tempo: it.entry.tempo,
+      matchKey: it.entry.matchKey,
+      key: it.track!.key,
       automation: it.entry.automation,
       loop: loopRegion(endLoopOf(it.entry, it.track)),
       curves: emptyCurves(),
@@ -289,7 +300,19 @@ export function nightSlots(items: TimelineItem[]): NightSlot[] {
     if (plan.echoAt !== undefined) a.echoAt = plan.echoAt;
   }
   for (const s of slots) s.curves = mergeCurves(...(parts.get(s.id) ?? []));
+  // Key matching, in night order: each matched track to the key the one before it actually plays in.
+  let prevKey: string | undefined;
+  for (const s of [...slots].sort((x, y) => x.startsAt - y.startsAt)) {
+    const shift = s.matchKey && prevKey ? (keyMatchShift(s.key, prevKey) ?? 0) : 0;
+    if (shift) s.semitones = shift;
+    prevKey = shift ? transposeKey(s.key, shift) : s.key;
+  }
   return slots;
+}
+
+/** The key a slot plays in, after any key matching. */
+export function slotKey(s: Pick<NightSlot, 'key' | 'semitones'>): string | undefined {
+  return s.semitones ? transposeKey(s.key, s.semitones) : s.key;
 }
 
 const loopRegion = (l: { start: number; end: number } | undefined) => (l ? { start: l.start, end: l.end } : undefined);
@@ -319,7 +342,7 @@ export function transitionsOf<S extends Omit<NightSlot, 'curves'>>(slots: S[]): 
   for (let i = 1; i < sorted.length; i++) {
     const a = sorted[i - 1];
     const b = sorted[i];
-    if (b.trackId !== a.trackId) out.push({ a, b, plan: planTransition(a, b, { blend: b.blend, sync: b.sync }) });
+    if (b.trackId !== a.trackId) out.push({ a, b, plan: planTransition(a, b, { blend: b.blend, sync: b.sync, tempo: b.tempo }) });
   }
   return out;
 }
@@ -348,9 +371,10 @@ export function describeTransition(a: Omit<NightSlot, 'curves'>, b: Omit<NightSl
     if (overlap > 0) info.overlapBars = Math.round((overlap / beat / 4) * 10) / 10;
     // B's start, as a spot in A's file (after A's tempo ride), counted in A's beats from its
     // grid; with the tempos synced, relative to where B's mix-in sits on its own beat.
-    const plan = planTransition(a, b, { blend: b.blend, sync: b.sync });
+    const plan = planTransition(a, b, { blend: b.blend, sync: b.sync, tempo: b.tempo });
     const posInA = a.mixIn + (inAt - a.startsAt) + rideOffset(plan, inAt);
-    const phase = plan.sync ? incomingPhase(a, b, plan.sync.rate) : 0;
+    const rate = plan.sync?.rate ?? (plan.match ? 1 / plan.match.rate : undefined);
+    const phase = rate !== undefined ? incomingPhase(a, b, rate) : 0;
     const beats = (posInA - (a.gridStart ?? 0)) / beat - phase;
     const whole = Math.round(beats);
     info.landsOn = {
@@ -394,14 +418,15 @@ export function planCues(set: SetPlan, lib: Library): Record<string, Cue[]> {
     const tb = lib.tracks[b.trackId];
     if (!ta || !tb) continue;
     const style = BLEND_STYLES.find((s) => s.id === plan.style)?.label.toLowerCase() ?? '';
-    const ride = plan.sync && tb.bpm ? `, ride to ${Math.round(tb.bpm)}` : '';
+    const ride = plan.sync && tb.bpm ? `, ride to ${Math.round(tb.bpm)}` : plan.match && ta.bpm ? `, at ${Math.round(ta.bpm)}` : '';
     const aSlot = slots.find((s) => s.id === a.id)!;
+    const bSlot = slots.find((s) => s.id === b.id)!;
     if (plan.inAt >= a.startsAt && plan.inAt < a.startsAt + a.playFor) {
       add(a.trackId, slotPos(aSlot, plan.inAt), `▸ ${tb.title} in (${style}${ride})`, PLAN_IN_COLOR);
     }
     add(a.trackId, slotPos(aSlot, plan.outAt), `◂ out → ${tb.title}`, PLAN_OUT_COLOR);
     add(b.trackId, b.mixIn, `◂ in from ${ta.title}`, PLAN_IN_COLOR);
-    if (plan.swapAt !== undefined) add(b.trackId, b.mixIn + (plan.swapAt - plan.inAt), '⇅ bass swap', PLAN_SWAP_COLOR);
+    if (plan.swapAt !== undefined) add(b.trackId, slotPos(bSlot, plan.swapAt), '⇅ bass swap', PLAN_SWAP_COLOR);
   }
   return out;
 }

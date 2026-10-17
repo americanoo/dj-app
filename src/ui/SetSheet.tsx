@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { keyColor, toCamelot } from '../core/keys';
-import { BLEND_STYLES, type BlendStyle } from '../core/mixplan';
+import { BLEND_STYLES, TEMPO_MODES, tempoMode, type BlendStyle, type TempoMode } from '../core/mixplan';
 import { SLOT_LETTERS, type Cue, type SetEntry } from '../core/model';
-import { buildTimeline, endLoopOf, itemMixIn, type TimelineItem } from '../core/setplan';
+import { buildTimeline, endLoopOf, itemMixIn, nightSlots, slotKey, type TimelineItem } from '../core/setplan';
 import { SHEET_FX, formatShort, fxIsOn, newCue, parseSheetTime, setMixPoint, withFx } from '../core/sheet';
 import { useNight } from './night';
+import { KeyLockButton } from './NightBar';
 import { activeSet, useStore } from './store';
 
 /**
@@ -19,6 +20,12 @@ export function SetSheet({ onTimeline }: { onTimeline?: () => void }) {
   const set = activeSet(project);
   const items = useMemo(() => buildTimeline(set, project.library), [set, project.library]);
   const end = items.reduce((e, it) => Math.max(e, it.startsAt + it.playFor), 0);
+  // Keys as they'll play, after any key matching.
+  const playKeys = useMemo(() => {
+    const m = new Map<string, { key?: string; semitones: number }>();
+    for (const s of nightSlots(items)) m.set(s.id, { key: slotKey(s), semitones: s.semitones ?? 0 });
+    return m;
+  }, [items]);
 
   const setCues = (trackId: string, cues: Cue[]) => dispatch({ type: 'setCues', trackId, cues });
   const updateEntry = (id: string, patch: Partial<SetEntry>) => dispatch({ type: 'updateEntry', id, patch });
@@ -37,6 +44,7 @@ export function SetSheet({ onTimeline }: { onTimeline?: () => void }) {
           {items.length} tracks · {formatShort(end) || '0:00'}
         </span>
         <span className="grow" />
+        <KeyLockButton />
         {onTimeline && (
           <button className="small" onClick={onTimeline} title="Back to the timeline with waveforms">
             ◐ Timeline
@@ -65,6 +73,7 @@ export function SetSheet({ onTimeline }: { onTimeline?: () => void }) {
               <SheetTrack
                 n={i + 1}
                 it={it}
+                playKey={playKeys.get(it.entry.id)}
                 onTime={(at) => dispatch({ type: 'setEntryTime', id: it.entry.id, at })}
                 onMixPoint={(which, at) => mixPoint(it, which, at)}
                 onCues={(cues) => it.track && setCues(it.track.id, cues)}
@@ -83,6 +92,7 @@ export function SetSheet({ onTimeline }: { onTimeline?: () => void }) {
 function SheetTrack({
   n,
   it,
+  playKey,
   onTime,
   onMixPoint,
   onCues,
@@ -92,6 +102,7 @@ function SheetTrack({
 }: {
   n: number;
   it: TimelineItem;
+  playKey?: { key?: string; semitones: number };
   onTime: (at: number) => void;
   onMixPoint: (which: 'in' | 'out', at: number | undefined) => void;
   onCues: (cues: Cue[]) => void;
@@ -118,8 +129,13 @@ function SheetTrack({
         <span className="sheet-meta">
           {track?.bpm ? `${track.bpm.toFixed(0)} BPM` : ''}
           {track?.key && (
-            <span className="key-pill" style={{ background: keyColor(track.key) }}>
-              {toCamelot(track.key)}
+            <span
+              className="key-pill"
+              style={{ background: keyColor(playKey?.key ?? track.key) }}
+              title={playKey?.semitones ? `Key matched: ${toCamelot(track.key)} played ${playKey.semitones > 0 ? '+' : ''}${playKey.semitones} semitones` : track.key}
+            >
+              {toCamelot(playKey?.key ?? track.key)}
+              {playKey?.semitones ? ` ${playKey.semitones > 0 ? '+' : ''}${playKey.semitones}` : ''}
             </span>
           )}
         </span>
@@ -251,7 +267,7 @@ function SheetMix({
   // Where in the outgoing song the next one comes in (tempo riding aside).
   const inAtSong = itemMixIn(a) + (b.startsAt - a.startsAt);
   const entry = b.entry;
-  const sync = entry.sync !== false;
+  const tempo = tempoMode(entry);
   return (
     <section className="sheet-mix" data-entry={entry.id}>
       <div className="sheet-mix-head">
@@ -282,13 +298,25 @@ function SheetMix({
             </option>
           ))}
         </select>
+        <select
+          value={tempo}
+          onChange={(e) => onEntry(entry.id, { tempo: e.target.value as TempoMode, sync: undefined })}
+          title={TEMPO_MODES.find((m) => m.id === tempo)?.hint}
+          aria-label="Tempo"
+        >
+          {TEMPO_MODES.map((m) => (
+            <option key={m.id} value={m.id}>
+              BPM: {m.label}
+            </option>
+          ))}
+        </select>
         <button
           className="small"
-          aria-pressed={sync}
-          onClick={() => onEntry(entry.id, { sync: !sync })}
-          title="Ride the outgoing track's tempo into the next one's, so the beats lock"
+          aria-pressed={!!entry.matchKey}
+          onClick={() => onEntry(entry.id, { matchKey: !entry.matchKey })}
+          title="Transpose the incoming track so it mixes smoothly with the key the outgoing one plays in"
         >
-          Sync
+          Match key
         </button>
         {SHEET_FX.map((f) => {
           const on = fxIsOn(entry.automation, f.id);

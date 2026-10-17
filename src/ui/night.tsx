@@ -20,11 +20,14 @@ export function NightProvider({ children }: { children: ReactNode }) {
     shared = new NightPlayer(audioContext(), () => Promise.resolve(undefined));
     try {
       shared.setVolume(Number(localStorage.getItem('setcraft-volume') ?? '0.9'));
+      shared.setKeyLock(localStorage.getItem('setcraft-keylock') !== 'off');
     } catch {
       // private mode
     }
   }
   const player = shared;
+  // Tests and the console can look at the night player while developing.
+  if (import.meta.env.DEV) (window as unknown as { __night?: NightPlayer }).__night = player;
   // Audio comes from a file attached this session, or else the linked music folder.
   player.setLoader((trackId) =>
     // The same decoded audio the deck uses, so a track in both is only held once.
@@ -64,6 +67,27 @@ export function useNight(): NightPlayer {
 }
 
 /** Re-renders when the night player plays, pauses, jumps or finishes loading a track. */
+/** Key lock: on, switch it, and whether this page can do it (it needs https or this computer). */
+export function useKeyLock(): { on: boolean; set: (on: boolean) => void; available: boolean } {
+  const p = useNight();
+  useSyncExternalStore(
+    (fn) => p.subscribe(fn),
+    () => p.version,
+  );
+  return {
+    on: p.keyLock,
+    available: p.keyLockAvailable,
+    set: (on) => {
+      p.setKeyLock(on);
+      try {
+        localStorage.setItem('setcraft-keylock', on ? 'on' : 'off');
+      } catch {
+        // private mode
+      }
+    },
+  };
+}
+
 export function useNightState(): { playing: boolean; active: boolean } {
   const p = useNight();
   useSyncExternalStore(

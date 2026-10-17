@@ -1,4 +1,5 @@
-import { valueAt, type Curves, type Env } from '../core/mixplan';
+import SignalsmithStretch, { type StretchNode, type StretchSchedule } from '../vendor/signalsmith-stretch.mjs';
+import { integrate, valueAt, type Curves, type Env } from '../core/mixplan';
 import { slotPos, slotRate, type NightSlot } from '../core/setplan';
 import { impulse, playOutFx, type OutFx } from './deck';
 import { transport } from './transport';
@@ -11,6 +12,12 @@ import { transport } from './transport';
  * Tracks are decoded a little ahead of time and scheduled on the audio clock,
  * so handovers are sample-accurate. Decoded audio is big, so only a few tracks
  * are kept.
+ *
+ * Key lock (on by default, like a DJ player's Master Tempo): a track whose tempo
+ * is ridden keeps its pitch, through a time-stretcher (Signalsmith Stretch, in an
+ * AudioWorklet), which also transposes tracks for key matching. Browsers only
+ * allow that on a secure page (https or this computer); elsewhere a ridden
+ * track's pitch moves with its tempo, like a record.
  */
 export type NightLoader = (trackId: string) => Promise<AudioBuffer | undefined>;
 
@@ -22,8 +29,21 @@ const PREFETCH = 40;
 const KEEP_BUFFERS = 4;
 const FADE = 0.012;
 
+/** A voice's sound source: the decoded buffer, or the time-stretcher fed with it. */
+type Playable = AudioNode & { stop(when?: number): unknown };
+
+/** Stretch nodes kept ready, so a voice never waits for one to be made. */
+const STRETCH_POOL = 4;
+/** How finely a tempo ride is followed by the stretcher (it takes steps, not ramps). */
+const RIDE_STEP = 0.25;
+
 interface Voice {
-  src: AudioBufferSourceNode;
+  src: Playable;
+  /** The time-stretcher, when the voice plays through one (key lock or transposed). */
+  stretch?: StretchNode;
+  /** Ends a stretched voice (worklets have no `ended` event): tidy-up timer and what it runs. */
+  endTimer?: number;
+  finish?: () => void;
   /** Start / stop fades (and where an FX cuts the track). */
   gain: GainNode;
   /** Where each automated parameter lands in the channel strip. */
@@ -41,7 +61,22 @@ interface Target {
 }
 
 const sigOf = (s: NightSlot) =>
-  `${s.trackId}|${s.startsAt}|${s.playFor}|${s.mixIn}|${s.echoAt}|${s.loop?.start}-${s.loop?.end}|${JSON.stringify(s.curves.rate)}`;
+  `${s.trackId}|${s.startsAt}|${s.playFor}|${s.mixIn}|${s.echoAt}|${s.loop?.start}-${s.loop?.end}|${s.semitones ?? 0}|${JSON.stringify(s.curves.rate)}`;
+
+/**
+ * The moments a tempo ride is followed at: where it starts, each of its corners,
+ * and every RIDE_STEP along a slope. Between them the rate holds.
+ */
+export function rideTimes(env: Env, from: number, end: number): number[] {
+  const ts = [from];
+  for (let i = 0; i < env.length; i++) {
+    const p = env[i];
+    const q = env[i + 1];
+    if (p.t > from && p.t < end) ts.push(p.t);
+    if (q && q.v !== p.v) for (let x = Math.max(p.t, from) + RIDE_STEP; x < Math.min(q.t, end); x += RIDE_STEP) ts.push(x);
+  }
+  return [...new Set(ts)].filter((t) => t >= from && t < end).sort((a, b) => a - b);
+}
 const autoSigOf = (s: NightSlot) => JSON.stringify({ ...s.curves, rate: undefined });
 
 /** EQ corners, like a DJ mixer's three bands. */
@@ -95,10 +130,17 @@ export class NightPlayer {
   /** Slots whose planned echo out has been scheduled. */
   private echoed = new Set<string>();
   private scrubbing: { wasPlaying: boolean; lastAt: number; pending: number | null; timer: number } | null = null;
+  /** Key lock: ridden tempos keep their pitch (see the class comment). */
+  private keyLockOn = true;
+  private stretchPool: StretchNode[] = [];
+  private stretchMaking = 0;
+  /** Time-stretching works here (AudioWorklet available: a secure page). */
+  private stretchOk: boolean;
 
   constructor(ctx: AudioContext, loader: NightLoader) {
     this.ctx = ctx;
     this.loader = loader;
+    this.stretchOk = typeof AudioWorkletNode !== 'undefined' && !!(ctx as AudioContext).audioWorklet;
     this.out = ctx.createGain();
     // Two full-level tracks in a blend add up: a limiter keeps the sum from clipping.
     const limiter = ctx.createDynamicsCompressor();
@@ -120,6 +162,86 @@ export class NightPlayer {
 
   setLoader(loader: NightLoader) {
     this.loader = loader;
+  }
+
+  get keyLock(): boolean {
+    return this.keyLockOn;
+  }
+
+  /** Whether key lock can work here (a secure page). Without it, a ridden track's pitch follows its tempo. */
+  get keyLockAvailable(): boolean {
+    return this.stretchOk;
+  }
+
+  /** Key lock on or off; what's playing switches over straight away. */
+  setKeyLock(on: boolean) {
+    if (on === this.keyLockOn) return;
+    this.keyLockOn = on;
+    if (on) this.fillPool();
+    if (this.isPlaying) this.play(this.position());
+    this.emit();
+  }
+
+  /** How many voices are playing through the time-stretcher (for tests and the UI). */
+  get stretchedVoices(): number {
+    return [...this.voices.values()].filter((v) => v.stretch).length;
+  }
+
+  private fillPool() {
+    while (this.stretchOk && this.stretchPool.length + this.stretchMaking < STRETCH_POOL) {
+      this.stretchMaking++;
+      SignalsmithStretch(this.ctx)
+        .then((node) => {
+          this.stretchMaking--;
+          // Its own stop() drops every change scheduled after "now"; stopping is just one more change.
+          node.stop = (when?: number) => node.schedule({ outputTime: when ?? this.ctx.currentTime, active: false });
+          this.stretchPool.push(node);
+          if (this.isPlaying) this.schedule();
+        })
+        .catch(() => {
+          this.stretchMaking--;
+          this.stretchOk = false; // no AudioWorklet after all: plain playback
+          this.emit();
+        });
+    }
+  }
+
+  /** A stretch node back into the pool, silent and empty. */
+  private recycle(node: StretchNode) {
+    node.disconnect();
+    void node.schedule({ outputTime: this.ctx.currentTime, active: false });
+    void node.dropBuffers();
+    this.stretchPool.push(node);
+  }
+
+  /**
+   * Feed a slot's audio to a stretch node and lay out its playback: from `from`
+   * (at audio time `when`) to `end`, following the tempo ride step by step, at
+   * the slot's transposition, round its exit loop if it has one.
+   */
+  private feedStretch(node: StretchNode, buf: AudioBuffer, s: NightSlot, from: number, end: number, when: number, stopAt: number) {
+    const offset = slotPos(s, from);
+    const lin = (t: number) => s.mixIn + integrate(s.curves.rate, s.startsAt, t, 1);
+    // Only the part of the file this voice can reach is handed over.
+    const a0 = Math.max(0, Math.min(offset, s.loop?.start ?? offset) - 0.5);
+    const a1 = Math.min(buf.duration, (s.loop ? s.loop.end : lin(end)) + 1);
+    const sr = buf.sampleRate;
+    const i0 = Math.floor(a0 * sr);
+    const i1 = Math.max(i0 + 1, Math.ceil(a1 * sr));
+    const chans = Array.from({ length: buf.numberOfChannels }, (_, c) => buf.getChannelData(c).slice(i0, i1));
+    void node.dropBuffers();
+    void node.addBuffers(chans, chans.map((c) => c.buffer));
+    const loop = s.loop ? { loopStart: s.loop.start - a0, loopEnd: s.loop.end - a0 } : { loopStart: 0, loopEnd: 0 };
+    const times = rideTimes(s.curves.rate, from, end);
+    times.forEach((t, k) => {
+      const next = times[k + 1] ?? Math.min(end, t + 1);
+      const rate = next > t ? (lin(next) - lin(t)) / (next - t) : valueAt(s.curves.rate, t, 1);
+      const change: StretchSchedule = { outputTime: k === 0 ? when : this.ctxAt(t), active: true, rate, semitones: s.semitones ?? 0 };
+      // Where to start in the file; after that the node keeps count itself.
+      if (k === 0) Object.assign(change, { input: offset - a0, ...loop });
+      void node.schedule(change);
+    });
+    void node.schedule({ outputTime: stopAt + 0.02, active: false });
   }
 
   get playing(): boolean {
@@ -168,6 +290,7 @@ export class NightPlayer {
 
   play(from = this.pausedAt) {
     void this.ctx.resume();
+    if (this.keyLockOn) this.fillPool();
     this.stopAll();
     this.cut.clear();
     this.echoed.clear();
@@ -337,16 +460,8 @@ export class NightPlayer {
    * fades → out, with post-fader sends to an echo (a beat long, at the tempo the
    * track plays at) and a reverb. Returns the automated parameters.
    */
-  private strip(buf: AudioBuffer, s: NightSlot, from: number) {
+  private strip(src: AudioNode, s: NightSlot, from: number) {
     const ctx = this.ctx;
-    const src = ctx.createBufferSource();
-    src.buffer = buf;
-    if (s.loop) {
-      // Leaving on a loop: past its end the track goes round it again, sample-exact.
-      src.loop = true;
-      src.loopStart = s.loop.start;
-      src.loopEnd = s.loop.end;
-    }
     const band = (type: BiquadFilterType, hz: number, q = 0.8) => {
       const f = ctx.createBiquadFilter();
       f.type = type;
@@ -394,13 +509,13 @@ export class NightPlayer {
       { param: reverbSend.gain, curve: (c) => c.reverb, dflt: 0 },
     ];
     const dispose = () => {
-      for (const n of [src, low, mid, high, lp, hp, level]) n.disconnect();
+      for (const n of [low, mid, high, lp, hp, level]) n.disconnect();
       // The sends ring on for a while before they're let go.
       window.setTimeout(() => {
         for (const n of [gain, echoSend, delay, fb, eHp, eLp, reverbSend, verb, wet]) n.disconnect();
       }, TAIL * 1000);
     };
-    return { src, gain, targets, dispose };
+    return { gain, targets, dispose };
   }
 
   /** Audio-clock time of a moment in the night (while playing). */
@@ -439,24 +554,60 @@ export class NightPlayer {
       const from = Math.max(s.startsAt, t + 0.01);
       const offset = slotPos(s, from);
       if (offset >= buf.duration) continue;
+      // Through the time-stretcher when the pitch must hold while the tempo moves, or the key is shifted.
+      // (Scrubbing stays like a record.)
+      const rides = s.curves.rate.some((p) => Math.abs(p.v - 1) > 1e-4);
+      const stretched = this.stretchOk && !this.scrubbing && ((s.semitones ?? 0) !== 0 || (this.keyLockOn && rides));
+      let stretch: StretchNode | undefined;
+      if (stretched) {
+        stretch = this.stretchPool.pop();
+        if (!stretch) {
+          this.fillPool();
+          continue; // a stretcher is on its way: picked up on a later tick
+        }
+      }
       const when = Math.max(now, this.ctxAt(from));
       const stopAt = Math.max(when + FADE * 2, this.ctxAt(end));
-      const { src, gain, targets, dispose } = this.strip(buf, s, from);
-      // The mix automation: tempo ride, fader, EQ, filter and sends, from wherever the voice joins.
-      this.follow(src.playbackRate, s.curves.rate, 1, from, when);
+      let src: Playable;
+      if (stretch) {
+        this.feedStretch(stretch, buf, s, from, end, when, stopAt);
+        src = stretch;
+      } else {
+        const b = this.ctx.createBufferSource();
+        b.buffer = buf;
+        if (s.loop) {
+          // Leaving on a loop: past its end the track goes round it again, sample-exact.
+          b.loop = true;
+          b.loopStart = s.loop.start;
+          b.loopEnd = s.loop.end;
+        }
+        // The tempo ride, as a record speeds up: pitch and tempo together.
+        this.follow(b.playbackRate, s.curves.rate, 1, from, when);
+        b.start(when, offset);
+        b.stop(stopAt + 0.02);
+        src = b;
+      }
+      const { gain, targets, dispose } = this.strip(src, s, from);
+      // The mix automation: fader, EQ, filter and sends, from wherever the voice joins.
       for (const tg of targets) this.follow(tg.param, tg.curve(s.curves), tg.dflt, from, when);
       gain.gain.setValueAtTime(0, when);
       gain.gain.linearRampToValueAtTime(1, when + FADE);
       gain.gain.setValueAtTime(1, Math.max(when + FADE, stopAt - FADE));
       gain.gain.linearRampToValueAtTime(0, stopAt);
-      src.start(when, offset);
-      src.stop(stopAt + 0.02);
       const id = s.id;
-      src.onended = () => {
+      let finished = false;
+      const finish = () => {
+        if (finished) return;
+        finished = true;
         if (this.voices.get(id)?.src === src) this.voices.delete(id);
+        src.disconnect();
         dispose();
+        if (stretch) this.recycle(stretch);
       };
-      this.voices.set(id, { src, gain, targets, sig: sigOf(s), autoSig: autoSigOf(s) });
+      const voice: Voice = { src, stretch, gain, targets, sig: sigOf(s), autoSig: autoSigOf(s), finish };
+      if (src instanceof AudioBufferSourceNode) src.onended = finish;
+      else voice.endTimer = window.setTimeout(finish, (stopAt + 0.1 - this.ctx.currentTime) * 1000);
+      this.voices.set(id, voice);
     }
     // Planned echo outs: set off a beat before the out point, so the track cuts right on it.
     for (const s of this.slots) {
@@ -546,6 +697,10 @@ export class NightPlayer {
       v.src.stop(now + FADE + 0.005);
     } catch {
       // already stopped
+    }
+    if (v.stretch && v.finish) {
+      window.clearTimeout(v.endTimer);
+      v.endTimer = window.setTimeout(v.finish, (FADE + 0.1) * 1000);
     }
   }
 

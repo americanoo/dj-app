@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { slotsAt } from '../core/setplan';
 import { formatTime } from '../core/time';
-import { useNight, useNightState } from './night';
+import { useKeyLock, useNight, useNightState } from './night';
 import { useStore } from './store';
 
 /** Which player the bar drives: the deck (one track, for cues) or the whole night. */
@@ -73,5 +73,28 @@ export function NightNow() {
       </div>
       <span className="clock" ref={clockEl} />
     </>
+  );
+}
+
+/**
+ * Key lock (Master Tempo): when the night rides a track's tempo, its pitch holds.
+ * Off, it plays like a record sped up. Needs a secure page; elsewhere it's shown off.
+ */
+export function KeyLockButton({ className = 'small' }: { className?: string }) {
+  const lock = useKeyLock();
+  return (
+    <button
+      className={`${className} keylock-btn`}
+      aria-pressed={lock.available && lock.on}
+      disabled={!lock.available}
+      onClick={() => lock.set(!lock.on)}
+      title={
+        lock.available
+          ? 'Key lock (Master Tempo): a track sped up or slowed down to match keeps its pitch, like on your DJ player'
+          : 'Key lock needs a secure page: open Setcraft on this computer (localhost) or from its https address. Here a sped-up track’s pitch rises, like a record.'
+      }
+    >
+      Key lock
+    </button>
   );
 }

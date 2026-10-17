@@ -3,6 +3,8 @@
 //
 //   Delta - Warehouse.wav  130 BPM, 160 s: intro, main, breakdown, drop, outro
 //   Steady - Groove.wav    120 BPM, 96 bars: bass throughout, parts by phrase
+//   Tone - A440.wav        64 s of a pure 440 Hz tone (pitch tests: key lock, key matching)
+//   Tone - B700.wav        64 s of a pure 700 Hz tone
 import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
@@ -83,11 +85,21 @@ function groove() {
   return out;
 }
 
+/** A pure tone, softly faded in and out: what the pitch tests listen for. */
+const tone = (hz) => () => {
+  const n = 64 * SR;
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) out[i] = Math.sin((2 * Math.PI * hz * i) / SR) * 0.35 * Math.min(1, i / 2000, (n - i) / 2000);
+  return out;
+};
+
 /** Writes the music folder under `root` (skipping files already there). */
 export function makeMusic(root) {
   const files = {
     [join(root, 'Techno', 'Delta - Warehouse.wav')]: warehouse,
     [join(root, 'Latin', 'Steady - Groove.wav')]: groove,
+    [join(root, 'Tones', 'Tone - A440.wav')]: tone(440),
+    [join(root, 'Tones', 'Tone - B700.wav')]: tone(700),
   };
   for (const [file, make] of Object.entries(files)) {
     if (existsSync(file)) continue;

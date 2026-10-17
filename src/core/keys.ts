@@ -122,3 +122,29 @@ export function keyColor(raw: string | undefined): string | undefined {
   const hue = Math.round(((camelotNumber(k) - 1) * 30 + 165) % 360);
   return k.minor ? `hsl(${hue} 62% 52%)` : `hsl(${hue} 72% 68%)`;
 }
+
+/** A key moved by `semitones` (e.g. Am + 2 = Bm), in standard names. */
+export function transposeKey(raw: string | undefined, semitones: number): string | undefined {
+  const k = parseKey(raw);
+  if (!k) return undefined;
+  return keyName({ pitch: (((k.pitch + Math.round(semitones)) % 12) + 12) % 12, minor: k.minor });
+}
+
+const SMOOTH: KeyRelation[] = ['same', 'relative', 'adjacent', 'diagonal'];
+
+/**
+ * Key matching: the smallest transposition of `key` (in semitones, -6..+6) that
+ * mixes smoothly with `target`: the same key, its relative, a neighbour on the
+ * Camelot wheel or a diagonal one, preferring them in that order when two shifts
+ * are as small. 0 when it already does; undefined when either key is unknown.
+ */
+export function keyMatchShift(key: string | undefined, target: string | undefined): number | undefined {
+  if (!parseKey(key) || !parseKey(target)) return undefined;
+  let best: { n: number; rank: number } | undefined;
+  for (let n = -6; n <= 6; n++) {
+    const rank = SMOOTH.indexOf(keyRelation(target, transposeKey(key, n)));
+    if (rank < 0) continue;
+    if (!best || Math.abs(n) < Math.abs(best.n) || (Math.abs(n) === Math.abs(best.n) && rank < best.rank)) best = { n, rank };
+  }
+  return best?.n;
+}

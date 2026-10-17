@@ -5,7 +5,7 @@ test('a synced bass-swap blend: the outgoing track rides into the incoming tempo
   await openApp(page);
   await makeBlend(page);
   await expect(page.locator('.tv-blend select')).toHaveValue('bassSwap');
-  await expect(page.locator('.tv-sync')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.tv-tempo')).toHaveValue('ride');
   await expect(page.locator('.tv-chips')).toContainText('Synced 130→120');
   await page.click('button.tv-preview');
   // Both decks playing: Warehouse held at 120/130 of its speed, Groove at its own; Groove's bass cut.
@@ -58,4 +58,17 @@ test('keyframes: a click adds a bump, fader or bass edits make the blend custom,
   await expect(page.locator('.tv-blend select')).toHaveValue('bassSwap');
   await page.keyboard.press('Control+z');
   await expect(page.locator('.tv-blend select')).toHaveValue('custom');
+});
+
+test('BPM: Match in: the incoming track comes in at the playing tempo; the outgoing one keeps its own', async ({ page }) => {
+  await openApp(page);
+  await makeBlend(page);
+  await page.locator('.tv-tempo').selectOption('match');
+  await expect(page.locator('.tv-chips')).toContainText('Matched 120→130');
+  await page.click('button.tv-preview');
+  await expect.poll(() => page.evaluate(() => window.__rates().length), { timeout: 20_000 }).toBe(2);
+  const rates = await page.evaluate(() => window.__rates());
+  // Warehouse (130) as it is; Groove (120) brought up to 130.
+  expect(rates[0]).toBeCloseTo(1, 3);
+  expect(rates[1]).toBeCloseTo(130 / 120, 2);
 });

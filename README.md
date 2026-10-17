@@ -47,12 +47,45 @@ What phones can't do (yet): DJ controllers need Chrome on Android over USB-C. A 
 own, separate from your computer's. Safari may clear the songs it keeps for a website that isn't opened for
 weeks; installed on the Home Screen, they stay.
 
+## The Setcraft helper: your music, straight from your computer
+
+Instead of linking folders or adding songs on each device, run the **Setcraft helper** on the computer your
+music is on (your Mac, with the external drive plugged in). In Terminal, in the Setcraft folder:
+
+```
+npm run setcraft
+```
+
+It builds Setcraft and starts the helper, which shows two addresses:
+
+- **On this computer:** `http://localhost:4173/`
+- **On your phone:** `http://192.168.x.x:4173/?pair=…`: open it once on the phone (same Wi-Fi). That pairs the
+  phone; after that the plain address works too.
+
+Then import your collection on any of them and every track plays straight from the computer's drives, from
+wherever your DJ software saved it: nothing to link, copy or add. The Library's music panel shows *Playing from
+<your computer>*. Keep the Terminal window open while you use it.
+
+If your drive has a new name, or the music moved, tell the helper where to look and it finds tracks by name
+(loosely, the same way as a linked folder):
+
+```
+npm run helper -- --music "/Volumes/My Drive/Music"
+```
+
+(`npm run helper` starts it without building again; `--port` picks another port.)
+
+What it will and won't do: it only reads audio files, only inside your home folder, `/Volumes` and any
+`--music` folders, and only for this computer and paired devices. It never changes or uploads anything. The
+pairing key is kept in `~/.setcraft-helper.json`; treat the phone link like a password. It needs Node.js 22.18
+or newer (`node -v`).
+
 ## First time? The tutorial
 
 The first time you open Setcraft, a short welcome offers a **hands-on tour**. Pick **Try it with demo tracks**
 (three short club tracks made right in your browser, so you can learn before your library is ready) or **Use my
 own music**. The tour then spotlights one part of the screen at a time: importing and linking your music folder,
-the library, the journey of the night, the transition view (blend, Sync, keyframes), the deck and hot cues, the
+the library, the journey of the night, the transition view (blend, BPM, keyframes), the deck and hot cues, the
 player, and export. Most steps ask you to do the thing (add two tracks to the set, overlap them, preview the
 transition, set a cue, press play) and move on by themselves once you have; a step you've already done is just
 read, and **Skip** / **Next** moves on anyway. **Esc** ends it. Replay it any time from **⋯ → Tutorial**. The
@@ -79,7 +112,8 @@ Between two tracks, the transition:
 
 - **comes in at** a time in the outgoing song ("Groove comes in at 2:08 of Warehouse"), with how long they play
   together or the gap between them.
-- **Blend** (auto, bass swap, crossfade, straight, echo out) and **Sync**.
+- **Blend** (auto, bass swap, crossfade, straight, echo out), **BPM** (ride out, match in, free) and **Match key**;
+  **Key lock** is in the Sheet's header.
 - **FX on/off**: *Echo out*, *Reverb out* and *Filter out* rise on the outgoing track over its last 4 bars;
   *Filter in* starts the incoming track muffled and opens it up. They're keyframes, so the Mix view shows (and
   can fine-tune) them.
@@ -98,7 +132,7 @@ their own space. Earlier versions of a track's cues open from **History** in the
 
 | Panel | What it's for |
 |-------|---------------|
-| **Transition** (top) | Two decks on one clock: the outgoing track (A) on the left, the incoming one (B) on the right, and both waveforms in between, lined up exactly as the night plays them. Where both play is highlighted (a gap in red), **A OUT** and **B IN** mark the handover, and the parts of each file the night doesn't play are ghosted. Chips show the blend length in bars, the tempo change, whether the keys fit, and where B comes in on A's grid (on a phrase, on the bar, or off the beat). **Drag B's waveform** to move where it comes in: it snaps to A's beats (**Shift** for free), with a live readout, and ⌘Z undoes it. **▶ Preview transition** plays the night from a few bars before B. **Sync** (on by default) locks the beats: over the 8 bars before B comes in, A rides its tempo into B's (half and double time allowed, up to ±16%) and holds it through the blend, like riding the pitch fader; B always plays at its own tempo, so its cues and the next transition stay put. A's waveform and grid are drawn as it's ridden, so you can see the beats line up, and dragging B snaps to A's beats as they're played. Riding changes A's pitch a little, as on a turntable. **Blend** picks how the two share the overlap: **Bass swap** (the default on a real overlap: B comes in with its bass cut, the basses swap on one of B's bars halfway through, then A fades out), **Crossfade** (equal power across the overlap), **Straight** (both at full level) or **Echo out** (A echoes out at its out point). The waveforms show it: they shrink as a fader comes down and the lows dim where the bass is cut. **✎ Keyframes** lets you draw the transition yourself: pick **Fader**, **Bass**, **Mid**, **High**, **Filter** (down: low-pass, up: high-pass), **Echo** (a send to a one-beat echo in time with the deck) or **Reverb**, and each deck shows that parameter's curve. Click on a deck to add a keyframe and drag it (time snaps to the incoming track's beats; **Shift** for free, values close to normal click onto normal); double-click or right-click one to remove it. The fader and bass start from the blend style's curve, so you tweak the bass swap rather than start again (the blend then reads **Custom**; picking a style hands them back); the others start as a bump around your click. Keyframes are kept relative to where B comes in, so they move with it; **Clear** removes them all and ⌘Z undoes any change. **⟲ Loop** repeats the transition, and edits are heard straight away, without restarting the tracks. ‹ › steps through the night's transitions; it follows the track you open in the deck, and the night while it plays. **Edit cues** opens either track in the deck. |
+| **Transition** (top) | Two decks on one clock: the outgoing track (A) on the left, the incoming one (B) on the right, and both waveforms in between, lined up exactly as the night plays them. Where both play is highlighted (a gap in red), **A OUT** and **B IN** mark the handover, and the parts of each file the night doesn't play are ghosted. Chips show the blend length in bars, the tempo change, whether the keys fit, and where B comes in on A's grid (on a phrase, on the bar, or off the beat). **Drag B's waveform** to move where it comes in: it snaps to A's beats (**Shift** for free), with a live readout, and ⌘Z undoes it. **▶ Preview transition** plays the night from a few bars before B. **BPM** sets how the tempos meet: **Ride out** (the default) locks the beats by riding A's tempo into B's over the 8 bars before B comes in (half and double time allowed, up to ±16%) and holding it through the blend, like riding the pitch fader, so B plays at its own tempo and its cues and the next transition stay put; **Match in** brings B in at A's tempo instead (A stays as it is) and lets B settle back to its own tempo over 8 bars once A has gone, like matching it on a deck by hand; **Free** plays both at their own tempo. The waveforms and grids are drawn as they're played, so you can see the beats line up, and dragging B snaps to A's beats. **Key lock** (on by default, like Master Tempo on a DJ player) keeps a sped-up or slowed-down track at its own pitch; off, its pitch moves with its tempo like a record. **Match key** transposes B by the smallest step that makes it mix smoothly with the key A plays in (the same key, its relative, or a Camelot neighbour), and the next transition matches against that new key; the key chip shows the result (e.g. *8A→8A · -1 st*). Key lock and key matching use a time-stretcher (Signalsmith Stretch) that browsers only run on a secure page: on your computer (localhost) or an https address. Opened over Wi-Fi from your computer (`http://192.168…`), a phone plays tempo changes like a record and can't transpose. **Blend** picks how the two share the overlap: **Bass swap** (the default on a real overlap: B comes in with its bass cut, the basses swap on one of B's bars halfway through, then A fades out), **Crossfade** (equal power across the overlap), **Straight** (both at full level) or **Echo out** (A echoes out at its out point). The waveforms show it: they shrink as a fader comes down and the lows dim where the bass is cut. **✎ Keyframes** lets you draw the transition yourself: pick **Fader**, **Bass**, **Mid**, **High**, **Filter** (down: low-pass, up: high-pass), **Echo** (a send to a one-beat echo in time with the deck) or **Reverb**, and each deck shows that parameter's curve. Click on a deck to add a keyframe and drag it (time snaps to the incoming track's beats; **Shift** for free, values close to normal click onto normal); double-click or right-click one to remove it. The fader and bass start from the blend style's curve, so you tweak the bass swap rather than start again (the blend then reads **Custom**; picking a style hands them back); the others start as a bump around your click. Keyframes are kept relative to where B comes in, so they move with it; **Clear** removes them all and ⌘Z undoes any change. **⟲ Loop** repeats the transition, and edits are heard straight away, without restarting the tracks. ‹ › steps through the night's transitions; it follows the track you open in the deck, and the night while it plays. **Edit cues** opens either track in the deck. |
 | **Deck** | The loaded track: a full-width colour waveform with its sections, and underneath it the eight hot cue pads in one row, the loop and memory cue buttons, and the cue list on the right. ‹ › steps through the night. |
 | **Journey of the night** (centre) | A zoomable timeline of the set, from the whole night down to seconds, shown in clock time once the set has a start time. Drag tracks here from the library at the exact moment they should start, and drag them along to move them. Tracks snap to whole seconds and to neighbouring tracks' edges; hold **Shift** for free placement. Alternating lanes show overlaps as blends. It **plays the night as planned**: **▶ Play night** plays every track at its place, from its mix-in, and tracks that overlap on the timeline play together, so what you see is what you hear; one runs straight into the next without stopping. Each block shows the waveform of the part of the track that plays. Click the timeline's background (the ruler, bands or empty lanes) to jump there, or drag along it to scrub the night with sound, even from pause: let go and it plays on if it was playing, or stops where it landed. Opening tracks in the deck while the night plays doesn't stop the music. Chapter bands and the energy line sit above, and the dot on each track shows its key compatibility with the previous one. Click a track to load it into the deck and edit its start time, chapter, energy, transition, notes and mix points; **Delete** removes it. |
 | **Library** (bottom) | Your imported collection and playlists. Click a row to load it into the deck, drag it onto the timeline, or double-click to add it at the end of the night. |
@@ -380,6 +414,7 @@ src/
     analysis.ts         three-band waveform analysis (biquad filters)
     sections.ts         intro / breakdown / build / drop / outro detection
     pathmatch.ts        finding a track's file in a linked folder or added songs (by name, loosely)
+    sheet.ts            the Sheet: mix points by time, FX switches, forgiving time entry
     keys.ts             key parsing (standard, Camelot, Open Key, Traktor ids) + harmonic relations
     time.ts             time formatting, beat/bar snapping, bar.beat labels
     setplan.ts          set timeline, transition warnings, run-sheet generation
@@ -394,11 +429,17 @@ src/
     store.tsx           project state (reducer) persisted to IndexedDB
     audio.tsx           audio attachments, waveform analysis, remembered waveforms (IndexedDB)
     musicFolder.tsx     linked music folder (File System Access API, folder-input fallback) and songs kept on the device
+    helper.ts           talking to the Setcraft helper (pairing, music by path)
+    nightPlayer.ts      the night: every track on the audio clock, mix automation, key lock / transposition
     deck.ts             Web Audio playback: instant jumps, real loops, click-free fades
     analysisWorker.ts   waveform analysis off the main thread
     versions.tsx        version snapshots stored in IndexedDB
     App (one-page layout), CueEditor (deck), Timeline, LibraryView, StoryPanel, EnergyArc, Waveform,
-    ExportPanel, MergeReview, VersionsPanel
+    ExportPanel, MergeReview, VersionsPanel, SetSheet
+  vendor/
+    signalsmith-stretch.mjs   time-stretch / pitch-shift (MIT), with one scheduling fix (see its header)
+helper/
+  setcraft-helper.mjs   the Setcraft helper: serves the app and your music to your devices (Node, no dependencies)
 ```
 
 Each importer converts into a single internal model, and each exporter converts out of it. Cue positions are stored

@@ -63,7 +63,7 @@ function reversed(ctx: BaseAudioContext, buf: AudioBuffer, from: number, to: num
 export function playOutFx(
   ctx: AudioContext,
   out: AudioNode,
-  v: { src: AudioBufferSourceNode; gain: GainNode },
+  v: { src: AudioNode & { stop(when?: number): unknown }; gain: GainNode },
   buffer: AudioBuffer,
   pos: number,
   posAt: (time: number) => number,

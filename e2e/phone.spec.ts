@@ -180,10 +180,10 @@ test('a whole folder of songs, or a zip of one, is added in one pick', async ({ 
   await page.locator('.folder-panel .add-music:not(.add-folder) + input').setInputFiles({ name: 'Music.zip', mimeType: 'application/zip', buffer: Buffer.from(zip) });
   await expect(page.locator('.toast').filter({ hasText: '1 song added to this phone' })).toContainText('1 track in your library now has its audio');
 
-  // A whole folder: both songs, from their subfolders.
+  // A whole folder: every song in it, from its subfolders (both tracks' songs, and the test tones).
   await page.locator('.folder-panel .add-folder + input').setInputFiles('e2e/.audio/Music');
-  await expect(page.locator('.toast').filter({ hasText: '2 songs added to this phone' })).toContainText('2 tracks in your library now have their audio');
-  await expect(page.locator('.device-music')).toContainText('2 songs on this phone');
+  await expect(page.locator('.toast').filter({ hasText: '4 songs added to this phone' })).toContainText('2 tracks in your library now have their audio');
+  await expect(page.locator('.device-music')).toContainText('4 songs on this phone');
 });
 
 test('the Sheet: the night as typed times, with loop endings and FX switches', async ({ page }) => {

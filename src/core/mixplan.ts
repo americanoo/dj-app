@@ -75,6 +75,26 @@ export function syncRate(bpmOut: number | undefined, bpmIn: number | undefined):
   return Math.abs(r - 1) <= MAX_PITCH ? r : undefined;
 }
 
+/**
+ * How the tempos meet in a transition:
+ * - ride: the outgoing track rides into the incoming one's tempo over the 8 bars before it comes in;
+ * - match: the incoming track comes in at the outgoing one's tempo, and settles back to its own over
+ *   8 bars once the outgoing one has gone (like matching it on a deck by hand);
+ * - free: both at their own tempo.
+ */
+export type TempoMode = 'ride' | 'match' | 'free';
+
+export const TEMPO_MODES: { id: TempoMode; label: string; hint: string }[] = [
+  { id: 'ride', label: 'Ride out', hint: 'The outgoing track rides into the incoming tempo over the 8 bars before it comes in' },
+  { id: 'match', label: 'Match in', hint: 'The incoming track comes in at the playing tempo, then settles back to its own over 8 bars' },
+  { id: 'free', label: 'Free', hint: 'Both tracks at their own tempo: the beats drift apart' },
+];
+
+/** The tempo mode chosen for a transition (older plans only had Sync on or off). */
+export function tempoMode(o: { tempo?: TempoMode; sync?: boolean }): TempoMode {
+  return o.tempo ?? (o.sync === false ? 'free' : 'ride');
+}
+
 export interface MixTrack {
   startsAt: number;
   playFor: number;
@@ -91,8 +111,15 @@ export interface TransitionPlan {
   inAt: number;
   outAt: number;
   overlap: number;
-  /** Tempo sync: the outgoing track's rate from `rideTo` on, reached by a ride from `rideFrom`. */
+  /** How the tempos meet (see TempoMode). */
+  tempo: TempoMode;
+  /** Tempo ride: the outgoing track's rate from `rideTo` on, reached by a ride from `rideFrom`. */
   sync?: { rate: number; rideFrom: number; rideTo: number };
+  /**
+   * Tempo match: the incoming track plays at `rate` (the outgoing tempo) until `until`, then
+   * settles back to its own tempo by `settle`.
+   */
+  match?: { rate: number; until: number; settle: number };
   /** Why the tempos aren't synced, when they could have been asked to be. */
   noSync?: 'off' | 'no-bpm' | 'too-far' | 'no-overlap' | 'same-tempo';
   /** Bass swap: when the basses change over. */
@@ -107,7 +134,11 @@ export function defaultBlend(overlap: number, bpm: number | undefined): BlendSty
 }
 
 /** How the transition from `a` into `b` plays. */
-export function planTransition(a: MixTrack, b: MixTrack, opts: { blend?: BlendStyle; sync?: boolean } = {}): TransitionPlan {
+export function planTransition(
+  a: MixTrack,
+  b: MixTrack,
+  opts: { blend?: BlendStyle; sync?: boolean; tempo?: TempoMode } = {},
+): TransitionPlan {
   const inAt = b.startsAt;
   const outAt = a.startsAt + a.playFor;
   const overlap = outAt - inAt;
@@ -115,15 +146,17 @@ export function planTransition(a: MixTrack, b: MixTrack, opts: { blend?: BlendSt
   const chosen = opts.blend;
   let style = chosen ?? defaultBlend(overlap, a.bpm);
   if ((style === 'bassSwap' || style === 'crossfade') && overlap <= 0.05) style = 'straight';
-  const plan: TransitionPlan = { style, chosen, inAt, outAt, overlap };
+  const tempo = tempoMode(opts);
+  const plan: TransitionPlan = { style, chosen, inAt, outAt, overlap, tempo };
 
-  if (opts.sync === false) plan.noSync = 'off';
+  if (tempo === 'free') plan.noSync = 'off';
   else if (overlap <= 0.05) plan.noSync = 'no-overlap';
   else if (!a.bpm || !b.bpm) plan.noSync = 'no-bpm';
   else {
     const rate = syncRate(a.bpm, b.bpm);
     if (rate === undefined) plan.noSync = 'too-far';
     else if (Math.abs(rate - 1) < 0.0005) plan.noSync = 'same-tempo';
+    else if (tempo === 'match') plan.match = { rate: 1 / rate, until: outAt, settle: outAt + RIDE_BARS * (240 / b.bpm) };
     else plan.sync = { rate, rideFrom: Math.max(a.startsAt, inAt - RIDE_BARS * barA), rideTo: inAt };
   }
 
@@ -232,7 +265,8 @@ export function outgoingCurves(p: TransitionPlan, a: MixTrack): Curves {
 /** The incoming track's side of a transition. */
 export function incomingCurves(p: TransitionPlan, b: MixTrack): Curves {
   const c = emptyCurves();
-  const bar = (b.bpm ? 60 / b.bpm : 0.5) * 4;
+  if (p.match) c.rate.push({ t: p.inAt, v: p.match.rate }, { t: p.match.until, v: p.match.rate }, { t: p.match.settle, v: 1 });
+  const bar = (b.bpm ? 60 / b.bpm : 0.5) * 4 * (p.match ? 1 / p.match.rate : 1);
   if (p.style === 'crossfade') {
     for (let k = 0; k <= 4; k++) c.level.push({ t: p.inAt + (k / 4) * p.overlap, v: Math.sin((k / 4) * (Math.PI / 2)) });
   } else if (p.style === 'bassSwap' && p.swapAt !== undefined) {
@@ -300,13 +334,14 @@ export function incomingPhase(a: MixTrack, b: MixTrack, rate: number): number {
  * track's beat as it's played (after its tempo ride), matching the phase of the
  * incoming track's mix-in against its own grid. `t` is where the pointer is.
  */
-export function snapIncoming(a: MixTrack, b: MixTrack, t: number, sync = true): number {
+export function snapIncoming(a: MixTrack, b: MixTrack, t: number, tempo: TempoMode | boolean = true): number {
   if (!a.bpm) return t;
+  const mode: TempoMode = typeof tempo === 'boolean' ? (tempo ? 'ride' : 'free') : tempo;
   const beatA = 60 / a.bpm;
-  const rate = sync ? syncRate(a.bpm, b.bpm) : undefined;
+  const rate = mode !== 'free' ? syncRate(a.bpm, b.bpm) : undefined;
   const phase = rate !== undefined ? incomingPhase(a, b, rate) : 0;
   // Where the outgoing track is in its file when the incoming one starts at `x`.
-  const posAt = (x: number) => a.mixIn + (x - a.startsAt) + rideOffset(planTransition(a, { ...b, startsAt: x }, { sync }), x);
+  const posAt = (x: number) => a.mixIn + (x - a.startsAt) + rideOffset(planTransition(a, { ...b, startsAt: x }, { tempo: mode }), x);
   const grid = a.gridStart ?? 0;
   const target = grid + (Math.round((posAt(t) - grid) / beatA - phase) + phase) * beatA;
   // The ride's length depends a little on where it starts; a few steps settle it.

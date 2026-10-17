@@ -13,6 +13,7 @@ declare global {
     __lowShelves: () => number[];
     __sends: () => number[];
     __decodes: number;
+    __peakHz: (lo: number, hi: number) => number;
   }
 }
 
@@ -24,10 +25,15 @@ declare global {
 export async function instrument(page: Page) {
   await page.addInitScript(() => {
     delete (window as { showDirectoryPicker?: unknown }).showDirectoryPicker;
+    // Key lock off unless a test turns it on: the tempo tests read each source's playback rate,
+    // which only a track played like a record has.
+    if (!localStorage.getItem('setcraft-keylock')) localStorage.setItem('setcraft-keylock', 'off');
     // The first-run tour has its own test; everywhere else it's been seen already.
     if (!sessionStorage.getItem('keep-tour')) localStorage.setItem('setcraft-tour', JSON.stringify({ status: 'done', step: 0 }));
     const w = window as unknown as Record<string, unknown>;
     let tap: AnalyserNode | null = null;
+    // A finer one for pitch: 32768-point FFT, about 1.5 Hz a bin.
+    let ftap: AnalyserNode | null = null;
     let ctx: BaseAudioContext | null = null;
     const live = new Set<AudioBufferSourceNode>();
     const shelves: BiquadFilterNode[] = [];
@@ -40,8 +46,12 @@ export async function instrument(page: Page) {
         if (!tap) {
           tap = ctx.createAnalyser();
           tap.fftSize = 2048;
+          ftap = ctx.createAnalyser();
+          ftap.fftSize = 32768;
+          ftap.smoothingTimeConstant = 0;
         }
         connect.call(this, tap);
+        connect.call(this, ftap!);
       }
       if (this instanceof BiquadFilterNode && dest instanceof GainNode) (dest as unknown as { fb: boolean }).fb = true;
       if (this instanceof GainNode && dest instanceof DelayNode && !(this as unknown as { fb?: boolean }).fb) sends.push(this);
@@ -77,6 +87,18 @@ export async function instrument(page: Page) {
       return Math.sqrt(s / a.length);
     };
     w.__sounding = () => tracks().length;
+    // The loudest frequency between lo and hi Hz right now (interpolated between FFT bins).
+    w.__peakHz = (lo: number, hi: number) => {
+      if (!ftap || !ctx) return 0;
+      const bins = new Float32Array(ftap.frequencyBinCount);
+      ftap.getFloatFrequencyData(bins);
+      const hz = ctx.sampleRate / ftap.fftSize;
+      let best = Math.ceil(lo / hz);
+      for (let i = best; i <= Math.floor(hi / hz); i++) if (bins[i] > bins[best]) best = i;
+      const [a, b, c] = [bins[best - 1], bins[best], bins[best + 1]];
+      const shift = (a - c) / (2 * (a - 2 * b + c)) || 0;
+      return (best + shift) * hz;
+    };
     w.__rates = () => tracks().map((n) => n.playbackRate.value);
     w.__lowShelves = () => shelves.filter((f) => f.type === 'lowshelf').slice(-2).map((f) => f.gain.value);
     w.__sends = () => sends.slice(-2).map((g) => g.gain.value);
