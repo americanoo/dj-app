@@ -1,0 +1,12 @@
+node_modules
+dist
+*.local
+.DS_Store
+*.tsbuildinfo
+*.pem
+.setcraft/
+
+# browser tests
+e2e/.audio/
+test-results/
+playwright-report/
