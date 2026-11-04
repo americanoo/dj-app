@@ -1,7 +1,7 @@
 /**
  * Generate iamericano logo concepts with Ideogram v4.0 via the Higgsfield API.
  * Server-side only; reads HF_CREDENTIALS from the environment or .env.local.
- * Run: npx tsx logos.ts  (billable: one request per logo)
+ * Run: npx tsx logos.ts [name]  (default name "iamericano"; billable: one request per logo)
  */
 import { config as loadEnv } from "dotenv";
 import { config, higgsfield, HiggsfieldError, APIError } from "@higgsfield/client/v2";
@@ -9,22 +9,24 @@ import { config, higgsfield, HiggsfieldError, APIError } from "@higgsfield/clien
 loadEnv({ path: ".env.local", quiet: true });
 
 const MODEL_ID = "ideogram/v4.0";
+const NAME = (process.argv[2] ?? "iamericano").toLowerCase();
+const UPPER = NAME.toUpperCase();
 
 const LOGOS: { name: string; prompt: string }[] = [
   {
     name: "chrome-border-sign",
     prompt:
-      'Retro 1970s Mexican border-town sign logo. The single word "IAMERICANO" in bold 3D chrome block lettering with a sunset gradient fill (gold, cream, sky blue), deep cobalt blue extruded drop shadow, small four-point sparkle glints, a swooping orange and blue swoosh behind the word, subtle distressed screen-print grain. Centered on a flat dark charcoal background. Flat vector logo design, clean shapes, no other text.',
+      `Retro 1970s Mexican border-town sign logo. The single word "${UPPER}" in bold 3D chrome block lettering with a sunset gradient fill (gold, cream, sky blue), deep cobalt blue extruded drop shadow, small four-point sparkle glints, a swooping orange and blue swoosh behind the word, subtle distressed screen-print grain. Centered on a flat dark charcoal background. Flat vector logo design, clean shapes, no other text.`,
   },
   {
     name: "rotulo-yellow",
     prompt:
-      'Hand-painted Mexican rotulo storefront sign logo. The word "iamericano" in bold red brush lettering with a cream inline highlight and dark red 3D shadow, a red ribbon banner below with the letters "DJ", white sparkles, a thin blue ornamental flourish with a small bow at the top, thin blue frame with notched corners. Bright marigold yellow background. Flat vector logo design, bold and playful, no other text.',
+      `Hand-painted Mexican rotulo storefront sign logo. The word "${NAME}" in bold red brush lettering with a cream inline highlight and dark red 3D shadow, a red ribbon banner below with the letters "DJ", white sparkles, a thin blue ornamental flourish with a small bow at the top, thin blue frame with notched corners. Bright marigold yellow background. Flat vector logo design, bold and playful, no other text.`,
   },
   {
     name: "folk-art-badge",
     prompt:
-      'Circular vintage sticker badge logo for a DJ. The word "IAMERICANO" arched around the top in bold cream condensed letters. In the center, a vinyl record whose label is a Mexican folk-art sun mural with green leaves and a terracotta clay cup. Palette: chili red, hot pink, marigold, cobalt blue, leaf green. Thick cream outline around the badge, light screen-print texture, on a solid chili red background. Flat vector sticker design, no other text.',
+      `Circular vintage sticker badge logo for a DJ. The word "${UPPER}" arched around the top in bold cream condensed letters. In the center, a vinyl record with a small spindle hole in its exact center; around the hole the label shows a Mexican folk-art sun mural (sun face placed below the hole, not on it) with green leaves and a terracotta clay cup. Palette: chili red, hot pink, marigold, cobalt blue, leaf green. Thick cream outline around the badge, light screen-print texture, on a solid chili red background. Flat vector sticker design, no other text.`,
   },
 ];
 
