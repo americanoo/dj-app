@@ -14,6 +14,7 @@ import {
 } from '../core/model';
 import type { ImportResult } from '../core/formats';
 import { mergeIntoLibrary, type MergeChoices } from '../core/merge';
+import { mergeScan, type ScanEntry } from '../core/musiclib';
 import { copySet } from '../core/versions';
 import { initHistory, record, redo, undo, type History } from '../core/history';
 import { playLength, setEnd, withTimes } from '../core/setplan';
@@ -67,7 +68,11 @@ export type Action =
   | { type: 'updateChapter'; id: string; patch: Partial<Chapter> }
   | { type: 'removeChapter'; id: string }
   | { type: 'moveChapter'; id: string; delta: number }
-  | { type: 'clearLibrary' };
+  | { type: 'clearLibrary' }
+  /** Music folders scanned (desktop app): new files become tracks, known ones fill gaps. */
+  | { type: 'scanMerge'; entries: ScanEntry[] }
+  /** Missing files found again: each track's new location. */
+  | { type: 'relink'; paths: Record<string, string> };
 
 export function activeSet(p: Project): SetPlan {
   return p.sets.find((s) => s.id === p.activeSetId) ?? p.sets[0];
@@ -96,6 +101,13 @@ export function reducer(p: Project, a: Action): Project {
       const t = p.library.tracks[a.id];
       if (!t) return p;
       return { ...p, library: { ...p.library, tracks: { ...p.library.tracks, [a.id]: withEdit(t, a.patch) } } };
+    }
+    case 'scanMerge':
+      return { ...p, library: mergeScan(p.library, a.entries).library };
+    case 'relink': {
+      const tracks = { ...p.library.tracks };
+      for (const [id, path] of Object.entries(a.paths)) if (tracks[id]) tracks[id] = { ...tracks[id], path };
+      return { ...p, library: { ...p.library, tracks } };
     }
     case 'updateTracks': {
       const tracks = { ...p.library.tracks };
@@ -268,6 +280,10 @@ function actionLabel(a: Action): string {
     }
     case 'updateTracks':
       return Object.values(a.patches).some((p) => 'cues' in p) ? 'Auto cues' : 'BPM fixes';
+    case 'scanMerge':
+      return 'Music folder scan';
+    case 'relink':
+      return 'Found missing files';
     case 'setCues':
       return 'Cue change';
     case 'addTrack':

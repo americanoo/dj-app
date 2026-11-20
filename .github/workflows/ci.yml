@@ -20,12 +20,12 @@ jobs:
         run: npm run typecheck
       - name: Unit tests
         run: npm test
-      - name: Build
-        run: npm run build
+      - name: Build (web app and the Mac app's main process)
+        run: npm run desktop:build
       - name: Install Chromium for the browser tests
         run: npx playwright install --with-deps chromium
-      - name: Browser tests
-        run: npm run e2e
+      - name: Browser tests (and the Mac app, under a virtual display)
+        run: xvfb-run -a npm run e2e
       - name: Keep the report when something fails
         if: failure()
         uses: actions/upload-artifact@v4

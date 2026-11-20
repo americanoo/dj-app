@@ -27,7 +27,9 @@ import { Tour, useDemoLoader, useTour } from './Tour';
 import { useIsPhone, type PhoneTab } from './phone';
 import { PhoneTabs } from './PhoneTabs';
 import { useInstall } from './install';
-import { onNotify } from './toastBus';
+import { onNotify, type ToastAction } from './toastBus';
+import { useDesktop } from './desktop';
+import { MissingFiles, MusicSetup } from './MusicSetup';
 import { activeSet, reducer, useStore } from './store';
 
 
@@ -41,10 +43,12 @@ interface Toast {
   id: string;
   text: string;
   kind: 'info' | 'error';
+  action?: ToastAction;
 }
 
 export function App() {
   const { project, dispatch, undoLabel, redoLabel } = useStore();
+  const desktop = useDesktop();
   const { attach } = useAudio();
   const { save: saveVersion } = useVersions();
   const [versionsOpen, setVersionsOpen] = useState(false);
@@ -58,6 +62,22 @@ export function App() {
   const isPhone = useIsPhone();
   const install = useInstall();
   const [installHelp, setInstallHelp] = useState(false);
+  // The Mac app's panels: music folders (also the first-launch welcome) and missing files.
+  const [musicSetup, setMusicSetup] = useState<null | 'welcome' | 'manage'>(null);
+  const [missingOpen, setMissingOpen] = useState(false);
+  useEffect(() => {
+    if (!desktop.ready || desktop.settings.folders.length) return;
+    try {
+      if (localStorage.getItem('setcraft-music-setup') !== 'done') setMusicSetup('welcome');
+    } catch {
+      setMusicSetup('welcome');
+    }
+  }, [desktop.ready, desktop.settings.folders.length]);
+  useEffect(() => {
+    const open = (e: Event) => ((e as CustomEvent<string>).detail === 'missing' ? setMissingOpen(true) : setMusicSetup('manage'));
+    window.addEventListener('setcraft-open-panel', open);
+    return () => window.removeEventListener('setcraft-open-panel', open);
+  }, []);
   const [tab, setTab] = useState<PhoneTab>(() => (Object.keys(project.library.tracks).length ? 'night' : 'library'));
   // On a computer the night's pane shows the timeline or the Sheet (the night as typed times); on a phone the Sheet has its own tab.
   const [nightView, setNightViewState] = useState<'timeline' | 'sheet'>(() => {
@@ -127,10 +147,10 @@ export function App() {
   const projectRef = useRef(project);
   projectRef.current = project;
 
-  const toast = useCallback((text: string, kind: Toast['kind'] = 'info') => {
+  const toast = useCallback((text: string, kind: Toast['kind'] = 'info', action?: ToastAction) => {
     const id = uid('toast');
-    setToasts((t) => [...t, { id, text, kind }]);
-    window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), kind === 'error' ? 9000 : 5000);
+    setToasts((t) => [...t, { id, text, kind, action }]);
+    window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), kind === 'error' || action ? 9000 : 5000);
   }, []);
   useEffect(() => onNotify(toast), [toast]);
 
@@ -167,7 +187,8 @@ export function App() {
             }
             continue;
           }
-          const result = importFile(file.name, bytes);
+          // In the Mac app, tracks whose saved location isn't here are pointed at the files in your music folders.
+          const result = await desktop.remapImport(importFile(file.name, bytes));
           const plan = planMerge(projectRef.current.library, result);
           const choices = await reviewMerge(file.name, plan);
           if (!choices) {
@@ -222,8 +243,15 @@ export function App() {
         else toast(`Linked audio for ${match.artist} – ${match.title}`);
       }
     },
-    [attach, dispatch, openCues, toast, saveVersion],
+    [attach, dispatch, openCues, toast, saveVersion, desktop.remapImport],
   );
+
+  // The Mac app imports collection files through the same path as picked ones.
+  useEffect(() => {
+    const onImport = (e: Event) => void handleFiles((e as CustomEvent<File[]>).detail);
+    window.addEventListener('setcraft-import-files', onImport);
+    return () => window.removeEventListener('setcraft-import-files', onImport);
+  }, [handleFiles]);
 
   // Esc closes the pop-up panels.
   useEffect(() => {
@@ -346,7 +374,7 @@ export function App() {
             <option value="__dup">⧉ Duplicate "{set.name}"</option>
           </select>
           {/* Until a folder is linked (or it needs a click to reconnect), linking it is front and centre. */}
-          {folder.status !== 'ready' && !isPhone && <LinkFolderButton topbar />}
+          {folder.status !== 'ready' && !isPhone && !desktop.available && <LinkFolderButton topbar />}
           <MenuButton label="⋯" title="More: story, music folder, controller, versions">
             {(close) => (
               <>
@@ -372,10 +400,27 @@ export function App() {
                     <span className="menu-hint">back to your DJ software</span>
                   </button>
                 )}
-                {(folder.status === 'ready' || isPhone) && (
-                  <div className="menu-item-wrap" onClick={close}>
-                    <LinkFolderButton topbar />
-                  </div>
+                {desktop.available ? (
+                  <button
+                    className="menu-item"
+                    onClick={() => {
+                      close();
+                      setMusicSetup('manage');
+                    }}
+                  >
+                    ♫ Music folders
+                    <span className="menu-hint">
+                      {desktop.missing.length
+                        ? `${desktop.missing.length} missing`
+                        : `${desktop.settings.folders.length} folder${desktop.settings.folders.length === 1 ? '' : 's'}${desktop.settings.collection ? ' · Traktor in sync' : ''}`}
+                    </span>
+                  </button>
+                ) : (
+                  (folder.status === 'ready' || isPhone) && (
+                    <div className="menu-item-wrap" onClick={close}>
+                      <LinkFolderButton topbar />
+                    </div>
+                  )
                 )}
                 <button
                   className="menu-item"
@@ -578,11 +623,39 @@ export function App() {
           </div>
         </div>
       )}
-      <Tour state={tour.state} setState={tour.setState} loadedTrackId={loadedTrackId} onTab={isPhone ? setTab : undefined} />
+      {musicSetup && (
+        <MusicSetup
+          welcome={musicSetup === 'welcome'}
+          onClose={() => {
+            try {
+              localStorage.setItem('setcraft-music-setup', 'done');
+            } catch {
+              // private mode
+            }
+            setMusicSetup(null);
+          }}
+        />
+      )}
+      {missingOpen && <MissingFiles onClose={() => setMissingOpen(false)} />}
+      {/* The tour waits until the music is set up. */}
+      {musicSetup !== 'welcome' && (
+        <Tour state={tour.state} setState={tour.setState} loadedTrackId={loadedTrackId} onTab={isPhone ? setTab : undefined} />
+      )}
       <div className="toasts" aria-live="polite">
         {toasts.map((t) => (
           <div key={t.id} className={`toast ${t.kind}`}>
             {t.text}
+            {t.action && (
+              <button
+                className="small toast-action"
+                onClick={() => {
+                  t.action!.run();
+                  setToasts((all) => all.filter((x) => x.id !== t.id));
+                }}
+              >
+                {t.action.label}
+              </button>
+            )}
           </div>
         ))}
       </div>

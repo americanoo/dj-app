@@ -47,6 +47,40 @@ What phones can't do (yet): DJ controllers need Chrome on Android over USB-C. A 
 own, separate from your computer's. Safari may clear the songs it keeps for a website that isn't opened for
 weeks; installed on the Home Screen, they stay.
 
+## Setcraft for Mac
+
+The Mac app is Setcraft with full access to your music: no linking, no Terminal.
+
+**Get it:** download the newest build from the repository's Releases page, the pre-release called
+**Setcraft for Mac (latest build)**: `Setcraft-…-arm64.dmg` for Apple silicon (M1 and later), `Setcraft-…-x64.dmg`
+for Intel Macs. Open the .dmg and drag Setcraft into Applications.
+
+**First open:** the app isn't signed with an Apple Developer certificate yet, so macOS stops it the first time.
+Open it once, then go to **System Settings → Privacy & Security**, scroll down and click **Open Anyway** next to
+Setcraft. (If macOS says the app "is damaged", run `xattr -cr /Applications/Setcraft.app` in Terminal once.)
+After that it opens normally from the Dock or Launchpad.
+
+**First launch: where is your music?** Add your music folders and drives (an external drive works; nothing is
+copied). Setcraft scans them and builds its library from the files: title, artist, BPM and key from their tags,
+and a fingerprint of each file so it can find it again after a move. Then, optionally, bring in your cues and
+playlists: Setcraft finds Traktor's `collection.nml` on its own (one click: **Import**), or choose any collection
+file. Its tracks are matched to the files in your folders, by location or, when the location is out of date, by
+name. With **Keep in sync** on, whenever Traktor saves its collection, new tracks and cues come in by themselves
+(your Setcraft edits are kept, and there's **Undo** on the message).
+
+Every track then plays straight from where it is, at full quality, with key lock (the app is a secure page).
+
+**Missing files:** when a file has moved or a drive was renamed, Setcraft looks for it in your music folders by
+fingerprint and by name, and fixes the ones it's sure of. The rest are listed under **⚠ missing** in the Library
+(and ⋯ → Music folders): **Locate…** one, and the others from the same folder follow.
+
+Manage it all later from **⋯ → Music folders**. The Mac app keeps its own library, separate from the web
+version's: to bring that one over, use **Export → Back up whole project (JSON)** in the web version, then
+**Import** that file in the app.
+
+**Building it yourself** (on a Mac): `npm ci`, then `npm run desktop` to run it, or `npm run desktop:dist` for the
+.dmg in `release/`. The "Mac app" GitHub workflow does the same on every push and publishes the pre-release.
+
 ## The Setcraft helper: your music, straight from your computer
 
 Instead of linking folders or adding songs on each device, run the **Setcraft helper** on the computer your
@@ -415,6 +449,7 @@ src/
     sections.ts         intro / breakdown / build / drop / outro detection
     pathmatch.ts        finding a track's file in a linked folder or added songs (by name, loosely)
     sheet.ts            the Sheet: mix points by time, FX switches, forgiving time entry
+    musiclib.ts         the library from music folders; finding moved files (fingerprint, name, folder moves)
     keys.ts             key parsing (standard, Camelot, Open Key, Traktor ids) + harmonic relations
     time.ts             time formatting, beat/bar snapping, bar.beat labels
     setplan.ts          set timeline, transition warnings, run-sheet generation
@@ -440,6 +475,11 @@ src/
     signalsmith-stretch.mjs   time-stretch / pitch-shift (MIT), with one scheduling fix (see its header)
 helper/
   setcraft-helper.mjs   the Setcraft helper: serves the app and your music to your devices (Node, no dependencies)
+desktop/                Setcraft for Mac (Electron)
+  main.ts               the app: window, built-in helper, settings, folder scanning, Traktor sync, file checks
+  preload.cjs           what the page may ask of the app (window.setcraftDesktop)
+  scan.ts               music-folder scanning: tags, fingerprints, rescan cache
+  libraries.ts          finding Traktor's collection on this Mac
 ```
 
 Each importer converts into a single internal model, and each exporter converts out of it. Cue positions are stored

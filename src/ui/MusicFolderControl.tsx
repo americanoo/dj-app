@@ -6,6 +6,7 @@ import { useMusicFolder, type AddMusicResult } from './musicFolder';
 import { useIsPhone } from './phone';
 import { activeSet, useStore } from './store';
 import { notify } from './toastBus';
+import { openDesktopPanel, useDesktop } from './desktop';
 import { songsInZip } from './unzipMusic';
 
 /** Audio types (and zips of them) for the picker. Listed by extension too, so phones offer every kind. */
@@ -189,6 +190,7 @@ export function LinkFolderButton({ compact = false, topbar = false }: { compact?
 /** Sidebar panel: folder status plus "analyse the set's waveforms". */
 export function MusicFolderPanel() {
   const folder = useMusicFolder();
+  const desktop = useDesktop();
   const isPhone = useIsPhone();
   const { project, dispatch } = useStore();
   const { audio, rememberedIds, outdatedIds, attach } = useAudio();
@@ -219,8 +221,37 @@ export function MusicFolderPanel() {
 
   return (
     <div className="folder-panel">
-      <h3>{isPhone ? 'Music' : 'Music folder'}</h3>
+      <h3>{desktop.available ? 'Music folders' : isPhone ? 'Music' : 'Music folder'}</h3>
+      {desktop.available && (
+        <>
+          <p className="small-text">
+            {desktop.scanning ? (
+              <span className="muted">Scanning… {desktop.scanning.total ? `${desktop.scanning.done} of ${desktop.scanning.total}` : ''}</span>
+            ) : (
+              <>
+                <b>{desktop.entries.length.toLocaleString()} songs</b>
+                <span className="muted">
+                  {' '}
+                  in {desktop.settings.folders.length} folder{desktop.settings.folders.length === 1 ? '' : 's'}
+                  {desktop.settings.collection ? ' · Traktor in sync' : ''}
+                </span>
+              </>
+            )}
+          </p>
+          <div className="row wrap">
+            <button className="small" onClick={() => openDesktopPanel('music')}>
+              Manage…
+            </button>
+            {desktop.missing.length > 0 && (
+              <button className="small missing-btn" onClick={() => openDesktopPanel('missing')}>
+                ⚠ {desktop.missing.length} missing
+              </button>
+            )}
+          </div>
+        </>
+      )}
       {folder.helper &&
+        !desktop.available &&
         (folder.helper.paired ? (
           <p className="small-text helper-status ok">
             <span className="status-dot ok" /> Playing from <b>{folder.helper.name}</b>
@@ -242,7 +273,7 @@ export function MusicFolderPanel() {
           </span>
         </p>
       )}
-      {folder.status === 'none' && !isPhone && (
+      {folder.status === 'none' && !isPhone && !desktop.available && (
         <p className="muted small-text">Link the folder your music lives in and Setcraft finds each track's audio for waveforms.</p>
       )}
       {isPhone && !folder.deviceCount && (
@@ -254,7 +285,7 @@ export function MusicFolderPanel() {
       {folder.status === 'needs-permission' && (
         <p className="muted small-text">Your browser needs a click to open “{folder.folderName}” again.</p>
       )}
-      {!isPhone && (
+      {!isPhone && !desktop.available && (
         <div className="row wrap">
           <LinkFolderButton />
           {folder.status === 'ready' && (
@@ -272,6 +303,7 @@ export function MusicFolderPanel() {
           <span className="muted"> on this {isPhone ? 'phone' : 'device'}</span>
         </p>
       )}
+      {!desktop.available && (
       <div className="row wrap">
         <AddMusicButton
           className="small"
@@ -290,6 +322,7 @@ export function MusicFolderPanel() {
           </button>
         )}
       </div>
+      )}
       {setTracks.length > 0 && (
         <div className="small-text folder-waves">
           <span className="muted" title={`Colour waveforms for the tracks in “${set.name}”`}>

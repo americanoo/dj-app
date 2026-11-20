@@ -10,3 +10,7 @@ dist
 e2e/.audio/
 test-results/
 playwright-report/
+
+# Mac app builds
+desktop/build/
+release/

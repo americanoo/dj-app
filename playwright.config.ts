@@ -20,7 +20,11 @@ export default defineConfig({
     baseURL: 'http://localhost:5174',
     viewport: { width: 1360, height: 950 },
     trace: 'retain-on-failure',
-    launchOptions: { args: ['--autoplay-policy=no-user-gesture-required'] },
+    launchOptions: {
+      args: ['--autoplay-policy=no-user-gesture-required'],
+      // Machines with a different Chromium than this Playwright downloads can point at it.
+      executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH || undefined,
+    },
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'], viewport: { width: 1360, height: 950 } } }],
   webServer: {

@@ -8,7 +8,7 @@
 
 import type { BlendStyle, TempoMode, TransitionAutomation } from './mixplan';
 
-export type SourceFormat = 'rekordbox' | 'traktor' | 'serato' | 'djay' | 'm3u' | 'csv' | 'manual';
+export type SourceFormat = 'rekordbox' | 'traktor' | 'serato' | 'djay' | 'm3u' | 'csv' | 'manual' | 'folder';
 
 export type CueKind = 'cue' | 'loop';
 
@@ -58,6 +58,11 @@ export interface Track {
   duration?: number;
   /** Absolute path on the DJ's machine, POSIX or Windows style. */
   path?: string;
+  /**
+   * The audio file's fingerprint (its size and a hash of its start and end), from a
+   * music-folder scan: finds the file again when it's moved or its drive is renamed.
+   */
+  fileId?: string;
   /** First downbeat of the beat grid, seconds. */
   gridStart?: number;
   /** Full tempo map when the source has one (rekordbox dynamic grids). */
@@ -212,7 +217,8 @@ export function emptyProject(): Project {
  * programs: normalised path when known, otherwise artist + title.
  */
 export function trackIdentity(t: Pick<Track, 'path' | 'artist' | 'title'>): string {
-  if (t.path) return 'p:' + normalisePath(t.path).toLowerCase();
+  // NFC: macOS hands out file names with accents decomposed, DJ software usually composed.
+  if (t.path) return 'p:' + normalisePath(t.path).normalize('NFC').toLowerCase();
   return 'm:' + `${t.artist}\u0000${t.title}`.toLowerCase().trim();
 }
 

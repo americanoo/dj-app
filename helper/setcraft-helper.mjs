@@ -111,21 +111,28 @@ async function walk(root, rel = '', out = []) {
  * `trustLoopback`: requests from this computer need no pairing (off in tests).
  */
 export async function createHelper({ token, app, music = [], roots, trustLoopback = true, log = () => {} }) {
-  const musicRoots = await Promise.all(music.map((m) => realpath(resolve(m)).catch(() => resolve(m))));
-  const allowed = await Promise.all(
-    (roots ?? [homedir(), '/Volumes']).map((r) => realpath(r).catch(() => r)),
-  );
-  allowed.push(...musicRoots);
+  const realRoot = (m) => realpath(resolve(m)).catch(() => resolve(m));
+  const baseRoots = await Promise.all((roots ?? [homedir(), '/Volumes']).map((r) => realpath(r).catch(() => r)));
+  let allowed = [...baseRoots];
 
-  // Index the --music folders in the background, for tracks whose saved location is gone.
+  // Index the music folders in the background, for tracks whose saved location is gone.
   const index = { byRoot: [] };
-  const indexing = Promise.all(
-    musicRoots.map(async (root) => {
-      const files = await walk(root);
-      index.byRoot.push({ root, idx: buildIndex(files) });
-      log(`Indexed ${files.length} audio files in ${root}`);
-    }),
-  );
+  let indexing = Promise.resolve();
+  const setMusic = (folders) => {
+    indexing = (async () => {
+      const musicRoots = await Promise.all(folders.map(realRoot));
+      allowed = [...baseRoots, ...musicRoots];
+      const byRoot = [];
+      for (const root of musicRoots) {
+        const files = await walk(root);
+        byRoot.push({ root, idx: buildIndex(files) });
+        log(`Indexed ${files.length} audio files in ${root}`);
+      }
+      index.byRoot = byRoot;
+    })();
+    return indexing;
+  };
+  void setMusic(music);
 
   const audioFile = async (q) => {
     const wanted = q.get('path') || '';
@@ -201,7 +208,9 @@ export async function createHelper({ token, app, music = [], roots, trustLoopbac
       else res.destroy();
     }
   });
-  server.indexing = indexing;
+  Object.defineProperty(server, 'indexing', { get: () => indexing });
+  /** Change the music folders (the desktop app's settings): re-indexed in the background. */
+  server.setMusic = setMusic;
   return server;
 }
 

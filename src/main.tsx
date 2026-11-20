@@ -8,6 +8,7 @@ import { VersionsProvider } from './ui/versions';
 import { LicenseProvider } from './ui/license';
 import { MidiProvider } from './ui/midi';
 import { NightProvider } from './ui/night';
+import { DesktopProvider } from './ui/desktop';
 import '@fontsource-variable/inter';
 import '@fontsource-variable/jetbrains-mono';
 import './ui/styles.css';
@@ -21,6 +22,7 @@ createRoot(document.getElementById('root')!).render(
       <VersionsProvider>
         <AudioProvider>
           <MusicFolderProvider>
+            <DesktopProvider>
             <LicenseProvider>
               <MidiProvider>
                 <NightProvider>
@@ -28,6 +30,7 @@ createRoot(document.getElementById('root')!).render(
                 </NightProvider>
               </MidiProvider>
             </LicenseProvider>
+            </DesktopProvider>
           </MusicFolderProvider>
         </AudioProvider>
       </VersionsProvider>
