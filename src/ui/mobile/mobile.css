@@ -319,13 +319,13 @@ html.phone body:has(.m-app) {
   cursor: grab;
 }
 
-/* The night: a true timeline */
+/* The night: a timeline to scale, one card after another */
 .m-night {
   padding: 0 0 24px;
 }
 .m-timeline {
   position: relative;
-  margin-top: 6px;
+  margin-top: 8px;
 }
 .m-lanes {
   position: absolute;
@@ -337,18 +337,17 @@ html.phone body:has(.m-app) {
 .m-tcard {
   position: absolute;
   left: 0;
-  right: 14px;
+  right: 0;
   box-sizing: border-box;
   border: 1px solid var(--m-line);
   border-radius: 6px;
   background: linear-gradient(#131313 42%, #000);
-  overflow: visible;
+  overflow: hidden;
   transition: transform 0.15s ease;
 }
-.m-tcard.lane-1 {
-  left: 14px;
-  right: 0;
-  z-index: 1;
+.m-tcard + .m-tcard,
+.m-gap + .m-tcard {
+  border-top-color: #2a2a2a;
 }
 .m-tcard.dragging,
 .m-tcard.trimming {
@@ -356,6 +355,14 @@ html.phone body:has(.m-app) {
   z-index: 5;
   border-color: var(--m-soft);
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.8);
+  overflow: visible;
+}
+.m-card-face {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  overflow: hidden;
 }
 .m-tcard .m-row-body {
   height: 100%;
@@ -422,45 +429,64 @@ html.phone body:has(.m-app) {
   flex-basis: 100%;
   padding: 0 4px 0 30px;
 }
-.m-row.dimmed > *:not(.m-lever) {
-  opacity: 0.22;
+.m-row.dimmed {
+  opacity: 0.25;
 }
 .m-playing-edge {
   position: absolute;
-  inset: -1px;
+  inset: 0;
   border: 1px solid rgba(255, 46, 46, 0.85);
   border-radius: 6px;
-  box-shadow: 0 0 12px rgba(255, 46, 46, 0.25);
+  box-shadow: inset 0 0 12px rgba(255, 46, 46, 0.18);
   pointer-events: none;
+  z-index: 2;
 }
-/* The covered tail of a card: its blend into the next track, striped, with its length */
-.m-card-face {
-  position: relative;
-  overflow: hidden;
-}
-.m-blend-tail {
+/* The blend with the track before: a striped band at the top of the card */
+.m-blend-band {
   position: absolute;
+  top: 0;
   left: 0;
   right: 0;
-  border-top: 1px dashed rgba(232, 112, 143, 0.6);
-  background: repeating-linear-gradient(135deg, rgba(232, 112, 143, 0.22) 0 2px, transparent 2px 6px);
+  border-bottom: 1px dashed rgba(232, 112, 143, 0.7);
+  background: repeating-linear-gradient(135deg, rgba(232, 112, 143, 0.2) 0 2px, transparent 2px 7px);
+  pointer-events: none;
+  z-index: 1;
+  overflow: hidden;
+}
+.m-blend-band span {
+  position: absolute;
+  right: 6px;
+  top: 2px;
+  font-size: 8px;
+  line-height: 10px;
+  color: var(--m-pink);
+  white-space: nowrap;
+  max-width: calc(100% - 12px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background: rgba(0, 0, 0, 0.6);
+  padding: 0 3px;
+  border-radius: 2px;
+}
+/* A gap between two tracks: silence */
+.m-gap {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  border-left: 1px dashed #3a3a3f;
+  border-right: 1px dashed #3a3a3f;
   pointer-events: none;
 }
-.m-blend-tail i {
+.m-gap span {
   position: absolute;
-  top: 4px;
-  font-style: normal;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
   font-size: 8px;
-  color: var(--m-pink);
-  writing-mode: vertical-rl;
+  color: var(--m-faint);
+  white-space: nowrap;
 }
-.lane-0 .m-blend-tail i {
-  left: 2px;
-}
-.lane-1 .m-blend-tail i {
-  right: 2px;
-}
-/* Levers: a layer above every card, so a blend never hides them */
+/* Levers: a layer above every card */
 .m-levers {
   position: absolute;
   top: 0;
@@ -472,9 +498,10 @@ html.phone body:has(.m-app) {
 }
 .m-lever {
   position: absolute;
-  height: 20px;
-  margin-top: -10px;
-  width: 64px;
+  height: 22px;
+  margin-top: -11px;
+  width: 70px;
+  left: calc(50% - 35px);
   pointer-events: auto;
   touch-action: none;
   cursor: ns-resize;
@@ -482,38 +509,30 @@ html.phone body:has(.m-app) {
   align-items: center;
   justify-content: center;
 }
-.m-lever.lane-0 {
-  left: calc((100% - 14px) / 2 - 32px);
-}
-.m-lever.lane-1 {
-  left: calc((100% - 14px) / 2 - 18px);
-}
-/* A bottom edge under the next card: its lever sits on the side that still shows */
-.m-lever.bottom.covered.lane-0 {
-  left: -24px;
-}
-.m-lever.bottom.covered.lane-1 {
-  left: auto;
-  right: -24px;
-}
 .m-lever i {
   display: block;
-  width: 30px;
-  height: 4px;
-  border-radius: 2px;
-  background: #55555c;
+  width: 34px;
+  height: 5px;
+  border-radius: 3px;
+  background: #6a6a70;
   border: 1px solid #000;
 }
-.m-lever.covered i {
+/* The blend's lever: pink, on the right, at the end of the track before */
+.m-lever.blend {
+  left: auto;
+  right: 6px;
+  width: 52px;
+}
+.m-lever.blend i {
+  width: 24px;
   background: var(--m-pink);
-  opacity: 0.8;
 }
 .m-lever:active i {
   background: var(--m-text);
 }
 .m-lever-tip {
   position: absolute;
-  bottom: 16px;
+  top: 18px;
   padding: 3px 7px;
   border-radius: 8px;
   background: var(--m-text);
@@ -521,10 +540,6 @@ html.phone body:has(.m-app) {
   font-size: 10px;
   font-weight: 700;
   white-space: nowrap;
-}
-.m-lever.bottom .m-lever-tip {
-  bottom: auto;
-  top: 16px;
 }
 .m-handle {
   display: grid;
@@ -541,6 +556,7 @@ html.phone body:has(.m-app) {
   top: 0;
   bottom: 0;
   width: 46px;
+  cursor: pointer;
 }
 .m-ruler.left {
   left: 0;
@@ -578,7 +594,11 @@ html.phone body:has(.m-app) {
   z-index: 2;
 }
 .m-ruler.left .m-ruler-label {
+  right: 6px;
   align-items: flex-end;
+}
+.m-ruler.right .m-ruler-label {
+  left: 6px;
 }
 .m-ruler-label small {
   font-size: 7px;
@@ -588,7 +608,6 @@ html.phone body:has(.m-app) {
   font: 8px/12px var(--m-mono);
   color: var(--m-soft);
   border-bottom: 1px dashed #2f2f35 !important;
-  text-align: inherit;
 }
 .m-ruler.left input.m-ruler-time {
   text-align: right;
@@ -605,33 +624,34 @@ html.phone body:has(.m-app) {
   font-size: 12px;
   width: 8ch !important;
 }
-.m-ruler.left .m-ruler-label {
-  right: 6px;
-}
-.m-ruler.right .m-ruler-label {
-  left: 6px;
-}
-/* Where the night is */
+/* Where the night is: drag its label to move the playhead */
 .m-now-line {
   position: absolute;
   left: 0;
   right: 0;
   height: 0;
   border-top: 1px solid var(--m-red);
-  z-index: 4;
+  z-index: 70;
   pointer-events: none;
 }
-.m-now-line span {
+.m-now-grab {
   position: absolute;
   left: 0;
-  top: -6px;
-  padding: 0 3px;
-  font-size: 8px;
-  line-height: 11px;
+  top: -9px;
+  padding: 2px 6px;
+  font-size: 9px;
+  line-height: 14px;
   background: var(--m-red);
   color: #000;
   font-weight: 700;
-  border-radius: 2px;
+  border-radius: 3px;
+  pointer-events: auto;
+  touch-action: none;
+  cursor: ns-resize;
+}
+.m-now-grab::after {
+  content: '⇕';
+  margin-left: 4px;
 }
 .m-now-line::after {
   content: '';
@@ -640,6 +660,18 @@ html.phone body:has(.m-app) {
   top: -4px;
   border: 4px solid transparent;
   border-right-color: var(--m-red);
+}
+.m-follow {
+  position: absolute;
+  right: 56px;
+  z-index: 75;
+  height: 28px !important;
+  padding: 0 12px !important;
+  border-radius: 14px !important;
+  background: var(--m-red) !important;
+  color: #000 !important;
+  font-size: 10px;
+  font-weight: 700;
 }
 .m-zoom {
   display: flex;
@@ -1360,4 +1392,121 @@ html.phone .app.m-layout .toasts {
   font-weight: 400;
   color: var(--m-faint);
   text-decoration: line-through;
+}
+
+/* Captions under the bar buttons, so each says what it does */
+.m-cap {
+  font-size: 8px;
+  line-height: 1;
+  letter-spacing: 0.3px;
+  color: var(--m-muted);
+  white-space: nowrap;
+}
+.m-bar-btn.on .m-cap,
+.m-tool.on .m-cap {
+  color: var(--m-text);
+}
+.m-bar-btn svg {
+  flex: none;
+}
+.m-bar-tools .m-bar-btn svg {
+  width: 20px;
+  height: 20px;
+}
+.m-tool.on::after {
+  display: none;
+}
+.m-tool.on {
+  background: #26262a !important;
+  box-shadow: inset 0 -2px 0 var(--m-text);
+}
+/* The keyframe strip above the tools */
+.m-kf-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  padding: 4px 4px 4px 4px;
+  min-height: 40px;
+  box-sizing: border-box;
+  background: var(--m-panel);
+  border: 1px solid var(--m-line-dim);
+  border-radius: 12px;
+}
+.m-kf-btn {
+  display: flex !important;
+  align-items: center;
+  gap: 6px;
+  height: 32px !important;
+  padding: 0 12px !important;
+  border-radius: 9px !important;
+  border: 1px solid rgba(255, 46, 46, 0.6) !important;
+  color: var(--m-text) !important;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  flex: none;
+}
+.m-kf-btn.open {
+  background: rgba(255, 46, 46, 0.18) !important;
+}
+.m-kf-info {
+  flex: 1;
+  min-width: 0;
+  font-size: 10px;
+  color: var(--m-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.m-kf-info b {
+  color: var(--m-red);
+  font-weight: 700;
+}
+.m-kf-x {
+  width: 30px;
+  height: 30px !important;
+  border-radius: 50% !important;
+  border: 1px solid var(--m-line) !important;
+  color: var(--m-soft) !important;
+  font-size: 12px;
+  flex: none;
+}
+
+/* Waveform strips */
+.m-wave {
+  position: relative;
+  height: 16px;
+  flex: none;
+  cursor: pointer;
+}
+.m-wave::before {
+  /* a bigger tap target */
+  content: '';
+  position: absolute;
+  inset: -6px 0;
+}
+.m-wave canvas {
+  display: block;
+}
+.m-wave-marks {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+.m-playhead {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  left: 0;
+  width: 1px;
+  background: var(--m-text);
+  box-shadow: 0 0 4px rgba(255, 255, 255, 0.7);
+  pointer-events: none;
+}
+/* The timeline keeps its layers (levers, the playhead) to itself, under menus and sheets. */
+.m-night {
+  position: relative;
+  z-index: 0;
 }

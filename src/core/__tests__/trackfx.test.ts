@@ -300,3 +300,15 @@ describe('the night counts from 00:00, with exact entrances and real lengths', (
     expect(times(p)[1]).toEqual(['b', 268.6]);
   });
 });
+
+describe('changing a blend', () => {
+  it("a track's end moved with keepNext: the next track stays, so the blend is longer or shorter", () => {
+    const mk = (id: string, duration: number): Track => ({ id, title: id, artist: '', cues: [], source: 'manual', duration, bpm: 120 });
+    let p: Project = { ...emptyProject(), library: { tracks: { a: mk('a', 300), b: mk('b', 240) }, playlists: [] } };
+    p = reducer(p, { type: 'addEntries', trackIds: ['a', 'b'], blend: true }); // b at 268: a 32 s blend
+    p = reducer(p, { type: 'trimEntry', id: activeSet(p).entries[0].id, edge: 'end', to: 280, keepNext: true });
+    expect(activeSet(p).entries[1].at).toBe(268);
+    const [a] = buildTimeline(activeSet(p), p.library);
+    expect(a.playFor).toBe(280); // a 12 s blend now
+  });
+});

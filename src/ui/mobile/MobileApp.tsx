@@ -5,6 +5,7 @@ import { newCue } from '../../core/sheet';
 import { tempoMode } from '../../core/mixplan';
 import { newRegion, type FxRegion, type FxTool } from '../../core/trackfx';
 import { useNight, useNightState } from '../night';
+import { FX_TOOLS } from '../../core/trackfx';
 import { activeSet, useStore } from '../store';
 import { notify } from '../toastBus';
 import {
@@ -65,7 +66,6 @@ export function MobileApp({
 }) {
   const { project, dispatch, undoLabel, redoLabel } = useStore();
   const night = useNight();
-  const { playing } = useNightState();
   const set = activeSet(project);
   const items = useMemo(() => buildTimeline(set, project.library), [set, project.library]);
   const [screen, setScreen] = useState<Screen>(() => (set.entries.length ? 'playlist' : 'library'));
@@ -313,11 +313,7 @@ export function MobileApp({
             <button className={`m-ctl${mixerOpen ? ' on' : ''}`} aria-label="mixer" title="mixer: vocals and instrumental levels" onClick={() => setMixerOpen((o) => !o)}>
               <MixerIcon />
             </button>
-            <div className="m-play-ring">
-              <button className="m-play" aria-label={playing ? 'pause' : 'play'} onClick={() => night.toggle()}>
-                {playing ? <PauseBig /> : <PlayBig />}
-              </button>
-            </div>
+            <PlayButton />
             <div className="m-plus-wrap">
               <button
                 className={`m-ctl m-plus mode-${mode}${menuOpen ? ' held' : ''}${mode === 'keyframe' && activeRegion?.to === undefined && activeRegion ? ' open' : ''}`}
@@ -365,14 +361,15 @@ export function MobileApp({
       <div className="m-bar-wrap">
         {bar === 'nav' || screen !== 'playlist' ? (
           <nav className="m-bar" aria-label="main">
-            <NavBtn label="library" on={screen === 'library'} onClick={() => setScreen('library')}>
+            <NavBtn label="library" cap="library" on={screen === 'library'} onClick={() => setScreen('library')}>
               <LibraryIcon />
             </NavBtn>
-            <NavBtn label="playlist" on={screen === 'playlist'} onClick={() => setScreen('playlist')}>
+            <NavBtn label="playlist" cap="night" on={screen === 'playlist'} onClick={() => setScreen('playlist')}>
               <PlaylistIcon />
             </NavBtn>
             <NavBtn
               label="tools"
+              cap="tools"
               on={false}
               onClick={() => {
                 setScreen('playlist');
@@ -382,48 +379,71 @@ export function MobileApp({
             >
               <ToolsIcon />
             </NavBtn>
-            <NavBtn label="settings" on={screen === 'settings'} onClick={() => setScreen('settings')}>
+            <NavBtn label="settings" cap="settings" on={screen === 'settings'} onClick={() => setScreen('settings')}>
               <SettingsIcon />
             </NavBtn>
           </nav>
         ) : bar === 'tools' ? (
-          <nav className="m-bar" aria-label="keyframe effects">
-            <BackBtn onClick={back} />
-            <ToolBtn label="echo out" on={toolOn('echo')} onClick={() => toggleTool('echo')}>
-              <EchoIcon />
-            </ToolBtn>
-            <ToolBtn label="reverb out" on={toolOn('reverb')} onClick={() => toggleTool('reverb')}>
-              <ReverbIcon />
-            </ToolBtn>
-            <ToolBtn label="filter" on={toolOn('filter')} onClick={() => toggleTool('filter')}>
-              <FilterIcon />
-            </ToolBtn>
-            <ToolBtn label="kill lows" on={toolOn('killLows')} onClick={() => toggleTool('killLows')}>
-              <KillLowsIcon />
-            </ToolBtn>
-            <ToolBtn
-              label={`acapella / instrumental mode${toolOn('acapella') ? ': acapella' : toolOn('instrumental') ? ': instrumental' : ''}`}
-              on={toolOn('acapella') || toolOn('instrumental')}
-              tag={toolOn('acapella') ? 'vox' : toolOn('instrumental') ? 'inst' : undefined}
-              onClick={() => toggleTool('stems')}
-            >
-              <MicIcon />
-            </ToolBtn>
-            <ToolBtn
-              label="match key"
-              on={!!focus?.entry.matchKey}
-              onClick={() => focus && updateEntry(focus.entry.id, { matchKey: !focus.entry.matchKey })}
-            >
-              <KeyIcon />
-            </ToolBtn>
-            <ToolBtn
-              label="sync"
-              on={tempoOn}
-              onClick={() => focus && updateEntry(focus.entry.id, { tempo: tempoOn ? 'free' : 'ride', sync: undefined })}
-            >
-              <SyncIcon />
-            </ToolBtn>
-          </nav>
+          <>
+            <KeyframeStrip
+              region={activeRegion}
+              onAdd={keyframe}
+              onDelete={() => {
+                if (!regionEntry || !activeRegion) return;
+                updateEntry(regionEntry.entry.id, { fx: (regionEntry.entry.fx ?? []).filter((r) => r.id !== activeRegion.id) });
+                setRegion(null);
+                notify('Keyframe deleted.', 'info', { label: 'Undo', run: () => dispatch({ type: 'undo' }) });
+              }}
+              onDone={() => setRegion(null)}
+            />
+            <nav className="m-bar m-bar-tools" aria-label="keyframe effects">
+              <BackBtn onClick={back} />
+              <ToolBtn label="echo out" cap="echo" on={toolOn('echo')} onClick={() => toggleTool('echo')}>
+                <EchoIcon />
+              </ToolBtn>
+              <ToolBtn label="reverb out" cap="reverb" on={toolOn('reverb')} onClick={() => toggleTool('reverb')}>
+                <ReverbIcon />
+              </ToolBtn>
+              <ToolBtn label="filter" cap="filter" on={toolOn('filter')} onClick={() => toggleTool('filter')}>
+                <FilterIcon />
+              </ToolBtn>
+              <ToolBtn label="kill lows" cap="no lows" on={toolOn('killLows')} onClick={() => toggleTool('killLows')}>
+                <KillLowsIcon />
+              </ToolBtn>
+              <ToolBtn
+                label={`acapella / instrumental mode${toolOn('acapella') ? ': acapella' : toolOn('instrumental') ? ': instrumental' : ''}`}
+                cap={toolOn('acapella') ? 'vocals' : toolOn('instrumental') ? 'instr.' : 'vox/inst'}
+                on={toolOn('acapella') || toolOn('instrumental')}
+                onClick={() => toggleTool('stems')}
+              >
+                <MicIcon />
+              </ToolBtn>
+              <ToolBtn
+                label="match key"
+                cap="key"
+                on={!!focus?.entry.matchKey}
+                onClick={() => {
+                  if (!focus) return;
+                  updateEntry(focus.entry.id, { matchKey: !focus.entry.matchKey });
+                  notify(focus.entry.matchKey ? `Match key off for “${focus.track?.title}”.` : `“${focus.track?.title}” is transposed to mix with the track before.`);
+                }}
+              >
+                <KeyIcon />
+              </ToolBtn>
+              <ToolBtn
+                label="sync"
+                cap="sync"
+                on={tempoOn}
+                onClick={() => {
+                  if (!focus) return;
+                  updateEntry(focus.entry.id, { tempo: tempoOn ? 'free' : 'ride', sync: undefined });
+                  notify(tempoOn ? `Sync off: “${focus.track?.title}” keeps its own tempo through the blend.` : `Sync on: the tempos ride together through the blend into “${focus.track?.title}”.`);
+                }}
+              >
+                <SyncIcon />
+              </ToolBtn>
+            </nav>
+          </>
         ) : bar === 'cue' ? (
           <CuePads it={focus} onBack={back} />
         ) : (
@@ -433,11 +453,13 @@ export function MobileApp({
               <span className="ic purple">
                 <LoopInIcon />
               </span>
+              <span className="u">in</span>
             </button>
             <button className="m-bar-btn" aria-label="loop out" title="loop out" onClick={loopOutAt}>
               <span className="ic pink">
                 <LoopOutIcon />
               </span>
+              <span className="u">out</span>
             </button>
             {LOOP_SIZES.map((b) => (
               <button key={b} className={`m-bar-btn m-size${loopSize === b ? ' on' : ''}`} aria-label={`loop ${b === 0.5 ? '1/2' : b} bars`} aria-pressed={loopSize === b} onClick={() => loopBars(b)}>
@@ -466,20 +488,93 @@ function snapBeat(s: number, beat: number, grid: number): number {
   return Math.max(0, grid + Math.round((s - grid) / beat) * beat);
 }
 
-function NavBtn({ label, on, onClick, children }: { label: string; on: boolean; onClick: () => void; children: ReactNode }) {
+function NavBtn({ label, cap, on, onClick, children }: { label: string; cap: string; on: boolean; onClick: () => void; children: ReactNode }) {
   return (
     <button className={`m-bar-btn${on ? ' on' : ''}`} aria-label={label} title={label} aria-current={on ? 'page' : undefined} onClick={onClick}>
       {children}
+      <span className="m-cap" aria-hidden="true">
+        {cap}
+      </span>
     </button>
   );
 }
 
-function ToolBtn({ label, on, onClick, children, tag }: { label: string; on: boolean; onClick: () => void; children: ReactNode; tag?: string }) {
+function ToolBtn({ label, cap, on, onClick, children }: { label: string; cap: string; on: boolean; onClick: () => void; children: ReactNode }) {
   return (
     <button className={`m-bar-btn m-tool${on ? ' on' : ''}`} aria-label={label} title={label} aria-pressed={on} onClick={onClick}>
       {children}
-      {tag && <span className="m-tool-tag">{tag}</span>}
+      <span className="m-cap" aria-hidden="true">
+        {cap}
+      </span>
     </button>
+  );
+}
+
+/** Play / pause. On its own so the rest of the screen doesn't redraw every time the night starts or stops. */
+function PlayButton() {
+  const night = useNight();
+  const { playing } = useNightState();
+  return (
+    <div className="m-play-ring">
+      <button className="m-play" aria-label={playing ? 'pause' : 'play'} onClick={() => night.toggle()}>
+        {playing ? <PauseBig /> : <PlayBig />}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Above the effect tools: the keyframe being worked on, and the button that
+ * sets it. Tap ◆ to put a start keyframe where the night is, pick its effects
+ * below, then ◆ again where they should end.
+ */
+function KeyframeStrip({
+  region,
+  onAdd,
+  onDelete,
+  onDone,
+}: {
+  region: { from: number; to?: number; tools: string[] } | undefined;
+  onAdd: () => void;
+  onDelete: () => void;
+  onDone: () => void;
+}) {
+  const names = region?.tools.map((t) => FX_TOOLS.find((x) => x.id === t)?.label ?? t).join(', ');
+  const open = region && region.to === undefined;
+  return (
+    <div className="m-kf-strip" role="group" aria-label="keyframe">
+      <button className={`m-kf-btn${open ? ' open' : ''}`} onClick={onAdd} aria-label={open ? 'set the end keyframe here' : 'add a keyframe here'}>
+        <span className="ic red">
+          <DiamondIcon />
+        </span>
+        {open ? 'set end' : region ? 'new keyframe' : 'add keyframe'}
+      </button>
+      <span className="m-kf-info">
+        {!region ? (
+          'where the night is, then pick effects'
+        ) : (
+          <>
+            <b>
+              ◆ {mmss(region.from)}
+              {region.to !== undefined ? `–${mmss(region.to)}` : ' → …'}
+            </b>{' '}
+            {names || (open ? 'pick effects, then set end' : 'no effects yet')}
+          </>
+        )}
+      </span>
+      {region && (
+        <>
+          <button className="m-kf-x" aria-label="delete this keyframe" onClick={onDelete}>
+            ✕
+          </button>
+          {!open && (
+            <button className="m-kf-x" aria-label="done with this keyframe" onClick={onDone}>
+              ✓
+            </button>
+          )}
+        </>
+      )}
+    </div>
   );
 }
 
