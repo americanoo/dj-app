@@ -288,7 +288,7 @@ export function MobileApp({
           header={header(
             set.name.toUpperCase(),
             <label className="m-start" title="when the night starts: the rulers show real times">
-              <span>{set.startClock ? 'starts' : 'start time'}</span>
+              <span>start</span>
               <input
                 type="time"
                 aria-label="start time"

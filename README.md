@@ -39,6 +39,15 @@ On a phone, Setcraft has its own layout: black, big type, and a bottom bar with 
   everything after it follows, each track keeping its overlap, so the night never stops or doubles up. This
   also happens when a track is removed, or when its real length becomes known. For a night built end to end,
   **settings → blend every transition** (8, 16 or 32 bars) overlaps them all at once.
+- **Sort and filter**: a quiet strip on the top edge of each list (e.g. `bpm ↑ · filter`) opens the panel.
+  - In the **library**: sort by title, artist, BPM, key (around the Camelot wheel), length or when added; tap a
+    choice again to reverse it. Filter by a BPM range (with both ends set, half and double time count), a key
+    (add *mixable* for the keys that mix with it), in the night or not, or **fits after** the night's last track
+    (a key that mixes and within 6% tempo). The strip shows how many tracks are shown, e.g. "2 of 3".
+  - In the **night**, *arrange* puts the tracks in a new order (with Undo): *mix by key* walks from the first
+    track to keys that mix at the nearest tempo; or BPM up or down, around the key wheel, by title, reversed.
+    Each place keeps its blend. Filters dim what doesn't match instead of hiding it, so the clock stays true;
+    *rough transitions* picks out tracks coming in on a key that doesn't mix, or more than 6% tempo away.
 - **The + button** works where the night is. Tap it to add a **start keyframe**, then choose its effects from the
   tools bar: echo out, reverb out, filter, kill lows, and acapella / instrumental. Tap **+** again to set the
   **end keyframe**. The bar also has **match key** and **sync** for the track. **Hold +** to switch to:

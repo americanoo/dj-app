@@ -241,3 +241,39 @@ test('the next track comes in over the end of the one before, from its start tim
   await page.evaluate((t) => (window as unknown as { __night: { play(t: number): void } }).__night.play(t), a.startsAt + a.playFor + 1);
   await expect.poll(() => page.evaluate(() => (window as unknown as { __sounding(): number }).__sounding()), { timeout: 10_000 }).toBe(1);
 });
+
+test('sort and filter on the edge of each list: the library sorts and filters, the night arranges and dims', async ({ page }) => {
+  await demoNight(page);
+  await page.tap('nav[aria-label=main] button[aria-label=library]');
+  const titles = () => page.locator('.m-card .m-title').allTextContents();
+  await page.tap('button[aria-label="library: sort and filter"]');
+  const pop = page.locator('[role=dialog][aria-label="library: sort and filter"]');
+  await pop.locator('button:has-text("bpm")').tap();
+  await expect.poll(titles).toEqual(['Sunrise', 'Night Drive', 'Warehouse Lights']); // 122, 124, 126
+  await pop.locator('button:has-text("bpm")').tap(); // again: the other way
+  await expect.poll(titles).toEqual(['Warehouse Lights', 'Night Drive', 'Sunrise']);
+  await pop.locator('input[aria-label="filter by key"]').fill('8A');
+  await pop.locator('input[aria-label="filter by key"]').blur();
+  await expect.poll(titles).toEqual(['Night Drive']);
+  await pop.locator('button:has-text("+ mixable")').tap(); // 8A mixes with 8B and 9A
+  await expect.poll(titles).toHaveLength(3);
+  await pop.locator('button:has-text("clear filters")').tap();
+  await pop.locator('input[aria-label="lowest bpm"]').fill('123');
+  await pop.locator('input[aria-label="lowest bpm"]').blur();
+  await expect.poll(titles).toEqual(['Warehouse Lights', 'Night Drive']);
+  await pop.locator('button:has-text("done")').tap();
+  await expect(page.locator('.m-tools-count')).toHaveText('2 of 3');
+
+  await page.tap('nav[aria-label=main] button[aria-label=playlist]');
+  const night = () => page.locator('.m-row .m-title').allTextContents();
+  await page.tap('button[aria-label="night: sort and filter"]');
+  const np = page.locator('[role=dialog][aria-label="night: sort and filter"]');
+  await np.locator('button:has-text("bpm ↑")').tap();
+  await expect.poll(night).toEqual(['Sunrise', 'Night Drive', 'Warehouse Lights']);
+  await page.tap('button[aria-label="night: sort and filter"]');
+  await np.locator('input[aria-label="lowest bpm"]').fill('125');
+  await np.locator('input[aria-label="lowest bpm"]').blur();
+  await np.locator('button:has-text("done")').tap();
+  await expect(page.locator('.m-row.dimmed')).toHaveCount(2);
+  await expect(page.locator('.m-row')).toHaveCount(3); // dimmed, not hidden: the clock stays true
+});

@@ -3,6 +3,9 @@ import type { SetEntry } from '../../core/model';
 import { nightSlots, slotKey, type TimelineItem } from '../../core/setplan';
 import { setMixPoint } from '../../core/sheet';
 import { toCamelot } from '../../core/keys';
+import { harmonicOrder, keysMix, matchesFilter, sortTracks, tempoFits } from '../../core/listsort';
+import { notify } from '../toastBus';
+import { ListTools, useListPrefs } from './ListTools';
 import { useNight } from '../night';
 import { activeSet, useStore } from '../store';
 import { DotsIcon, HandleIcon } from './icons';
@@ -46,6 +49,28 @@ export function PlaylistScreen({
     return m;
   }, [items]);
   const end = items.reduce((e, it) => Math.max(e, it.startsAt + it.playFor), 0);
+  const [prefs, setPrefs] = useListPrefs('night', { sort: 'added', desc: false, filter: {} });
+  // Filtering the night dims what doesn't match: the rows stay, so the clock stays true.
+  const matches = useMemo(
+    () =>
+      items.map((it, i) => {
+        if (!it.track) return false;
+        if (!matchesFilter(it.track, prefs.filter)) return false;
+        if (prefs.filter.rough) {
+          const prev = items[i - 1]?.track;
+          return !!prev && (!keysMix(prev.key, it.track.key) || !tempoFits(prev.bpm, it.track.bpm));
+        }
+        return true;
+      }),
+    [items, prefs.filter],
+  );
+  const arrange = (how: string) => {
+    const withTrack = items.map((it) => ({ id: it.entry.id, title: it.track?.title ?? '', artist: it.track?.artist ?? '', bpm: it.track?.bpm, key: it.track?.key, duration: it.playFor }));
+    const order =
+      how === 'harmonic' ? harmonicOrder(withTrack) : how === 'reverse' ? [...withTrack].reverse() : sortTracks(withTrack, how === 'bpmDesc' ? 'bpm' : (how as 'bpm' | 'key' | 'title'), how === 'bpmDesc');
+    dispatch({ type: 'reorderEntries', ids: order.map((x) => x.id) });
+    notify('The night is in its new order; each place keeps its blend.', 'info', { label: 'Undo', run: () => dispatch({ type: 'undo' }) });
+  };
   const target = drag ? Math.max(0, Math.min(items.length - 1, drag.idx + Math.round(drag.dy / ROW))) : -1;
 
   const mixPoint = (it: TimelineItem, which: 'in' | 'out', at: number | undefined) => {
@@ -74,11 +99,41 @@ export function PlaylistScreen({
           </button>
         </div>
       ) : (
+        <>
+        <ListTools
+          label="night"
+          prefs={prefs}
+          onPrefs={setPrefs}
+          sortLabel="arrange"
+          sortOptions={[
+            { id: 'harmonic', label: 'mix by key' },
+            { id: 'bpm', label: 'bpm ↑' },
+            { id: 'bpmDesc', label: 'bpm ↓' },
+            { id: 'key', label: 'key wheel' },
+            { id: 'title', label: 'title' },
+            { id: 'reverse', label: 'reverse' },
+          ]}
+          onSort={arrange}
+          shown={matches.filter(Boolean).length}
+          total={items.length}
+          extra={
+            <div className="m-tools-row">
+              <button
+                className={`m-chip${prefs.filter.rough ? ' on' : ''}`}
+                aria-pressed={!!prefs.filter.rough}
+                onClick={() => setPrefs({ ...prefs, filter: { ...prefs.filter, rough: !prefs.filter.rough || undefined } })}
+                title="keys that don't mix, or more than 6% tempo, from the track before"
+              >
+                rough transitions
+              </button>
+            </div>
+          }
+        />
         <div className="m-scroll m-night" style={{ ['--row' as string]: `${ROW}px` }}>
           {items.map((it, i) => (
             <div
               key={it.entry.id}
-              className={`m-row${drag?.idx === i ? ' dragging' : ''}`}
+              className={`m-row${drag?.idx === i ? ' dragging' : ''}${matches[i] ? '' : ' dimmed'}`}
               style={drag ? { transform: `translateY(${drag.idx === i ? drag.dy : shift(i)}px)` } : undefined}
             >
               <Ruler side="left" i={i} items={items} label={clockLabel(it.startsAt, set.startClock)} />
@@ -168,6 +223,7 @@ export function PlaylistScreen({
           </div>
           {footer}
         </div>
+        </>
       )}
     </div>
   );

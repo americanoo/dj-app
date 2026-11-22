@@ -1041,3 +1041,129 @@ html.phone .app.m-layout .toasts {
   gap: 6px;
   flex: none;
 }
+
+/* Sort and filter: a quiet strip on the top edge of each list */
+.m-tools-edge {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 22px;
+  margin: -4px 16px 4px;
+  flex: none;
+}
+.m-playlist .m-tools-edge {
+  margin: -4px 52px 4px;
+}
+.m-edge-btn {
+  display: flex !important;
+  align-items: center;
+  gap: 5px;
+  height: 22px !important;
+  padding: 0 2px !important;
+  font-size: 9px;
+  letter-spacing: 1.2px;
+  color: var(--m-faint) !important;
+  text-transform: lowercase;
+}
+.m-edge-btn[aria-expanded='true'],
+.m-edge-btn:active {
+  color: var(--m-soft) !important;
+}
+.m-edge-sep {
+  opacity: 0.6;
+}
+.m-edge-dot {
+  display: inline-grid;
+  place-items: center;
+  min-width: 13px;
+  height: 13px;
+  margin-left: 3px;
+  border-radius: 7px;
+  background: var(--m-purple);
+  color: #000;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+.m-tools-count {
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: var(--m-faint);
+}
+.m-tools-pop {
+  top: 26px;
+  right: 0;
+  width: min(330px, calc(100vw - 32px));
+  padding: 12px;
+  gap: 12px;
+}
+.m-tools-pop button.m-chip {
+  height: 28px;
+  padding: 0 10px !important;
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  border-radius: 999px !important;
+}
+.m-tools-pop button.m-chip.on {
+  background: var(--m-text) !important;
+  color: #000 !important;
+  border-color: var(--m-text) !important;
+  font-weight: 700;
+}
+.m-tools-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.m-tools-h {
+  font-size: 9px;
+  letter-spacing: 2.4px;
+  color: var(--m-faint);
+  text-transform: uppercase;
+}
+.m-tools-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.m-app .m-tools-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  color: var(--m-muted);
+  flex-wrap: wrap;
+}
+.m-tools-row > span:first-child {
+  width: 36px;
+}
+.m-app input.m-tools-in {
+  width: 56px;
+  padding: 3px 0;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px dashed var(--m-line);
+  border-radius: 0;
+  color: var(--m-text);
+  font: 11px var(--m-mono);
+  outline: none;
+}
+.m-tools-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.m-tools-foot .m-text-btn {
+  margin: 0;
+}
+.m-row.dimmed .m-row-body {
+  opacity: 0.22;
+}
+.m-start span {
+  white-space: nowrap;
+}
+.m-head h1 {
+  min-width: 0;
+  flex-shrink: 1;
+}
