@@ -49,7 +49,19 @@ export function endLoopOf(entry: SetEntry, track: Track | undefined): { start: n
   return { start: c.start, end: c.end, times: Math.max(1, Math.round(entry.endLoop.times)) };
 }
 
+/** How much faster than recorded an entry plays tonight (its playBpm over the track's BPM); 1 when it isn't changed. */
+export function tempoFactor(entry: Pick<SetEntry, 'playBpm'>, track: Pick<Track, 'bpm'> | undefined): number {
+  return entry.playBpm && track?.bpm ? entry.playBpm / track.bpm : 1;
+}
+
+/** How long an entry plays in the night (a track played faster takes less time). */
 export function playLength(entry: SetEntry, track: Track | undefined): { seconds: number; estimated: boolean } {
+  const { seconds, estimated } = fileLength(entry, track);
+  return { seconds: seconds / tempoFactor(entry, track), estimated };
+}
+
+/** How much of the file an entry plays, in the file's own seconds. */
+function fileLength(entry: SetEntry, track: Track | undefined): { seconds: number; estimated: boolean } {
   if (!track) return { seconds: DEFAULT_TRACK_SECONDS, estimated: true };
   const mixIn = track.cues.find((c) => c.id === entry.mixInCueId)?.start;
   const loop = endLoopOf(entry, track);
@@ -291,6 +303,11 @@ export function nextInNight(set: SetPlan, lib: Library, trackId: string): { trac
   return { trackId: next.trackId, at: Math.max(0, mixIn ?? t.gridStart ?? 0) };
 }
 
+/** How much faster than recorded a timeline item plays tonight. */
+export function itemStretch(it: TimelineItem): number {
+  return tempoFactor(it.entry, it.track);
+}
+
 /** Where a timeline item's track starts playing (its mix-in cue, else the top of the file). */
 export function itemMixIn(it: TimelineItem): number {
   return it.track?.cues.find((c) => c.id === it.entry.mixInCueId)?.start ?? 0;
@@ -308,13 +325,13 @@ export function trackAtNight(items: TimelineItem[], t: number): { trackId: strin
     : (withTrack.find((x) => x.startsAt > t) ?? withTrack[withTrack.length - 1]);
   if (!it) return undefined;
   const into = Math.max(0, Math.min(it.playFor, t - it.startsAt));
-  return { trackId: it.entry.trackId, pos: itemMixIn(it) + into };
+  return { trackId: it.entry.trackId, pos: itemMixIn(it) + into * itemStretch(it) };
 }
 
 /** How far into the night a spot in a track is (its first appearance in the set). */
 export function nightAtTrack(items: TimelineItem[], trackId: string, pos: number): number | undefined {
   const it = items.find((x) => x.entry.trackId === trackId);
-  return it ? it.startsAt + (pos - itemMixIn(it)) : undefined;
+  return it ? it.startsAt + (pos - itemMixIn(it)) / itemStretch(it) : undefined;
 }
 
 /** One track's stretch of the night, ready to play: from `mixIn` in the file, at `startsAt`, for `playFor` seconds. */
@@ -333,6 +350,10 @@ export interface NightSlot {
   tempo?: TempoMode;
   /** Transposed to mix smoothly with the key the previous track plays in (see `semitones`). */
   matchKey?: boolean;
+  /** Tonight's transposition chosen for it (semitones), before key matching. */
+  keyShift?: number;
+  /** Played this much faster than recorded throughout (its rate curve includes it). */
+  stretch?: number;
   /** The track's key as written (before any transposition). */
   key?: string;
   /** Keyframes of the transition into this track. */
@@ -367,6 +388,8 @@ export function nightSlots(items: TimelineItem[]): NightSlot[] {
       sync: it.entry.sync,
       tempo: it.entry.tempo,
       matchKey: it.entry.matchKey,
+      keyShift: it.entry.keyShift || undefined,
+      stretch: itemStretch(it) !== 1 ? itemStretch(it) : undefined,
       key: it.track!.key,
       fx: it.entry.fx,
       endFx: it.entry.endFx ?? it.track!.endFx,
@@ -375,23 +398,40 @@ export function nightSlots(items: TimelineItem[]): NightSlot[] {
       loop: loopRegion(endLoopOf(it.entry, it.track)),
       curves: emptyCurves(),
     }));
+  // Transitions and effects are planned as if each track had been recorded at tonight's
+  // tempo (positions in the file divided by its stretch); the rate curve then carries the
+  // stretch, so the player reads the file at the right speed.
+  const virt = new Map(
+    slots.map((s) => {
+      const r = s.stretch ?? 1;
+      return [s.id, r === 1 ? s : { ...s, mixIn: s.mixIn / r, gridStart: s.gridStart !== undefined ? s.gridStart / r : undefined, bpm: s.bpm ? s.bpm * r : s.bpm }];
+    }),
+  );
   const parts = new Map<string, Curves[]>();
   const add = (id: string, c: Curves) => parts.set(id, [...(parts.get(id) ?? []), c]);
-  for (const { a, b, plan } of transitionsOf(slots)) {
+  for (const { a, b, plan } of transitionsOf(slots.map((s) => virt.get(s.id)!))) {
     add(a.id, withKeyframes(outgoingCurves(plan, a), b.automation?.a, plan.inAt));
     add(b.id, withKeyframes(incomingCurves(plan, b), b.automation?.b, plan.inAt));
-    if (plan.echoAt !== undefined) a.echoAt = plan.echoAt;
+    if (plan.echoAt !== undefined) slots.find((s) => s.id === a.id)!.echoAt = plan.echoAt;
   }
   for (const s of slots) {
-    const own = s.fx?.length || s.endFx?.length || s.stems?.length ? [trackFxCurves(s)] : [];
+    const v = virt.get(s.id)!;
+    const own = s.fx?.length || s.endFx?.length || s.stems?.length ? [trackFxCurves({ ...v, stretch: s.stretch, mixIn: s.mixIn })] : [];
     s.curves = mergeCurves(...(parts.get(s.id) ?? []), ...own);
+    const r = s.stretch ?? 1;
+    if (r !== 1) {
+      s.curves.rate = s.curves.rate.length ? s.curves.rate.map((p) => ({ t: p.t, v: p.v * r })) : [{ t: s.startsAt, v: r }];
+    }
   }
-  // Key matching, in night order: each matched track to the key the one before it actually plays in.
+  // Key: tonight's transposition, then key matching, in night order: each matched track
+  // to the key the one before it actually plays in.
   let prevKey: string | undefined;
   for (const s of [...slots].sort((x, y) => x.startsAt - y.startsAt)) {
-    const shift = s.matchKey && prevKey ? (keyMatchShift(s.key, prevKey) ?? 0) : 0;
-    if (shift) s.semitones = shift;
-    prevKey = shift ? transposeKey(s.key, shift) : s.key;
+    const own = s.keyShift ?? 0;
+    const base = own ? transposeKey(s.key, own) : s.key;
+    const match = s.matchKey && prevKey ? (keyMatchShift(base, prevKey) ?? 0) : 0;
+    if (own + match) s.semitones = own + match;
+    prevKey = own + match ? transposeKey(s.key, own + match) : s.key;
   }
   return slots;
 }

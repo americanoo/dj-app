@@ -1,5 +1,5 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import { formatSetTime, itemMixIn, parseClock, type TimelineItem } from '../../core/setplan';
+import { formatSetTime, itemMixIn, itemStretch, parseClock, type TimelineItem } from '../../core/setplan';
 import { useNight } from '../night';
 
 /** Where the night is, in seconds: kept up to date (about 12 times a second) while it plays. */
@@ -33,12 +33,17 @@ export function itemIndexAt(items: TimelineItem[], t: number): number {
 
 /** The moment in the song (seconds into the file) playing at night time `t`. */
 export function songPos(it: TimelineItem, t: number): number {
-  return itemMixIn(it) + Math.max(0, Math.min(it.playFor, t - it.startsAt));
+  return itemMixIn(it) + Math.max(0, Math.min(it.playFor, t - it.startsAt)) * itemStretch(it);
+}
+
+/** Where in the song an item stops playing (file seconds). */
+export function songEnd(it: TimelineItem): number {
+  return itemMixIn(it) + it.playFor * itemStretch(it);
 }
 
 /** Night time at which moment `s` of the song plays. */
 export function nightTimeOf(it: TimelineItem, s: number): number {
-  return it.startsAt + (s - itemMixIn(it));
+  return it.startsAt + (s - itemMixIn(it)) / itemStretch(it);
 }
 
 /** A night time as a wall-clock time ("11:30") when the set has a start time, else time into the set. */

@@ -4,7 +4,7 @@ import type { SectionKind } from '../../core/sections';
 import { useNight } from '../night';
 import { useTrackWave } from '../trackWave';
 import { PAD_COLORS } from './icons';
-import { nightTimeOf, useNightTime } from './nightModel';
+import { nightTimeOf, songEnd, songPos, useNightTime } from './nightModel';
 
 export type StripMode = 'keyframe' | 'cue' | 'loop';
 
@@ -43,7 +43,8 @@ export const WaveStrip = memo(function WaveStrip({
   const canvas = useRef<HTMLCanvasElement>(null);
   const [w, setW] = useState(0);
   const mixIn = itemMixIn(it);
-  const dur = wave?.duration || it.track?.duration || mixIn + it.playFor;
+  const end = songEnd(it);
+  const dur = wave?.duration || it.track?.duration || end;
   const x = (s: number) => (Math.max(0, Math.min(dur, s)) / dur) * w;
 
   useEffect(() => {
@@ -69,7 +70,7 @@ export const WaveStrip = memo(function WaveStrip({
     for (let i = 0; i < n; i++) {
       const t0 = (i / n) * dur;
       const t1 = ((i + 1) / n) * dur;
-      const played = t1 > mixIn && t0 < mixIn + it.playFor;
+      const played = t1 > mixIn && t0 < end;
       let amp = 0.12;
       if (wave) {
         const a = Math.floor(t0 * wave.peaksPerSecond);
@@ -86,7 +87,7 @@ export const WaveStrip = memo(function WaveStrip({
       g.roundRect(bx, (H - h) / 2, 1.6, h, 0.8);
       g.fill();
     }
-  }, [wave, sections, w, dur, mixIn, it.playFor]);
+  }, [wave, sections, w, dur, mixIn, end]);
 
   const regions = it.entry.fx ?? [];
   const cues = it.track?.cues ?? [];
@@ -94,7 +95,7 @@ export const WaveStrip = memo(function WaveStrip({
     const el = box.current;
     if (!el || !w) return;
     const s = ((clientX - el.getBoundingClientRect().left) / w) * dur;
-    night.seek(nightTimeOf(it, Math.max(mixIn, Math.min(mixIn + it.playFor - 0.05, s))));
+    night.seek(nightTimeOf(it, Math.max(mixIn, Math.min(end - 0.05, s))));
   };
   const kfCount = regions.reduce((n, r) => n + (r.to === undefined ? 1 : 2), 0);
 
@@ -164,5 +165,5 @@ export const WaveStrip = memo(function WaveStrip({
 function Playhead({ it, x }: { it: TimelineItem; x: (s: number) => number }) {
   const t = useNightTime();
   if (t < it.startsAt || t >= it.startsAt + it.playFor) return null;
-  return <div className="m-playhead" style={{ transform: `translateX(${x(itemMixIn(it) + (t - it.startsAt))}px)` }} />;
+  return <div className="m-playhead" style={{ transform: `translateX(${x(songPos(it, t))}px)` }} />;
 }

@@ -2,7 +2,7 @@ import { memo, useMemo, useState, type ReactNode } from 'react';
 import type { SetEntry } from '../../core/model';
 import { nightSlots, slotKey, type TimelineItem } from '../../core/setplan';
 import { setMixPoint } from '../../core/sheet';
-import { toCamelot } from '../../core/keys';
+import { shiftToKey, toCamelot, transposeKey } from '../../core/keys';
 import { harmonicOrder, keysMix, matchesFilter, sortTracks, tempoFits } from '../../core/listsort';
 import { notify } from '../toastBus';
 import { ListTools, useListPrefs } from './ListTools';
@@ -45,7 +45,7 @@ export function PlaylistScreen({
   const [menu, setMenu] = useState<string | null>(null);
   const playKeys = useMemo(() => {
     const m = new Map<string, string | undefined>();
-    for (const s of nightSlots(items)) if (s.semitones) m.set(s.id, toCamelot(slotKey(s)));
+    for (const s of nightSlots(items)) if ((s.semitones ?? 0) !== (s.keyShift ?? 0)) m.set(s.id, toCamelot(slotKey(s)));
     return m;
   }, [items]);
   const end = items.reduce((e, it) => Math.max(e, it.startsAt + it.playFor), 0);
@@ -72,6 +72,27 @@ export function PlaylistScreen({
     notify('The night is in its new order; each place keeps its blend.', 'info', { label: 'Undo', run: () => dispatch({ type: 'undo' }) });
   };
   const target = drag ? Math.max(0, Math.min(items.length - 1, drag.idx + Math.round(drag.dy / ROW))) : -1;
+
+  /** Tonight's key: a transposition of the track (its own key stays). Without a key yet, it's the track's key. */
+  const setKey = (it: TimelineItem, key: string | undefined) => {
+    const t = it.track;
+    if (!t) return;
+    if (!t.key) return key && dispatch({ type: 'updateTrack', id: t.id, patch: { key } });
+    const shift = key ? shiftToKey(t.key, key) : 0;
+    if (shift === undefined) return notify(`“${key}” isn't a key Setcraft knows. Try 8A or Am.`, 'error');
+    dispatch({ type: 'updateEntry', id: it.entry.id, patch: { keyShift: shift || undefined } });
+    if (shift && !night.keyLockAvailable) notify(NO_STRETCH, 'error');
+    else if (shift) notify(`Plays in ${toCamelot(transposeKey(t.key, shift))} tonight (${shift > 0 ? '+' : ''}${shift} semitones). Its own key stays ${toCamelot(t.key)}.`);
+  };
+  /** Tonight's tempo: the track plays faster or slower (its own BPM stays). Without a BPM yet, it's the track's BPM. */
+  const setBpm = (it: TimelineItem, bpm: number | undefined) => {
+    const t = it.track;
+    if (!t) return;
+    if (!t.bpm) return bpm && dispatch({ type: 'updateTrack', id: t.id, patch: { bpm, bpmConfirmed: true } });
+    const same = !bpm || Math.abs(bpm - t.bpm) < 0.05;
+    dispatch({ type: 'updateEntry', id: it.entry.id, patch: { playBpm: same ? undefined : bpm } });
+    if (!same && !night.keyLock) notify('Key lock is off, so this track will also sound higher or lower, like a record sped up. Switch key lock on in settings to keep its key.', 'info');
+  };
 
   const mixPoint = (it: TimelineItem, which: 'in' | 'out', at: number | undefined) => {
     if (!it.track) return;
@@ -141,14 +162,16 @@ export function PlaylistScreen({
                 <TrackCard
                   title={it.track?.title ?? 'Missing track'}
                   artist={it.track?.artist ?? ''}
-                  keyName={it.track?.key}
+                  keyName={it.entry.keyShift ? transposeKey(it.track?.key, it.entry.keyShift) : it.track?.key}
+                  keyWas={it.entry.keyShift ? toCamelot(it.track?.key) : undefined}
                   keyHint={playKeys.get(it.entry.id)}
-                  bpm={it.track?.bpm}
+                  bpm={it.entry.playBpm ?? it.track?.bpm}
+                  bpmWas={it.entry.playBpm ? it.track?.bpm : undefined}
                   start={it.track?.cues.find((c) => c.id === it.entry.mixInCueId)?.start ?? 0}
                   end={endOf(it)}
                   endFx={it.entry.endFx ?? it.track?.endFx ?? []}
-                  onKey={(key) => it.track && dispatch({ type: 'updateTrack', id: it.track.id, patch: { key } })}
-                  onBpm={(bpm) => it.track && bpm && dispatch({ type: 'updateTrack', id: it.track.id, patch: { bpm, bpmConfirmed: true } })}
+                  onKey={(key) => setKey(it, key)}
+                  onBpm={(bpm) => setBpm(it, bpm)}
                   onStart={(s) => mixPoint(it, 'in', s || undefined)}
                   onEnd={(s) => mixPoint(it, 'out', s !== undefined && it.track?.duration && s >= it.track.duration - 0.5 ? undefined : s)}
                   onEndFx={(endFx) => dispatch({ type: 'updateEntry', id: it.entry.id, patch: { endFx } })}
@@ -228,6 +251,9 @@ export function PlaylistScreen({
     </div>
   );
 }
+
+const NO_STRETCH =
+  'Changing the key needs key lock, which this page can’t do: it needs the Mac app, or Setcraft from an https address. Over Wi-Fi from your Mac, the phone plays it in its own key.';
 
 function endOf(it: TimelineItem): number | undefined {
   const t = it.track;

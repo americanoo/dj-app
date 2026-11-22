@@ -34,6 +34,13 @@ On a phone, Setcraft has its own layout: black, big type, and a bottom bar with 
   sides show when each track starts; set the night's start time at the top and they show real times. The track
   playing now is marked in red. Tap a waveform to move there. Drag a card by **☰** to move it; the overlaps
   between tracks stay as they were. Start, end and eo/fo/kl on a night card apply to that night only.
+- **Tonight's key and tempo.** On a night card, the key and BPM you type are how that track plays in this
+  night: a new BPM plays it faster or slower (and the blends ride to it), and a new key transposes it (a minor
+  key stays minor, so a major key you type counts as its relative). The track's own values stay, shown struck
+  through next to tonight's, and clearing the field goes back to them. With key lock on, a new tempo keeps the
+  key; with it off, it sounds higher or lower like a record. Transposing needs key lock, which needs the Mac
+  app or an https address: over plain Wi-Fi from your Mac, the phone plays the track in its own key. Key and BPM
+  on the **library** cards are the track's own values (to correct them), not a change in how it plays.
 - **Tracks blend into each other.** A track added with **+** comes in over the last 16 bars of the one before
   (at most a third of either track) and plays from its own start time. Change a track's start or end and
   everything after it follows, each track keeping its overlap, so the night never stops or doubles up. This

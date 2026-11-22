@@ -27,6 +27,8 @@ export function TrackCard({
   right,
   className = '',
   keyHint,
+  keyWas,
+  bpmWas,
 }: {
   title: string;
   artist: string;
@@ -45,6 +47,9 @@ export function TrackCard({
   className?: string;
   /** Shown after the key when it plays in another one (key matching). */
   keyHint?: string;
+  /** The track's own key and BPM, shown small when tonight's differ. */
+  keyWas?: string;
+  bpmWas?: number;
 }) {
   return (
     <div className={`m-card ${left ? 'with-left' : ''} ${className}`}>
@@ -62,6 +67,11 @@ export function TrackCard({
             width={3}
             onCommit={(v) => onKey(v ? (parseKey(v) ? normaliseKey(v) : v) : undefined)}
           />
+          {keyWas && (
+            <span className="m-was" title={`the track's own key: ${keyWas}`}>
+              {keyWas}
+            </span>
+          )}
           {keyHint && <span className="m-keyhint">→{keyHint}</span>}
           <span className="m-bpm">
             <TextField
@@ -77,6 +87,11 @@ export function TrackCard({
               }}
             />{' '}
             bpm
+            {bpmWas !== undefined && (
+              <span className="m-was" title={`the track's own tempo: ${bpmWas}`}>
+                {Math.round(bpmWas * 10) / 10}
+              </span>
+            )}
           </span>
         </div>
         <div className="m-artist" title={artist}>

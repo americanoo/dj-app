@@ -60,6 +60,8 @@ export interface FxPlacement {
   playFor: number;
   mixIn: number;
   bpm?: number;
+  /** Played faster (>1) or slower than recorded: song moments are this much closer together in the night. */
+  stretch?: number;
   fx?: FxRegion[];
   endFx?: EndFx[];
   stems?: StemKey[];
@@ -71,7 +73,8 @@ export interface FxPlacement {
  */
 export function trackFxCurves(p: FxPlacement): Curves {
   const c = emptyCurves();
-  const at = (songT: number) => p.startsAt + (songT - p.mixIn);
+  const r = p.stretch ?? 1;
+  const at = (songT: number) => p.startsAt + (songT - p.mixIn) / r;
   const bar = (p.bpm ? 60 / p.bpm : 0.5) * 4;
   const beat = bar / 4;
   const ramp = (env: Env, a: number, b: number, v: number) => env.push({ t: a, v: 0 }, { t: Math.max(a + 0.05, b), v }, { t: b + 0.03, v: 0 });

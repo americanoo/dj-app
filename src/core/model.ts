@@ -124,6 +124,10 @@ export interface SetEntry {
   tempo?: TempoMode;
   /** Key matching: transpose this track to mix smoothly with the key the previous one plays in. */
   matchKey?: boolean;
+  /** Tonight's tempo for this track, when it plays faster or slower than recorded (its BPM stays the track's own). */
+  playBpm?: number;
+  /** Tonight's transposition, in semitones (its key stays the track's own); key matching adds to it. */
+  keyShift?: number;
   /** Keyframes for the transition into this track (fader, EQ, filter, echo, reverb on either deck). */
   automation?: TransitionAutomation;
   /** The phone's keyframe effects on this track in the night (see trackfx). */

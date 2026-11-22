@@ -35,7 +35,7 @@ import {
 } from './icons';
 import { LibraryScreen } from './LibraryScreen';
 import { MixerSheet } from './MixerSheet';
-import { itemIndexAt, mmss, nightTimeOf, songPos, useNightIndex, useNightTime } from './nightModel';
+import { itemIndexAt, mmss, nightTimeOf, songEnd, songPos, useNightIndex, useNightTime } from './nightModel';
 import { PlaylistScreen } from './PlaylistScreen';
 import { SettingsScreen, type SettingsActions } from './SettingsScreen';
 import type { StripMode } from './WaveStrip';
@@ -523,7 +523,7 @@ function CuePads({ it, onBack }: { it: TimelineItem | undefined; onBack: () => v
             onClick={() => {
               if (held.current || !c || !it) return;
               const mixIn = itemMixIn(it);
-              if (c.start < mixIn || c.start > mixIn + it.playFor) notify(`Hot cue ${slot + 1} is outside the part of the track that plays tonight.`, 'error');
+              if (c.start < mixIn || c.start > songEnd(it)) notify(`Hot cue ${slot + 1} is outside the part of the track that plays tonight.`, 'error');
               else night.seek(nightTimeOf(it, c.start));
             }}
           >
