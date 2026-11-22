@@ -49,7 +49,7 @@ export function LibraryScreen({ onImport, onDemo, demoBusy, header }: { onImport
   }
 
   const add = (t: Track) => {
-    dispatch({ type: 'addEntries', trackIds: [t.id] });
+    dispatch({ type: 'addEntries', trackIds: [t.id], blend: true });
     notify(`“${t.title}” added to the night.`, 'info', { label: 'Undo', run: () => dispatch({ type: 'undo' }) });
   };
 

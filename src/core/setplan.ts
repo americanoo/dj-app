@@ -147,6 +147,58 @@ export function reorderEntries(set: SetPlan, lib: Library, ids: string[]): SetEn
   });
 }
 
+/** How long a track added to the end of a night blends in over the one before: 16 bars, at most a third of either track. */
+export const BLEND_BARS = 16;
+export function blendLength(prevSeconds: number, prevBpm: number | undefined, nextSeconds: number): number {
+  const bars = BLEND_BARS * 4 * (60 / (prevBpm || 120));
+  return Math.max(0, Math.min(bars, prevSeconds / 3, nextSeconds / 3));
+}
+
+/** Every transition of the night as a blend of `bars` bars (of the outgoing track), in the order the tracks are in now. */
+export function blendNight(set: SetPlan, lib: Library, bars: number): SetEntry[] {
+  const entries = withTimes(set, lib).entries;
+  const len = (e: SetEntry) => playLength(e, lib.tracks[e.trackId]).seconds;
+  let at = entries[0]?.at ?? 0;
+  return entries.map((e, i) => {
+    if (i > 0) {
+      const p = entries[i - 1];
+      const bar = 4 * (60 / (lib.tracks[p.trackId]?.bpm || 120));
+      const ov = Math.max(0, Math.min(bars * bar, len(p) / 2, len(e) / 2));
+      at = Math.max(at + 1, at + len(p) - ov);
+    }
+    return e.at === at ? e : { ...e, at };
+  });
+}
+
+/**
+ * After an edit that changes how long tracks play (a new start or end time, a
+ * loop ending, a track's real length becoming known, a track removed), the
+ * tracks after it follow: each keeps its overlap (or gap) with the track before
+ * it, so the night carries on from wherever the earlier tracks now end.
+ * Tracks that weren't in the night before (just added or placed) stay put.
+ */
+export function keepTransitions(prev: SetPlan, prevLib: Library, next: SetPlan, nextLib: Library): SetPlan {
+  const before = withTimes(prev, prevLib).entries;
+  const len = (e: SetEntry, lib: Library) => playLength(e, lib.tracks[e.trackId]).seconds;
+  const gapBefore = new Map<string, number>();
+  before.forEach((e, i) => {
+    if (i > 0) gapBefore.set(e.id, (e.at ?? 0) - ((before[i - 1].at ?? 0) + len(before[i - 1], prevLib)));
+  });
+  const timed = withTimes(next, nextLib);
+  const out: SetEntry[] = [];
+  let changed = timed !== next;
+  timed.entries.forEach((e, i) => {
+    const gap = gapBefore.get(e.id);
+    if (i === 0 || gap === undefined) return out.push(e);
+    const p = out[i - 1];
+    const at = Math.max((p.at ?? 0) + 1, (p.at ?? 0) + len(p, nextLib) + gap);
+    if (Math.abs(at - (e.at ?? 0)) < 1e-6) return out.push(e);
+    changed = true;
+    out.push({ ...e, at });
+  });
+  return changed ? { ...timed, entries: out } : next;
+}
+
 export function totalSeconds(items: TimelineItem[]): number {
   return items.reduce((end, it) => Math.max(end, it.startsAt + it.playFor), 0);
 }

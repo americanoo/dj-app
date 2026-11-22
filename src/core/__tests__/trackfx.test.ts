@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { valueAt } from '../mixplan';
-import { emptyProject, newSet, type SetEntry, type Track } from '../model';
+import { emptyProject, newSet, type Project, type SetEntry, type Track } from '../model';
 import { buildTimeline, nightSlots, reorderEntries } from '../setplan';
+import { setMixPoint } from '../sheet';
 import { setTrackMixPoint, stemsAt, trackFxCurves, trackMixCue } from '../trackfx';
 import { activeSet, reducer } from '../../ui/store';
 
@@ -103,6 +104,73 @@ describe('reordering the night', () => {
       ['c', 0],
       ['a', 140], // c is 150 long, 10 s overlap
       ['b', 220], // a is 100 long, 20 s overlap
+    ]);
+  });
+});
+
+describe('the night carries on from wherever a track now ends', () => {
+  const mk = (id: string, duration: number): Track => ({ id, title: id, artist: '', cues: [], source: 'manual', duration, bpm: 120 });
+  const start = (): Project => {
+    const p0 = emptyProject();
+    return { ...p0, library: { tracks: { a: mk('a', 300), b: mk('b', 240), c: mk('c', 200) }, playlists: [] } };
+  };
+  const times = (p: Project) => activeSet(p).entries.map((e) => [e.trackId, Math.round((e.at ?? 0) * 10) / 10]);
+
+  it('tracks added from the phone blend in over the end of the one before (16 bars)', () => {
+    const p = reducer(start(), { type: 'addEntries', trackIds: ['a', 'b', 'c'], blend: true });
+    // 16 bars at 120 BPM = 32 s
+    expect(times(p)).toEqual([
+      ['a', 0],
+      ['b', 268],
+      ['c', 476],
+    ]);
+  });
+
+  it('an earlier end time brings the next tracks in sooner, keeping each overlap', () => {
+    let p = reducer(start(), { type: 'addEntries', trackIds: ['a', 'b', 'c'], blend: true });
+    const e = activeSet(p).entries[0];
+    const { cues, patch } = setMixPoint(p.library.tracks.a, e, 'out', 200, activeSet(p).entries);
+    p = reducer(p, { type: 'setCues', trackId: 'a', cues });
+    p = reducer(p, { type: 'updateEntry', id: e.id, patch });
+    // a now plays 200 s: b comes in 32 s before that, c follows b
+    expect(times(p)).toEqual([
+      ['a', 0],
+      ['b', 168],
+      ['c', 376],
+    ]);
+  });
+
+  it('a later start time in the next track: it plays from there, and the rest moves up', () => {
+    let p = reducer(start(), { type: 'addEntries', trackIds: ['a', 'b', 'c'], blend: true });
+    const e = activeSet(p).entries[1];
+    const { cues, patch } = setMixPoint(p.library.tracks.b, e, 'in', 60, activeSet(p).entries);
+    p = reducer(p, { type: 'setCues', trackId: 'b', cues });
+    p = reducer(p, { type: 'updateEntry', id: e.id, patch });
+    expect(times(p)).toEqual([
+      ['a', 0],
+      ['b', 268],
+      ['c', 416], // b plays 180 s now
+    ]);
+    const [, slot] = nightSlots(buildTimeline(activeSet(p), p.library));
+    expect(slot.mixIn).toBe(60);
+  });
+
+  it('blend every transition: a night laid end to end gets overlaps', () => {
+    let p = reducer(start(), { type: 'addEntries', trackIds: ['a', 'b', 'c'] }); // end to end: 0, 300, 540
+    p = reducer(p, { type: 'blendNight', bars: 8 }); // 16 s at 120 BPM
+    expect(times(p)).toEqual([
+      ['a', 0],
+      ['b', 284],
+      ['c', 508],
+    ]);
+  });
+
+  it('removing a track closes the gap', () => {
+    let p = reducer(start(), { type: 'addEntries', trackIds: ['a', 'b', 'c'], blend: true });
+    p = reducer(p, { type: 'removeEntry', id: activeSet(p).entries[1].id });
+    expect(times(p)).toEqual([
+      ['a', 0],
+      ['c', 268],
     ]);
   });
 });

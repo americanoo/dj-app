@@ -18,7 +18,7 @@ import { mergeScan, type ScanEntry } from '../core/musiclib';
 import { trackMixCue } from '../core/trackfx';
 import { copySet } from '../core/versions';
 import { initHistory, record, redo, undo, type History } from '../core/history';
-import { playLength, reorderEntries, setEnd, withTimes } from '../core/setplan';
+import { blendLength, blendNight, keepTransitions, playLength, reorderEntries, setEnd, withTimes } from '../core/setplan';
 
 const STORAGE_KEY = 'setcraft-project-v1';
 /**
@@ -60,12 +60,13 @@ export type Action =
   | { type: 'deleteSet'; id: string }
   | { type: 'duplicateSet'; id: string }
   | { type: 'addSetCopy'; set: SetPlan; name: string; tracks: Track[] }
-  | { type: 'addEntries'; trackIds: string[]; chapterId?: string }
+  | { type: 'addEntries'; trackIds: string[]; chapterId?: string; blend?: boolean }
   | { type: 'placeTrack'; trackId: string; at: number; chapterId?: string }
   | { type: 'setEntryTime'; id: string; at: number }
   | { type: 'updateEntry'; id: string; patch: Partial<SetEntry> }
   | { type: 'removeEntry'; id: string }
   | { type: 'reorderEntries'; ids: string[] }
+  | { type: 'blendNight'; bars: number }
   | { type: 'addChapter' }
   | { type: 'updateChapter'; id: string; patch: Partial<Chapter> }
   | { type: 'removeChapter'; id: string }
@@ -92,6 +93,41 @@ function withEdit(t: Track, patch: Partial<Track>): Track {
 }
 
 export function reducer(p: Project, a: Action): Project {
+  const next = apply(p, a);
+  return followsLengths(a) ? rippleSets(p, next) : next;
+}
+
+/** Edits that can change how long tracks play, after which the rest of the night follows (see keepTransitions). */
+function followsLengths(a: Action): boolean {
+  switch (a.type) {
+    case 'setCues':
+    case 'updateTrack':
+    case 'updateTracks':
+    case 'removeEntry':
+    case 'import':
+    case 'scanMerge':
+      return true;
+    case 'updateEntry':
+      return !('at' in a.patch);
+    default:
+      return false;
+  }
+}
+
+function rippleSets(prev: Project, next: Project): Project {
+  if (next === prev) return next;
+  let changed = false;
+  const sets = next.sets.map((s) => {
+    const old = prev.sets.find((x) => x.id === s.id);
+    if (!old) return s;
+    const kept = keepTransitions(old, prev.library, s, next.library);
+    if (kept !== s) changed = true;
+    return kept;
+  });
+  return changed ? { ...next, sets } : next;
+}
+
+function apply(p: Project, a: Action): Project {
   switch (a.type) {
     case 'load':
       return a.project;
@@ -157,9 +193,20 @@ export function reducer(p: Project, a: Action): Project {
         const last = s.entries[s.entries.length - 1];
         const chapterId = a.chapterId ?? last?.chapterId ?? s.chapters[0]?.id ?? '';
         let cursor = setEnd(s, p.library);
+        // With `blend`, each one comes in over the end of the one before (see blendLength).
+        let prev = a.blend
+          ? s.entries.reduce<{ seconds: number; bpm?: number } | undefined>((best, e) => {
+              const end = (e.at ?? 0) + playLength(e, p.library.tracks[e.trackId]).seconds;
+              return end >= cursor - 1e-6 ? { seconds: playLength(e, p.library.tracks[e.trackId]).seconds, bpm: p.library.tracks[e.trackId]?.bpm } : best;
+            }, undefined)
+          : undefined;
         const added = a.trackIds.map((trackId) => {
-          const e = newEntry(s, trackId, chapterId, cursor, p.library.tracks[trackId]);
-          cursor += playLength(e, p.library.tracks[trackId]).seconds;
+          const track = p.library.tracks[trackId];
+          const e = newEntry(s, trackId, chapterId, cursor, track);
+          const seconds = playLength(e, track).seconds;
+          if (prev) e.at = Math.max(0, cursor - blendLength(prev.seconds, prev.bpm, seconds));
+          cursor = (e.at ?? 0) + seconds;
+          if (a.blend) prev = { seconds, bpm: track?.bpm };
           return e;
         });
         return { ...s, entries: [...s.entries, ...added] };
@@ -192,6 +239,8 @@ export function reducer(p: Project, a: Action): Project {
       return mapActive(p, (s) => ({ ...s, entries: s.entries.filter((e) => e.id !== a.id) }));
     case 'reorderEntries':
       return mapActive(p, (s) => ({ ...s, entries: reorderEntries(s, p.library, a.ids) }));
+    case 'blendNight':
+      return mapActive(p, (s) => ({ ...s, entries: blendNight(s, p.library, a.bars) }));
     case 'addChapter':
       return mapActive(p, (s) => ({
         ...s,
@@ -318,6 +367,8 @@ function actionLabel(a: Action): string {
       return 'Remove from set';
     case 'reorderEntries':
       return 'Reorder the night';
+    case 'blendNight':
+      return 'Blend the night';
     case 'addChapter':
       return 'Add chapter';
     case 'updateChapter':

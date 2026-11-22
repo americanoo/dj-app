@@ -84,7 +84,7 @@ export function MobileApp({
   useEffect(() => {
     if (!demoAsked.current || demoBusy || !trackIds.length) return;
     demoAsked.current = false;
-    if (!set.entries.length) dispatch({ type: 'addEntries', trackIds });
+    if (!set.entries.length) dispatch({ type: 'addEntries', trackIds, blend: true });
     setScreen('playlist');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [demoBusy, trackIds.length]);

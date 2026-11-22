@@ -207,9 +207,37 @@ test('drag a card by its handle to move it in the night', async ({ page }) => {
 test('settings: classic layout is a tap away, and back', async ({ page }) => {
   await demoNight(page);
   await page.tap('nav[aria-label=main] button[aria-label=settings]');
+  await page.tap('button[aria-label="blend every transition over 32 bars"]');
+  await expect(page.locator('.toast').last()).toContainText('32 bars');
   await page.tap('button:has-text("classic layout")');
   await expect(page.locator('.phone-tabs')).toBeVisible();
   await page.tap('.topbar button:has-text("⋯")');
   await page.tap('.menu-item:has-text("Phone layout")');
   await expect(page.locator('.m-app')).toBeVisible();
+});
+
+test('the next track comes in over the end of the one before, from its start time, wherever the end is set', async ({ page }) => {
+  await demoNight(page);
+  type Slot = { startsAt: number; playFor: number; mixIn: number };
+  const plan = () => page.evaluate(() => (window as unknown as { __night: { plan: Slot[] } }).__night.plan.map((s) => ({ startsAt: s.startsAt, playFor: s.playFor, mixIn: s.mixIn })));
+  // The demo night blends: each track comes in before the one before it ends.
+  let [a, b] = await plan();
+  const overlap = a.startsAt + a.playFor - b.startsAt;
+  expect(overlap).toBeGreaterThan(5);
+  // An earlier end on the first track: the second comes in sooner, with the same overlap.
+  const row = (i: number) => page.locator('.m-row').nth(i);
+  await row(0).locator('input[aria-label="end time"]').fill('130');
+  await row(0).locator('input[aria-label="end time"]').press('Enter');
+  // A later start on the second: it plays from there.
+  await row(1).locator('input[aria-label="start time"]').fill('20');
+  await row(1).locator('input[aria-label="start time"]').press('Enter');
+  await expect.poll(async () => (await plan())[1].mixIn).toBe(20);
+  [a, b] = await plan();
+  expect(a.playFor).toBeCloseTo(90, 1);
+  expect(a.startsAt + a.playFor - b.startsAt).toBeCloseTo(overlap, 1);
+  // Played across the blend: both sound together, then the second carries on.
+  await page.evaluate((t) => (window as unknown as { __night: { play(t: number): void } }).__night.play(t), b.startsAt + 1);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __sounding(): number }).__sounding()), { timeout: 10_000 }).toBe(2);
+  await page.evaluate((t) => (window as unknown as { __night: { play(t: number): void } }).__night.play(t), a.startsAt + a.playFor + 1);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __sounding(): number }).__sounding()), { timeout: 10_000 }).toBe(1);
 });

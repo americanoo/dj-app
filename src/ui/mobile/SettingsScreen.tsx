@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { LinkFolderButton } from '../MusicFolderControl';
 import { useKeyLock } from '../night';
 import { activeSet, useStore } from '../store';
+import { notify } from '../toastBus';
 
 export interface SettingsActions {
   story: () => void;
@@ -46,6 +47,28 @@ export function SettingsScreen({ header, actions: a }: { header: ReactNode; acti
           </span>
           <input className="m-input" type="time" value={set.startClock ?? ''} onChange={(e) => dispatch({ type: 'updateSet', patch: { startClock: e.target.value || undefined } })} aria-label="start time" />
         </label>
+        <div className="m-row-item">
+          <span>
+            blend every transition
+            <small>each track comes in over the end of the one before</small>
+          </span>
+          <span className="m-blend">
+            {[8, 16, 32].map((bars) => (
+              <button
+                key={bars}
+                className="m-chip"
+                aria-label={`blend every transition over ${bars} bars`}
+                disabled={set.entries.length < 2}
+                onClick={() => {
+                  dispatch({ type: 'blendNight', bars });
+                  notify(`Every transition now blends over ${bars} bars.`, 'info', { label: 'Undo', run: () => dispatch({ type: 'undo' }) });
+                }}
+              >
+                {bars}
+              </button>
+            ))}
+          </span>
+        </div>
         <Row label="story & chapters" hint="venue, chapters, notes" onClick={a.story} />
         <label className="m-row-item">
           <span>

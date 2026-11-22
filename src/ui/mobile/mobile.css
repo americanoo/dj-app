@@ -1036,3 +1036,8 @@ html.phone .app.m-layout .toasts {
   padding: 0;
   color-scheme: dark;
 }
+.m-blend {
+  display: flex;
+  gap: 6px;
+  flex: none;
+}

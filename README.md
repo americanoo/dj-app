@@ -34,6 +34,11 @@ On a phone, Setcraft has its own layout: black, big type, and a bottom bar with 
   sides show when each track starts; set the night's start time at the top and they show real times. The track
   playing now is marked in red. Tap a waveform to move there. Drag a card by **☰** to move it; the overlaps
   between tracks stay as they were. Start, end and eo/fo/kl on a night card apply to that night only.
+- **Tracks blend into each other.** A track added with **+** comes in over the last 16 bars of the one before
+  (at most a third of either track) and plays from its own start time. Change a track's start or end and
+  everything after it follows, each track keeping its overlap, so the night never stops or doubles up. This
+  also happens when a track is removed, or when its real length becomes known. For a night built end to end,
+  **settings → blend every transition** (8, 16 or 32 bars) overlaps them all at once.
 - **The + button** works where the night is. Tap it to add a **start keyframe**, then choose its effects from the
   tools bar: echo out, reverb out, filter, kill lows, and acapella / instrumental. Tap **+** again to set the
   **end keyframe**. The bar also has **match key** and **sync** for the track. **Hold +** to switch to:
