@@ -166,6 +166,28 @@ export function blendLength(prevSeconds: number, prevBpm: number | undefined, ne
   return Math.max(0, Math.min(bars, prevSeconds / 3, nextSeconds / 3));
 }
 
+/** The night starting at 00:00: when its first track starts later (it was removed, moved or trimmed), everything moves up. */
+export function startAtZero(set: SetPlan, lib: Library): SetPlan {
+  const timed = withTimes(set, lib);
+  if (!timed.entries.length) return set;
+  const first = Math.min(...timed.entries.map((e) => e.at ?? 0));
+  if (Math.abs(first) < 1e-6) return timed === set ? set : timed;
+  return { ...timed, entries: timed.entries.map((e) => ({ ...e, at: (e.at ?? 0) - first })) };
+}
+
+/**
+ * When a track comes in: it moves to night time `at`, and every track after it
+ * moves by as much, so the transitions after it stay as they were.
+ */
+export function setEntrance(set: SetPlan, lib: Library, id: string, at: number): SetEntry[] {
+  const entries = withTimes(set, lib).entries;
+  const i = entries.findIndex((e) => e.id === id);
+  if (i < 0) return entries;
+  const d = Math.max(0, at) - (entries[i].at ?? 0);
+  if (!d) return entries;
+  return entries.map((e, k) => (k >= i ? { ...e, at: Math.max(0, (e.at ?? 0) + d) } : e));
+}
+
 /** Every transition of the night as a blend of `bars` bars (of the outgoing track), in the order the tracks are in now. */
 export function blendNight(set: SetPlan, lib: Library, bars: number): SetEntry[] {
   const entries = withTimes(set, lib).entries;

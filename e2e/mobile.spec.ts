@@ -78,10 +78,12 @@ test('the phone layout: library and night as cards, nothing wider than the scree
   await expect(page.locator('.m-row')).toHaveCount(3, { timeout: 20_000 });
   // Clock rulers on both sides, one label per track plus the end.
   await expect(page.locator('.m-ruler.left .m-ruler-label')).toHaveCount(3);
-  await expect(page.locator('.m-ruler-band')).toHaveCount(2); // the first row plays, on both rulers
-  // Real times once the night has a start time.
+  await expect(page.locator('.m-now-line')).toBeVisible();
+  await expect(page.locator('[data-playing=true]')).toHaveCount(1); // the first track is where the night is
+  // The timeline counts from 00:00; with a start time, the clock shows underneath.
+  await expect(page.locator('.m-ruler.left .m-ruler-label input').first()).toHaveValue('00:00.0');
   await page.locator('.m-head input[aria-label="start time"]').fill('23:00');
-  await expect(page.locator('.m-ruler.left .m-ruler-label').first()).toHaveText('11:00');
+  await expect(page.locator('.m-ruler.left .m-ruler-label small').first()).toHaveText('11:00');
   await page.tap('nav[aria-label=main] button[aria-label=library]');
   await expect(page.locator('.m-card')).toHaveCount(3);
   await expect(page.locator('.m-title').first()).toHaveCSS('font-family', /Anton/);
@@ -196,12 +198,58 @@ test('drag a card by its handle to move it in the night', async ({ page }) => {
   await demoNight(page);
   const titles = () => page.locator('.m-row .m-title').allTextContents();
   const before = await titles();
+  const r0 = (await page.locator('.m-row').nth(0).boundingBox())!;
+  const r1 = (await page.locator('.m-row').nth(1).boundingBox())!;
   const h = (await page.locator('.m-handle').first().boundingBox())!;
+  // Past the middle of the second card.
+  const dy = r1.y + r1.height / 2 - (r0.y + r0.height / 2) + 20;
   await page.mouse.move(h.x + h.width / 2, h.y + h.height / 2);
   await page.mouse.down();
-  await page.mouse.move(h.x + h.width / 2, h.y + h.height / 2 + 130, { steps: 8 });
+  await page.mouse.move(h.x + h.width / 2, h.y + h.height / 2 + dy, { steps: 8 });
   await page.mouse.up();
   await expect.poll(titles).toEqual([before[1], before[0], before[2]]);
+});
+
+test('the timeline is to scale, and the levers trim a track: the end moves what follows, the start keeps the end', async ({ page }) => {
+  await demoNight(page);
+  type Slot = { startsAt: number; playFor: number; mixIn: number };
+  const plan = () => page.evaluate(() => (window as unknown as { __night: { plan: Slot[] } }).__night.plan.map((s) => ({ startsAt: s.startsAt, playFor: s.playFor, mixIn: s.mixIn })));
+  const p0 = await plan();
+  const box = (i: number) => page.locator('.m-row').nth(i).boundingBox() as Promise<{ x: number; y: number; width: number; height: number }>;
+  // To scale: heights and tops follow the times.
+  const pps = (await box(0)).height / p0[0].playFor;
+  expect((await box(1)).height / p0[1].playFor).toBeCloseTo(pps, 2);
+  expect((await box(1)).y - (await box(0)).y).toBeCloseTo((p0[1].startsAt - p0[0].startsAt) * pps, 0);
+
+  const drag = async (sel: string, i: number, dy: number) => {
+    const l = (await page.locator(sel).nth(i).boundingBox())!;
+    await page.mouse.move(l.x + l.width / 2, l.y + l.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(l.x + l.width / 2, l.y + l.height / 2 + dy, { steps: 6 });
+    await page.mouse.up();
+  };
+  // Trims land on the beat: within a beat (and a pixel) of where they were dropped.
+  const beat = 60 / 124;
+  const near = (a: number, b: number) => Math.abs(a - b) <= beat + 1 / pps;
+  // The end of the first track, 30 s earlier: the next comes in as much sooner, same overlap.
+  await drag('.m-lever.bottom', 0, -30 * pps);
+  await expect.poll(async () => near((await plan())[0].playFor, p0[0].playFor - 30)).toBe(true);
+  const p1 = await plan();
+  expect(p1[1].startsAt - p0[1].startsAt).toBeCloseTo(p1[0].playFor - p0[0].playFor, 3);
+  // On the beat: the first track's new end is a whole number of beats into it (Night Drive's grid starts at 0).
+  expect(((p1[0].playFor / beat) % 1 + 1) % 1 < 0.01 || ((p1[0].playFor / beat) % 1 + 1) % 1 > 0.99).toBe(true);
+  // The start of the second track, 20 s later: it starts later in the night and in the song; the third stays.
+  await drag('.m-lever.top', 1, 20 * pps);
+  await expect.poll(async () => (await plan())[1].mixIn > p1[1].mixIn + 15).toBe(true);
+  const p2 = await plan();
+  expect(near(p2[1].mixIn, p1[1].mixIn + 20)).toBe(true);
+  expect(p2[1].startsAt - p1[1].startsAt).toBeCloseTo(p2[1].mixIn - p1[1].mixIn, 3);
+  expect(p2[1].startsAt + p2[1].playFor).toBeCloseTo(p1[1].startsAt + p1[1].playFor, 0);
+  expect(p2[2].startsAt).toBeCloseTo(p1[2].startsAt, 1);
+  // And the cards follow, still to scale (the default zoom refits to the new lengths).
+  await expect
+    .poll(async () => Math.abs((await box(0)).height / p2[0].playFor - (await box(2)).height / p2[2].playFor))
+    .toBeLessThan(0.02);
 });
 
 test('settings: classic layout is a tap away, and back', async ({ page }) => {
@@ -315,4 +363,31 @@ test("a night card's key and BPM are how the track plays tonight: faster or slow
   await row(1).locator('input[aria-label=key]').fill('');
   await row(1).locator('input[aria-label=key]').press('Enter');
   await expect.poll(async () => (await plan())[1].semitones).toBeUndefined();
+});
+
+test('exact times on the rulers: type when the next track comes in, or when one ends; the night always starts at 00:00', async ({ page }) => {
+  await demoNight(page);
+  type Slot = { trackId: string; startsAt: number; playFor: number };
+  const plan = () => page.evaluate(() => (window as unknown as { __night: { plan: Slot[] } }).__night.plan.map((s) => ({ trackId: s.trackId, startsAt: s.startsAt, playFor: s.playFor })));
+  const p0 = await plan();
+  // The second track comes in at 2:00.5; the third follows with its blend unchanged.
+  const entrance = page.locator('.m-ruler.left input[aria-label^="when Warehouse Lights comes in"]');
+  await entrance.fill('2:00.5');
+  await entrance.press('Enter');
+  await expect.poll(async () => (await plan())[1].startsAt).toBeCloseTo(120.5, 3);
+  const p1 = await plan();
+  expect(p1[2].startsAt - p1[1].startsAt).toBeCloseTo(p0[2].startsAt - p0[1].startsAt, 3);
+  await expect(entrance).toHaveValue('02:00.5');
+  // The first track can't come in later than 00:00.
+  await expect(page.locator('.m-ruler.left .m-ruler-label input').first()).toBeDisabled();
+  // The first track ends at 1:50: typed on the right ruler, it plays exactly that long.
+  const end = page.locator('.m-ruler.right input[aria-label^="when Night Drive ends"]');
+  await end.fill('1:50');
+  await end.press('Enter');
+  await expect.poll(async () => (await plan())[0].playFor).toBeCloseTo(110, 3);
+  // Removing the first track: the night starts at 00:00 again.
+  await page.locator('button[aria-label="more for Night Drive"]').tap();
+  await page.tap('text=remove from night');
+  await expect.poll(async () => (await plan())[0].startsAt).toBe(0);
+  await expect(page.locator('.m-ruler.left .m-ruler-label input').first()).toHaveValue('00:00.0');
 });

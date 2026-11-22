@@ -16,9 +16,10 @@ import type { ImportResult } from '../core/formats';
 import { mergeIntoLibrary, type MergeChoices } from '../core/merge';
 import { mergeScan, type ScanEntry } from '../core/musiclib';
 import { trackMixCue } from '../core/trackfx';
+import { setMixPoint } from '../core/sheet';
 import { copySet } from '../core/versions';
 import { initHistory, record, redo, undo, type History } from '../core/history';
-import { blendLength, blendNight, keepTransitions, playLength, reorderEntries, setEnd, withTimes } from '../core/setplan';
+import { blendLength, blendNight, keepTransitions, setEntrance, startAtZero, tempoFactor, playLength, reorderEntries, setEnd, withTimes } from '../core/setplan';
 
 const STORAGE_KEY = 'setcraft-project-v1';
 /**
@@ -67,6 +68,10 @@ export type Action =
   | { type: 'removeEntry'; id: string }
   | { type: 'reorderEntries'; ids: string[] }
   | { type: 'blendNight'; bars: number }
+  | { type: 'trimEntry'; id: string; edge: 'start' | 'end'; to: number }
+  | { type: 'setEntrance'; id: string; at: number }
+  /** Tracks' real lengths, measured from their audio (not an edit: it isn't undone). */
+  | { type: 'measured'; durations: Record<string, number> }
   | { type: 'addChapter' }
   | { type: 'updateChapter'; id: string; patch: Partial<Chapter> }
   | { type: 'removeChapter'; id: string }
@@ -93,8 +98,27 @@ function withEdit(t: Track, patch: Partial<Track>): Track {
 }
 
 export function reducer(p: Project, a: Action): Project {
-  const next = apply(p, a);
-  return followsLengths(a) ? rippleSets(p, next) : next;
+  const applied = apply(p, a);
+  const next = followsLengths(a) ? rippleSets(p, applied) : applied;
+  return keepsStart(a) ? fromZero(next) : next;
+}
+
+/** Edits after which the night starts at 00:00 again (dragging a track in time on the desktop timeline leaves it where it's put). */
+function keepsStart(a: Action): boolean {
+  return a.type !== 'setEntryTime' && a.type !== 'placeTrack' && a.type !== 'selectSet';
+}
+
+function fromZero(p: Project): Project {
+  let changed = false;
+  const sets = p.sets.map((s) => {
+    const z = startAtZero(s, p.library);
+    if (z !== s && z.entries.some((e, i) => e.at !== s.entries[i]?.at || e.id !== s.entries[i]?.id)) {
+      changed = true;
+      return z;
+    }
+    return s;
+  });
+  return changed ? { ...p, sets } : p;
 }
 
 /** Edits that can change how long tracks play, after which the rest of the night follows (see keepTransitions). */
@@ -109,6 +133,11 @@ function followsLengths(a: Action): boolean {
       return true;
     case 'updateEntry':
       return !('at' in a.patch);
+    case 'trimEntry':
+      // Trimming the end moves what follows; trimming the start keeps the end where it is.
+      return a.edge === 'end';
+    case 'measured':
+      return true;
     default:
       return false;
   }
@@ -241,6 +270,37 @@ function apply(p: Project, a: Action): Project {
       return mapActive(p, (s) => ({ ...s, entries: reorderEntries(s, p.library, a.ids) }));
     case 'blendNight':
       return mapActive(p, (s) => ({ ...s, entries: blendNight(s, p.library, a.bars) }));
+    case 'setEntrance':
+      return mapActive(p, (s) => ({ ...s, entries: setEntrance(s, p.library, a.id, a.at) }));
+    case 'measured': {
+      const tracks = { ...p.library.tracks };
+      let changed = false;
+      for (const [id, d] of Object.entries(a.durations)) {
+        const t = tracks[id];
+        if (t && d > 0 && Math.abs((t.duration ?? 0) - d) > 0.02) {
+          tracks[id] = { ...t, duration: d };
+          changed = true;
+        }
+      }
+      return changed ? { ...p, library: { ...p.library, tracks } } : p;
+    }
+    case 'trimEntry': {
+      // A card's edge dragged on the timeline: its start or end moves to song time `to`.
+      // Trimming the start also starts it later in the night, so the rest of it stays put.
+      const set = withTimes(activeSet(p), p.library);
+      const e = set.entries.find((x) => x.id === a.id);
+      const t = e && p.library.tracks[e.trackId];
+      if (!e || !t) return p;
+      const oldIn = t.cues.find((c) => c.id === e.mixInCueId)?.start ?? 0;
+      const to = Math.max(0, t.duration ? Math.min(t.duration, a.to) : a.to);
+      const { cues, patch } = setMixPoint(t, e, a.edge === 'start' ? 'in' : 'out', a.edge === 'start' && to < 0.01 ? undefined : to, set.entries);
+      const withCues = cues === t.cues ? p : apply(p, { type: 'updateTrack', id: t.id, patch: { cues: markEdits(t.cues, cues) } });
+      const shift = a.edge === 'start' ? (to - oldIn) / tempoFactor(e, t) : 0;
+      return mapActive(withCues, (s) => ({
+        ...s,
+        entries: s.entries.map((x) => (x.id === e.id ? { ...x, ...patch, ...(shift ? { at: Math.max(0, (e.at ?? 0) + shift) } : {}) } : x)),
+      }));
+    }
     case 'addChapter':
       return mapActive(p, (s) => ({
         ...s,
@@ -369,6 +429,12 @@ function actionLabel(a: Action): string {
       return 'Reorder the night';
     case 'blendNight':
       return 'Blend the night';
+    case 'trimEntry':
+      return a.edge === 'start' ? 'Trim the start' : 'Trim the end';
+    case 'setEntrance':
+      return 'When it comes in';
+    case 'measured':
+      return 'Track lengths';
     case 'addChapter':
       return 'Add chapter';
     case 'updateChapter':
@@ -407,8 +473,8 @@ function historyReducer(h: History<Project>, a: StoreAction): History<Project> {
   if (a.type === 'redo') return redo(h);
   const next = reducer(h.present, a);
   if (a.type === 'load' && a.fresh) return initHistory(next);
-  // Switching between sets is navigation, not an edit.
-  if (a.type === 'selectSet') return { ...h, present: next };
+  // Switching between sets is navigation, and a measured length is a fact: neither is an edit to undo.
+  if (a.type === 'selectSet' || a.type === 'measured') return { ...h, present: next };
   return record(h, next, actionLabel(a), mergeKey(a), Date.now());
 }
 

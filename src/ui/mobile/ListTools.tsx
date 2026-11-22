@@ -47,6 +47,7 @@ export function ListTools({
   shown,
   total,
   extra,
+  before,
 }: {
   label: string;
   prefs: ListPrefs;
@@ -59,6 +60,8 @@ export function ListTools({
   total: number;
   /** More filter rows (in the night / fits after). */
   extra?: ReactNode;
+  /** Controls at the start of the strip (the night's zoom). */
+  before?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const f = prefs.filter;
@@ -72,6 +75,7 @@ export function ListTools({
 
   return (
     <div className="m-tools-edge">
+      {before}
       {n > 0 && (
         <span className="m-tools-count">
           {shown} of {total}

@@ -29,11 +29,29 @@ On a phone, Setcraft has its own layout: black, big type, and a bottom bar with 
   number pad). The **eo / fo / kl** buttons switch on **echo out**, **filter out** or **kill lows** for when the
   track reaches its end time. Start, end and these end effects are the track's defaults: they come with it
   whenever it goes into a night. Tap **+** to add a track to the night.
-- **Playlist (the night)**: the tracks in order. Each card has the track's waveform under it, coloured by
-  section: build in blue, drop in white, breakdown in pink, intro and outro in grey. The clock rulers on both
-  sides show when each track starts; set the night's start time at the top and they show real times. The track
-  playing now is marked in red. Tap a waveform to move there. Drag a card by **☰** to move it; the overlaps
-  between tracks stay as they were. Start, end and eo/fo/kl on a night card apply to that night only.
+- **Playlist (the night)**: a timeline drawn to scale. Each card is as tall as its track plays and sits where
+  it starts, so a 7-minute track is twice the height of a 3½-minute one, and blends really overlap. Later tracks
+  sit on top. The part of a card the next one covers is its blend, shown striped with its length; the cards
+  alternate sides so both edges of a blend show. The night always starts at 00:00 (remove or trim the first
+  track and everything moves up). The left ruler gives the time each track comes in, the right one the time it
+  ends, to a tenth of a second, with a tick every minute; set the night's start time at the top and the clock
+  time shows under each.
+  - **Exact times**: tap a time on the left ruler and type when that track should come in (e.g. `2:00.5`); the
+    tracks after it move with it, keeping their blends, and a message says how long before the previous track
+    ends it comes in. Tap a time on the right ruler and type when that track should end.
+  - **Real lengths**: once a track's audio has been opened (played, or prefetched as the night plays), its
+    length is measured from the audio itself, replacing the collection's, and the night is planned with it. A red line marks where
+  the night is and moves at its real speed; the playing card has a red edge, and the view follows it while it
+  plays. Zoom with **−** / **+** on the strip above; the middle button fits the tracks again.
+  - **Levers**: drag the bar on a card's bottom edge up to end the track sooner (the card gets thinner and the
+    tracks after it move up, keeping their blends), or down to let it play longer. Drag the bar on its top edge
+    down to start it later in the song (it also starts later in the night, so its end stays put). Trims snap to
+    the beat, and a label shows the new start or end as you drag. Where a card's bottom is under the next card,
+    its lever sits on the side that still shows, in pink.
+  - Each card shows the track's waveform, coloured by section: build in blue, drop in white, breakdown in pink,
+    intro and outro in grey. A thin card shows less: a single line and its waveform, then just its title. Tap a
+    waveform to move there. Drag a card by **☰** to move it; the overlaps between tracks stay as they were.
+    Start, end and eo/fo/kl on a night card apply to that night only.
 - **Tonight's key and tempo.** On a night card, the key and BPM you type are how that track plays in this
   night: a new BPM plays it faster or slower (and the blends ride to it), and a new key transposes it (a minor
   key stays minor, so a major key you type counts as its relative). The track's own values stay, shown struck

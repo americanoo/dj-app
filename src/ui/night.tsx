@@ -43,17 +43,25 @@ export function NightProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     player.setSlots(nightSlots(buildTimeline(activeSet(project), project.library)));
   }, [player, project]);
-  // A track's real length is known once its audio has been analysed (by the deck, the
-  // transition view or anything else): the night is planned with it from then on.
+  // A track's real length is known once its audio has been decoded (by the night, the deck,
+  // the transition view or anything else): the night is planned with it from then on, rather
+  // than the rounded length a collection file gave.
+  const tracksRef = useRef(project.library.tracks);
+  tracksRef.current = project.library.tracks;
   useEffect(() => {
-    const patches: Record<string, { duration: number }> = {};
-    for (const [id, a] of Object.entries(audio)) {
-      const t = project.library.tracks[id];
-      if (t && !t.duration && a.duration > 0) patches[id] = { duration: a.duration };
-    }
-    if (Object.keys(patches).length) dispatch({ type: 'updateTracks', patches });
+    const report = (found: Record<string, number>) => {
+      const durations: Record<string, number> = {};
+      for (const [id, d] of Object.entries(found)) {
+        const t = tracksRef.current[id];
+        if (t && d > 0 && Math.abs((t.duration ?? 0) - d) > 0.02) durations[id] = d;
+      }
+      if (Object.keys(durations).length) dispatch({ type: 'measured', durations });
+    };
+    report(Object.fromEntries(Object.entries(audio).map(([id, a]) => [id, a.duration])));
+    report(player.measuredDurations());
+    return player.subscribe(() => report(player.measuredDurations()));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [audio]);
+  }, [audio, player]);
   // Newly attached files or a linked folder: tracks that had no audio can be tried again.
   useEffect(() => player.forget(), [player, audio, folder.revision]);
 

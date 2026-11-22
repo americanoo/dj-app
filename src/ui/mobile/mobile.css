@@ -319,86 +319,245 @@ html.phone body:has(.m-app) {
   cursor: grab;
 }
 
-/* The night */
+/* The night: a true timeline */
 .m-night {
   padding: 0 0 24px;
 }
-.m-row {
+.m-timeline {
   position: relative;
-  display: grid;
-  grid-template-columns: 40px minmax(0, 1fr) 40px;
-  column-gap: 6px;
-  height: var(--row);
+  margin-top: 6px;
+}
+.m-lanes {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50px;
+  right: 50px;
+}
+.m-tcard {
+  position: absolute;
+  left: 0;
+  right: 14px;
+  box-sizing: border-box;
+  border: 1px solid var(--m-line);
+  border-radius: 6px;
+  background: linear-gradient(#131313 42%, #000);
+  overflow: visible;
   transition: transform 0.15s ease;
 }
-.m-row.dragging {
+.m-tcard.lane-1 {
+  left: 14px;
+  right: 0;
+  z-index: 1;
+}
+.m-tcard.dragging,
+.m-tcard.trimming {
   transition: none;
   z-index: 5;
-}
-.m-row.dragging .m-card {
   border-color: var(--m-soft);
   box-shadow: 0 8px 30px rgba(0, 0, 0, 0.8);
 }
-.m-row-body {
+.m-tcard .m-row-body {
+  height: 100%;
   display: flex;
   flex-direction: column;
-  gap: 7px;
-  padding-top: 2px;
-  min-width: 0;
+  justify-content: center;
+  gap: 6px;
+  padding: 4px 8px 6px 2px;
+  box-sizing: border-box;
+  overflow: hidden;
 }
-.m-row-body .m-card {
-  padding-left: 2px;
+.m-tcard .m-row-body .m-card {
+  border: 0;
+  background: none;
+  padding: 0;
+  min-height: 0;
 }
-.m-wave {
-  position: relative;
-  height: 16px;
-  flex: none;
-  cursor: pointer;
+.m-tcard .m-row-body .m-wave {
+  margin-left: 30px;
 }
-.m-wave::before {
-  /* bigger tap target */
-  content: '';
-  position: absolute;
-  inset: -6px 0;
-}
-.m-wave canvas {
-  display: block;
-}
-.m-wave-marks {
-  position: absolute;
-  inset: 0;
-  overflow: visible;
-  pointer-events: none;
-}
-.m-playhead {
-  position: absolute;
-  top: -3px;
-  bottom: -3px;
-  left: 0;
-  width: 1px;
-  background: var(--m-text);
-  box-shadow: 0 0 4px rgba(255, 255, 255, 0.7);
-  pointer-events: none;
-}
-.m-ruler {
+.m-compact {
   position: relative;
   height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 6px 0 0;
+  overflow: hidden;
+  font-size: 11px;
+}
+.size-mid .m-compact {
+  flex-wrap: wrap;
+  align-content: center;
+  row-gap: 4px;
+}
+.m-c-title {
+  flex: 1;
+  min-width: 0;
+  font: 400 15px/1.1 var(--m-display);
+  color: var(--m-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.size-thin .m-c-title {
+  font-size: 12px;
+}
+.m-c-key {
+  color: var(--m-red);
+  font-weight: 700;
+}
+.m-c-bpm {
+  color: var(--m-blue);
+  font-weight: 700;
+}
+.size-thin .m-handle {
+  height: 100%;
+}
+.size-thin .m-round {
+  width: 22px;
+  height: 22px !important;
+}
+.m-c-wave {
+  flex-basis: 100%;
+  padding: 0 4px 0 30px;
+}
+.m-row.dimmed > *:not(.m-lever) {
+  opacity: 0.22;
+}
+.m-playing-edge {
+  position: absolute;
+  inset: -1px;
+  border: 1px solid rgba(255, 46, 46, 0.85);
+  border-radius: 6px;
+  box-shadow: 0 0 12px rgba(255, 46, 46, 0.25);
+  pointer-events: none;
+}
+/* The covered tail of a card: its blend into the next track, striped, with its length */
+.m-card-face {
+  position: relative;
+  overflow: hidden;
+}
+.m-blend-tail {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px dashed rgba(232, 112, 143, 0.6);
+  background: repeating-linear-gradient(135deg, rgba(232, 112, 143, 0.22) 0 2px, transparent 2px 6px);
+  pointer-events: none;
+}
+.m-blend-tail i {
+  position: absolute;
+  top: 4px;
+  font-style: normal;
+  font-size: 8px;
+  color: var(--m-pink);
+  writing-mode: vertical-rl;
+}
+.lane-0 .m-blend-tail i {
+  left: 2px;
+}
+.lane-1 .m-blend-tail i {
+  right: 2px;
+}
+/* Levers: a layer above every card, so a blend never hides them */
+.m-levers {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50px;
+  right: 50px;
+  pointer-events: none;
+  z-index: 60;
+}
+.m-lever {
+  position: absolute;
+  height: 20px;
+  margin-top: -10px;
+  width: 64px;
+  pointer-events: auto;
+  touch-action: none;
+  cursor: ns-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.m-lever.lane-0 {
+  left: calc((100% - 14px) / 2 - 32px);
+}
+.m-lever.lane-1 {
+  left: calc((100% - 14px) / 2 - 18px);
+}
+/* A bottom edge under the next card: its lever sits on the side that still shows */
+.m-lever.bottom.covered.lane-0 {
+  left: -24px;
+}
+.m-lever.bottom.covered.lane-1 {
+  left: auto;
+  right: -24px;
+}
+.m-lever i {
+  display: block;
+  width: 30px;
+  height: 4px;
+  border-radius: 2px;
+  background: #55555c;
+  border: 1px solid #000;
+}
+.m-lever.covered i {
+  background: var(--m-pink);
+  opacity: 0.8;
+}
+.m-lever:active i {
+  background: var(--m-text);
+}
+.m-lever-tip {
+  position: absolute;
+  bottom: 16px;
+  padding: 3px 7px;
+  border-radius: 8px;
+  background: var(--m-text);
+  color: #000;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.m-lever.bottom .m-lever-tip {
+  bottom: auto;
+  top: 16px;
+}
+.m-handle {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 44px;
+  flex: none;
+  touch-action: none;
+  cursor: grab;
+}
+/* Rulers */
+.m-ruler {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 46px;
 }
 .m-ruler.left {
+  left: 0;
   border-right: 1px solid #2a2a33;
 }
 .m-ruler.right {
+  right: 0;
   border-left: 1px solid #2a2a33;
 }
 .m-ruler i {
   position: absolute;
   height: 1px;
-  background: #2a2a33;
   width: 4px;
+  background: #2a2a33;
 }
 .m-ruler i.major {
-  top: 0;
-  width: 10px;
+  width: 8px;
   background: var(--m-line);
 }
 .m-ruler.left i {
@@ -409,57 +568,87 @@ html.phone body:has(.m-app) {
 }
 .m-ruler-label {
   position: absolute;
-  top: 4px;
+  margin-top: -6px;
   font-size: 8px;
+  line-height: 10px;
   color: var(--m-muted);
-  opacity: 0.6;
   white-space: nowrap;
+  display: flex;
+  flex-direction: column;
+  z-index: 2;
 }
 .m-ruler.left .m-ruler-label {
-  left: 2px;
+  align-items: flex-end;
 }
-.m-ruler.right .m-ruler-label {
-  right: 2px;
+.m-ruler-label small {
+  font-size: 7px;
+  color: var(--m-faint);
 }
-.m-ruler:has(.m-ruler-band) .m-ruler-label {
-  color: var(--m-red);
-  opacity: 0.85;
+.m-app input.m-ruler-time {
+  font: 8px/12px var(--m-mono);
+  color: var(--m-soft);
+  border-bottom: 1px dashed #2f2f35 !important;
+  text-align: inherit;
 }
-.m-ruler-band {
-  position: absolute;
-  inset: 0;
-  background: rgba(255, 46, 46, 0.06);
-  pointer-events: none;
+.m-ruler.left input.m-ruler-time {
+  text-align: right;
 }
-.m-ruler.left .m-ruler-band {
-  border-right: 1px solid rgba(255, 46, 46, 0.6);
-  margin-right: -1px;
+.m-app input.m-ruler-time:disabled {
+  color: var(--m-muted);
+  border-bottom-color: transparent !important;
+  opacity: 1;
 }
-.m-ruler.right .m-ruler-band {
-  border-left: 1px solid rgba(255, 46, 46, 0.6);
-  margin-left: -1px;
+.m-app input.m-ruler-time:focus {
+  position: relative;
+  z-index: 5;
+  background: #000 !important;
+  font-size: 12px;
+  width: 8ch !important;
 }
-.m-ruler-mark {
-  position: absolute;
-  font-size: 9px;
-  line-height: 10px;
-  margin-top: -5px;
-  color: rgba(242, 241, 238, 0.75);
-}
-.m-ruler-mark.left {
-  left: 6px;
-}
-.m-ruler-mark.right {
+.m-ruler.left .m-ruler-label {
   right: 6px;
 }
-.m-row-end {
-  display: flex;
-  height: 16px;
-  position: relative;
+.m-ruler.right .m-ruler-label {
+  left: 6px;
 }
-.m-row-end .m-ruler-label {
-  position: static;
-  padding: 0 2px;
+/* Where the night is */
+.m-now-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 1px solid var(--m-red);
+  z-index: 4;
+  pointer-events: none;
+}
+.m-now-line span {
+  position: absolute;
+  left: 0;
+  top: -6px;
+  padding: 0 3px;
+  font-size: 8px;
+  line-height: 11px;
+  background: var(--m-red);
+  color: #000;
+  font-weight: 700;
+  border-radius: 2px;
+}
+.m-now-line::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: -4px;
+  border: 4px solid transparent;
+  border-right-color: var(--m-red);
+}
+.m-zoom {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.m-zoom .m-edge-btn {
+  min-width: 22px;
+  justify-content: center;
 }
 
 /* Popovers */
@@ -1053,7 +1242,7 @@ html.phone .app.m-layout .toasts {
   flex: none;
 }
 .m-playlist .m-tools-edge {
-  margin: -4px 52px 4px;
+  margin: -4px 16px 4px;
 }
 .m-edge-btn {
   display: flex !important;
@@ -1157,9 +1346,7 @@ html.phone .app.m-layout .toasts {
 .m-tools-foot .m-text-btn {
   margin: 0;
 }
-.m-row.dimmed .m-row-body {
-  opacity: 0.22;
-}
+
 .m-start span {
   white-space: nowrap;
 }
