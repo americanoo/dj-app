@@ -130,6 +130,21 @@ export function transposeKey(raw: string | undefined, semitones: number): string
   return keyName({ pitch: (((k.pitch + Math.round(semitones)) % 12) + 12) % 12, minor: k.minor });
 }
 
+/**
+ * The transposition (semitones, -6..+5) that puts `from` in the key `to`. A
+ * transposition keeps a key minor or major, so a key of the other kind counts as
+ * its relative (typing 9B for an 8A track gives 9A: -5). Undefined when either is unknown.
+ */
+export function shiftToKey(from: string | undefined, to: string | undefined): number | undefined {
+  const a = parseKey(from);
+  const b = parseKey(to);
+  if (!a || !b) return undefined;
+  // The relative minor is three semitones below its major (C → Am), and vice versa.
+  const target = a.minor === b.minor ? b.pitch : a.minor ? b.pitch + 9 : b.pitch + 3;
+  const d = (((target - a.pitch) % 12) + 12) % 12;
+  return d > 5 ? d - 12 : d;
+}
+
 const SMOOTH: KeyRelation[] = ['same', 'relative', 'adjacent', 'diagonal'];
 
 /**

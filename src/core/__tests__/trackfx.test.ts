@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { valueAt } from '../mixplan';
 import { emptyProject, newSet, type Project, type SetEntry, type Track } from '../model';
-import { buildTimeline, nightSlots, reorderEntries } from '../setplan';
+import { buildTimeline, nightSlots, reorderEntries, slotKey, slotPos } from '../setplan';
+import { shiftToKey } from '../keys';
+import { keysMix as keysMixFor } from '../listsort';
 import { setMixPoint } from '../sheet';
 import { setTrackMixPoint, stemsAt, trackFxCurves, trackMixCue } from '../trackfx';
 import { activeSet, reducer } from '../../ui/store';
@@ -172,5 +174,59 @@ describe('the night carries on from wherever a track now ends', () => {
       ['a', 0],
       ['c', 268],
     ]);
+  });
+});
+
+describe("tonight's tempo and key for a track", () => {
+  const track = (id: string, bpm: number, key: string, duration = 240): Track => ({ id, title: id, artist: '', cues: [], source: 'manual', duration, bpm, key });
+  const night = (entries: Partial<SetEntry>[], tracks: Track[]) => {
+    const set = newSet('S');
+    set.entries = entries.map((e, i) => ({ id: `e${i}`, trackId: tracks[i].id, chapterId: set.chapters[0].id, energy: 5, transition: '', notes: '', at: 0, ...e }));
+    return { set, lib: { tracks: Object.fromEntries(tracks.map((t) => [t.id, t])), playlists: [] } };
+  };
+
+  it('a faster tempo plays the file faster throughout, and takes less time', () => {
+    const { set, lib } = night([{ playBpm: 132 }], [track('a', 120, 'Am')]);
+    const [it] = buildTimeline(set, lib);
+    expect(it.playFor).toBeCloseTo(240 / 1.1, 3);
+    const [slot] = nightSlots([it]);
+    expect(slot.stretch).toBeCloseTo(1.1);
+    expect(valueAt(slot.curves.rate, 50, 1)).toBeCloseTo(1.1);
+    // 100 s into the night is 110 s into the file
+    expect(slotPos(slot, 100)).toBeCloseTo(110, 3);
+    expect(slot.bpm! * valueAt(slot.curves.rate, 50, 1)).toBeCloseTo(132);
+  });
+
+  it("a ride into the next track's tempo goes to its tempo tonight", () => {
+    const { set, lib } = night(
+      [{ at: 0 }, { at: 180, playBpm: 126 }],
+      [track('a', 120, 'Am'), track('b', 125, 'Am')],
+    );
+    const slots = nightSlots(buildTimeline(set, lib));
+    // the outgoing track ends at 126 BPM: rate 126 / 120
+    const a = slots[0];
+    expect(a.bpm! * valueAt(a.curves.rate, a.startsAt + a.playFor - 0.01, 1)).toBeCloseTo(126, 1);
+    expect(slots[1].bpm! * valueAt(slots[1].curves.rate, 200, 1)).toBeCloseTo(126, 1);
+  });
+
+  it('a typed key transposes it: the same kind of key, or the relative of the other kind', () => {
+    expect(shiftToKey('Am', '9A')).toBe(-5); // Am → Em
+    expect(shiftToKey('Am', 'Bm')).toBe(2);
+    expect(shiftToKey('Am', '9B')).toBe(-5); // G major's relative is Em
+    expect(shiftToKey('C', 'Am')).toBe(0);
+    const { set, lib } = night([{ keyShift: 2 }], [track('a', 120, 'Am')]);
+    const [slot] = nightSlots(buildTimeline(set, lib));
+    expect(slot.semitones).toBe(2);
+    expect(slotKey(slot)).toBe('Bm');
+  });
+
+  it('key matching works from the key it plays in tonight', () => {
+    const { set, lib } = night(
+      [{ at: 0, keyShift: 2 }, { at: 200, matchKey: true }],
+      [track('a', 120, 'Am'), track('b', 120, 'Am')],
+    );
+    const slots = nightSlots(buildTimeline(set, lib));
+    expect(slotKey(slots[0])).toBe('Bm');
+    expect(keysMixFor(slotKey(slots[1]), 'Bm')).toBe(true);
   });
 });

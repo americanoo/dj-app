@@ -1167,3 +1167,10 @@ html.phone .app.m-layout .toasts {
   min-width: 0;
   flex-shrink: 1;
 }
+.m-was {
+  margin-left: 4px;
+  font-size: 9px;
+  font-weight: 400;
+  color: var(--m-faint);
+  text-decoration: line-through;
+}

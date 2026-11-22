@@ -277,3 +277,42 @@ test('sort and filter on the edge of each list: the library sorts and filters, t
   await expect(page.locator('.m-row.dimmed')).toHaveCount(2);
   await expect(page.locator('.m-row')).toHaveCount(3); // dimmed, not hidden: the clock stays true
 });
+
+test("a night card's key and BPM are how the track plays tonight: faster or slower, transposed", async ({ page }) => {
+  await demoNight(page);
+  type Slot = { stretch?: number; semitones?: number; startsAt: number; playFor: number };
+  const plan = () => page.evaluate(() => (window as unknown as { __night: { plan: Slot[] } }).__night.plan.map((s) => ({ stretch: s.stretch, semitones: s.semitones, startsAt: s.startsAt, playFor: s.playFor })));
+  const row = (i: number) => page.locator('.m-row').nth(i);
+  const before = (await plan())[0].playFor;
+  // Night Drive is 124 BPM: tonight at 136.4, 10% faster.
+  await row(0).locator('input[aria-label=bpm]').fill('136.4');
+  await row(0).locator('input[aria-label=bpm]').press('Enter');
+  await expect.poll(async () => (await plan())[0].stretch).toBeCloseTo(1.1, 3);
+  expect((await plan())[0].playFor).toBeCloseTo(before / 1.1, 1);
+  await expect(row(0).locator('.m-was')).toHaveText('124');
+  // The library keeps the track's own BPM.
+  const playBpm = await savedSoon(page, (p) => (p.sets[0].entries[0] as Entry & { playBpm?: number }).playBpm);
+  expect(playBpm).toBe(136.4);
+  expect((await saved(page)).library.tracks[(await saved(page)).sets[0].entries[0].trackId].bpm).toBe(124);
+  // It plays 10% faster (key lock is off in tests: the rate shows on the source).
+  await page.evaluate(() => (window as unknown as { __night: { play(t: number): void } }).__night.play(10));
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as { __rates(): number[] }).__rates()), { timeout: 10_000 })
+    .toEqual([expect.closeTo(1.1, 2)]);
+  await page.evaluate(() => (window as unknown as { __night: { pause(): void } }).__night.pause());
+
+  // Warehouse Lights is in 9A: tonight in 10A, a fifth up (-5 semitones, the smaller move).
+  await row(1).locator('input[aria-label=key]').fill('10A');
+  await row(1).locator('input[aria-label=key]').press('Enter');
+  await expect.poll(async () => (await plan())[1].semitones).toBe(-5);
+  await expect(row(1).locator('input[aria-label=key]')).toHaveValue('10A');
+  await expect(row(1).locator('.m-was')).toHaveText('9A');
+  // Played through the pitch shifter.
+  const b = (await plan())[1];
+  await page.evaluate((t) => (window as unknown as { __night: { play(t: number): void } }).__night.play(t), b.startsAt + b.playFor / 2);
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __night: { stretchedVoices: number } }).__night.stretchedVoices), { timeout: 10_000 }).toBeGreaterThan(0);
+  // Back to its own key: clear it.
+  await row(1).locator('input[aria-label=key]').fill('');
+  await row(1).locator('input[aria-label=key]').press('Enter');
+  await expect.poll(async () => (await plan())[1].semitones).toBeUndefined();
+});
