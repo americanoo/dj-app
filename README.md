@@ -21,19 +21,39 @@ npm run build    # static site in dist/ – host anywhere
 
 ## On your phone
 
-Setcraft works on phones too. On a phone-sized screen it shows **one panel at a time**, picked from tabs along
-the bottom: **Night** (the journey of the night, fitted to what's planned so the tracks are big enough to drag),
-**Sheet** (the same night as typed times, see below),
-**Mix** (the transition), **Deck** (one track: waveform, pads, loops) and **Library**. The player sits just above
-the tabs, Export and the rest are under **⋯**, and opening a track from the library or the mix takes you to the
-deck. Switching tabs never stops the music.
+On a phone, Setcraft has its own layout: black, big type, and a bottom bar with four buttons:
+**library**, **playlist**, **tools** and **settings**.
+
+- **Library ("LOAD MUSIC")**: every track as a card showing its title, **key** (red) and **BPM** (blue), its
+  artist, and its **start** and **end** times. Tap any of those to type a new value (`2:08`, or `208` on the
+  number pad). The **eo / fo / kl** buttons switch on **echo out**, **filter out** or **kill lows** for when the
+  track reaches its end time. Start, end and these end effects are the track's defaults: they come with it
+  whenever it goes into a night. Tap **+** to add a track to the night.
+- **Playlist (the night)**: the tracks in order. Each card has the track's waveform under it, coloured by
+  section: build in blue, drop in white, breakdown in pink, intro and outro in grey. The clock rulers on both
+  sides show when each track starts; set the night's start time at the top and they show real times. The track
+  playing now is marked in red. Tap a waveform to move there. Drag a card by **☰** to move it; the overlaps
+  between tracks stay as they were. Start, end and eo/fo/kl on a night card apply to that night only.
+- **The + button** works where the night is. Tap it to add a **start keyframe**, then choose its effects from the
+  tools bar: echo out, reverb out, filter, kill lows, and acapella / instrumental. Tap **+** again to set the
+  **end keyframe**. The bar also has **match key** and **sync** for the track. **Hold +** to switch to:
+  - **hot cues**: + sets the next pad, the 8 pads jump to their cues, and holding a pad clears it;
+  - **loops**: loop in and loop out, or one tap for a loop of ½ to 16 bars. The loop plays on repeat while you
+    listen, and *End on it* makes the track leave the night on that loop.
+- **Mixer** (the button left of play): **vocals** and **instrumental** levels for the track playing now, with
+  quick *vocals mode* and *instrumental mode*. Moving a slider sets a keyframe where the night is, so the
+  levels can change through the song. Until real stem separation arrives (lalal.ai, in the paid version), this
+  is previewed with EQ.
+- **Settings**: import, music, the night's name and start time, key lock, export, versions, the controller, and
+  **classic layout**. The classic layout is the full editor in one panel at a time (Night, Sheet, Mix, Deck,
+  Library); **⋯ → Phone layout** brings you back.
 
 **Install it like an app**: open Setcraft from its web address and choose **⋯ → Install app**. On Android (and
 desktop Chrome) that's Chrome's own install; on iPhone and iPad it shows how: **Share → Add to Home Screen**. It
 then opens full screen from its icon and keeps working without internet. (Installing needs the https address of
 a hosted copy; opening it over your Wi-Fi from your computer works, but can't install.)
 
-**Your music on the phone**: phones can't link a folder, so add the songs instead: **♫ Add music** (under **⋯**,
+**Your music on the phone**: phones can't link a folder, so add the songs instead: **♫ Add music** (in **settings**, or in the classic layout under **⋯**,
 in the Library's **☰** panel, or on a track that has no audio). Pick them in the Files app from the phone,
 iCloud Drive or a drive plugged into it. To add everything at once: **▤ Add a folder** (in the ☰ panel) takes a
 whole folder with its subfolders, where the phone allows picking folders; or zip your music folder on the

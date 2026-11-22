@@ -15,9 +15,10 @@ import {
 import type { ImportResult } from '../core/formats';
 import { mergeIntoLibrary, type MergeChoices } from '../core/merge';
 import { mergeScan, type ScanEntry } from '../core/musiclib';
+import { trackMixCue } from '../core/trackfx';
 import { copySet } from '../core/versions';
 import { initHistory, record, redo, undo, type History } from '../core/history';
-import { playLength, setEnd, withTimes } from '../core/setplan';
+import { playLength, reorderEntries, setEnd, withTimes } from '../core/setplan';
 
 const STORAGE_KEY = 'setcraft-project-v1';
 /**
@@ -64,6 +65,7 @@ export type Action =
   | { type: 'setEntryTime'; id: string; at: number }
   | { type: 'updateEntry'; id: string; patch: Partial<SetEntry> }
   | { type: 'removeEntry'; id: string }
+  | { type: 'reorderEntries'; ids: string[] }
   | { type: 'addChapter' }
   | { type: 'updateChapter'; id: string; patch: Partial<Chapter> }
   | { type: 'removeChapter'; id: string }
@@ -156,7 +158,7 @@ export function reducer(p: Project, a: Action): Project {
         const chapterId = a.chapterId ?? last?.chapterId ?? s.chapters[0]?.id ?? '';
         let cursor = setEnd(s, p.library);
         const added = a.trackIds.map((trackId) => {
-          const e = newEntry(s, trackId, chapterId, cursor);
+          const e = newEntry(s, trackId, chapterId, cursor, p.library.tracks[trackId]);
           cursor += playLength(e, p.library.tracks[trackId]).seconds;
           return e;
         });
@@ -166,7 +168,7 @@ export function reducer(p: Project, a: Action): Project {
       return mapActive(p, (s0) => {
         const s = withTimes(s0, p.library);
         const at = Math.max(0, a.at);
-        const e = newEntry(s, a.trackId, a.chapterId ?? chapterAt(s, at), at);
+        const e = newEntry(s, a.trackId, a.chapterId ?? chapterAt(s, at), at, p.library.tracks[a.trackId]);
         return withTimes({ ...s, entries: [...s.entries, e] }, p.library);
       });
     case 'setEntryTime':
@@ -188,6 +190,8 @@ export function reducer(p: Project, a: Action): Project {
       return mapActive(p, (s) => ({ ...s, entries: s.entries.map((e) => (e.id === a.id ? { ...e, ...a.patch } : e)) }));
     case 'removeEntry':
       return mapActive(p, (s) => ({ ...s, entries: s.entries.filter((e) => e.id !== a.id) }));
+    case 'reorderEntries':
+      return mapActive(p, (s) => ({ ...s, entries: reorderEntries(s, p.library, a.ids) }));
     case 'addChapter':
       return mapActive(p, (s) => ({
         ...s,
@@ -239,10 +243,13 @@ export function markEdits(prev: Cue[], next: Cue[]): Cue[] {
   });
 }
 
-function newEntry(s: SetPlan, trackId: string, chapterId: string, at: number): SetEntry {
+function newEntry(s: SetPlan, trackId: string, chapterId: string, at: number, track?: Track): SetEntry {
   const chapterIdx = Math.max(0, s.chapters.findIndex((c) => c.id === chapterId));
   const energy = Math.round(3 + (chapterIdx / Math.max(1, s.chapters.length - 1)) * 5) || 5;
-  return { id: uid('ent'), trackId, chapterId, energy, transition: '', notes: '', at };
+  // The track's own play-from / play-until (set in the library) become this entry's mix points.
+  const mixInCueId = track && trackMixCue(track, 'in')?.id;
+  const mixOutCueId = track && trackMixCue(track, 'out')?.id;
+  return { id: uid('ent'), trackId, chapterId, energy, transition: '', notes: '', at, ...(mixInCueId ? { mixInCueId } : {}), ...(mixOutCueId ? { mixOutCueId } : {}) };
 }
 
 /** The chapter playing at a moment: the track starting at or before it, else the next one. */
@@ -309,6 +316,8 @@ function actionLabel(a: Action): string {
       return 'Track in set';
     case 'removeEntry':
       return 'Remove from set';
+    case 'reorderEntries':
+      return 'Reorder the night';
     case 'addChapter':
       return 'Add chapter';
     case 'updateChapter':

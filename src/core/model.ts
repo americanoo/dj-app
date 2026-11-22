@@ -7,6 +7,7 @@
  */
 
 import type { BlendStyle, TempoMode, TransitionAutomation } from './mixplan';
+import type { EndFx, FxRegion, StemKey } from './trackfx';
 
 export type SourceFormat = 'rekordbox' | 'traktor' | 'serato' | 'djay' | 'm3u' | 'csv' | 'manual' | 'folder';
 
@@ -63,6 +64,8 @@ export interface Track {
    * music-folder scan: finds the file again when it's moved or its drive is renamed.
    */
   fileId?: string;
+  /** End-time effects chosen in the library, used by this track's places in a night unless they set their own. */
+  endFx?: EndFx[];
   /** First downbeat of the beat grid, seconds. */
   gridStart?: number;
   /** Full tempo map when the source has one (rekordbox dynamic grids). */
@@ -123,6 +126,12 @@ export interface SetEntry {
   matchKey?: boolean;
   /** Keyframes for the transition into this track (fader, EQ, filter, echo, reverb on either deck). */
   automation?: TransitionAutomation;
+  /** The phone's keyframe effects on this track in the night (see trackfx). */
+  fx?: FxRegion[];
+  /** Effects as it reaches its end time; when unset, the track's own (from the library). */
+  endFx?: EndFx[];
+  /** Vocals / instrumental levels through the song (see trackfx). */
+  stems?: StemKey[];
   /**
    * Leave on a loop: the track plays up to this saved loop, then rolls it
    * `times` times in all while the next one comes in. Overrides the mix-out cue.

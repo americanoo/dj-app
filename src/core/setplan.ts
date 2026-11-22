@@ -1,6 +1,7 @@
 /** Narrative analysis of a set: timeline, transition checks and a printable plan. */
 import type { Cue, Library, SetEntry, SetPlan, Track } from './model';
 import { keyMatchShift, keyRelation, toCamelot, transposeKey, type KeyRelation } from './keys';
+import { trackFxCurves, type EndFx, type FxRegion, type StemKey } from './trackfx';
 import { effectiveBpmDelta } from './tempo';
 import { formatTime } from './time';
 import {
@@ -121,6 +122,29 @@ export function buildTimeline(set: SetPlan, lib: Library): TimelineItem[] {
     prevEnd = startsAt + seconds;
   });
   return items;
+}
+
+/**
+ * The night in a new order (entry ids, first to last). Each place in the night
+ * keeps its timing (the overlap or gap with the track before it), so moving a
+ * track keeps the night's shape: the tracks just swap places.
+ */
+export function reorderEntries(set: SetPlan, lib: Library, ids: string[]): SetEntry[] {
+  const old = withTimes(set, lib).entries;
+  const byId = new Map(old.map((e) => [e.id, e]));
+  const order = [...ids.filter((id) => byId.has(id)), ...old.filter((e) => !ids.includes(e.id)).map((e) => e.id)].map((id) => byId.get(id)!);
+  const len = (e: SetEntry) => playLength(e, lib.tracks[e.trackId]).seconds;
+  // The gap (negative: overlap) before each place in the night.
+  const gaps = old.map((e, i) => (i === 0 ? 0 : (e.at ?? 0) - ((old[i - 1].at ?? 0) + len(old[i - 1]))));
+  let at = old[0]?.at ?? 0;
+  return order.map((e, i) => {
+    if (i > 0) {
+      const prev = order[i - 1];
+      const prevAt = at;
+      at = Math.max(prevAt + 1, prevAt + len(prev) + gaps[i]);
+    }
+    return e.at === at ? e : { ...e, at };
+  });
 }
 
 export function totalSeconds(items: TimelineItem[]): number {
@@ -269,6 +293,10 @@ export interface NightSlot {
   loop?: { start: number; end: number };
   /** Transposed by this many semitones for the whole of its play (key matching). */
   semitones?: number;
+  /** Its own effects (see trackfx): keyframe regions, end FX, stem levels. */
+  fx?: FxRegion[];
+  endFx?: EndFx[];
+  stems?: StemKey[];
 }
 
 /** What plays when: every track of the night, overlapping ones together, with its mix automation. */
@@ -288,6 +316,9 @@ export function nightSlots(items: TimelineItem[]): NightSlot[] {
       tempo: it.entry.tempo,
       matchKey: it.entry.matchKey,
       key: it.track!.key,
+      fx: it.entry.fx,
+      endFx: it.entry.endFx ?? it.track!.endFx,
+      stems: it.entry.stems,
       automation: it.entry.automation,
       loop: loopRegion(endLoopOf(it.entry, it.track)),
       curves: emptyCurves(),
@@ -299,7 +330,10 @@ export function nightSlots(items: TimelineItem[]): NightSlot[] {
     add(b.id, withKeyframes(incomingCurves(plan, b), b.automation?.b, plan.inAt));
     if (plan.echoAt !== undefined) a.echoAt = plan.echoAt;
   }
-  for (const s of slots) s.curves = mergeCurves(...(parts.get(s.id) ?? []));
+  for (const s of slots) {
+    const own = s.fx?.length || s.endFx?.length || s.stems?.length ? [trackFxCurves(s)] : [];
+    s.curves = mergeCurves(...(parts.get(s.id) ?? []), ...own);
+  }
   // Key matching, in night order: each matched track to the key the one before it actually plays in.
   let prevKey: string | undefined;
   for (const s of [...slots].sort((x, y) => x.startsAt - y.startsAt)) {

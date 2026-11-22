@@ -13,6 +13,13 @@ test.use({
     'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
 });
 
+// These cover the classic layout on a phone (the full editor); mobile.spec.ts covers the phone layout.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    if (!localStorage.getItem('setcraft-phone-layout')) localStorage.setItem('setcraft-phone-layout', 'classic');
+  });
+});
+
 const shown = (page: Page) =>
   page.locator('.workspace-layout > .pane').evaluateAll((ps) => ps.filter((p) => getComputedStyle(p).display !== 'none').map((p) => p.classList[1]));
 

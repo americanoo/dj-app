@@ -11,6 +11,7 @@ import { NightProvider } from './ui/night';
 import { DesktopProvider } from './ui/desktop';
 import '@fontsource-variable/inter';
 import '@fontsource-variable/jetbrains-mono';
+import '@fontsource/anton';
 import './ui/styles.css';
 import { registerServiceWorker } from './ui/install';
 

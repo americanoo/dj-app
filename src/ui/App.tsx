@@ -31,6 +31,7 @@ import { onNotify, type ToastAction } from './toastBus';
 import { useDesktop } from './desktop';
 import { MissingFiles, MusicSetup } from './MusicSetup';
 import { activeSet, reducer, useStore } from './store';
+import { MobileApp } from './mobile/MobileApp';
 
 
 interface PendingMerge {
@@ -60,6 +61,21 @@ export function App() {
   const clearLibrary = useClearLibrary();
   // Phones: one panel at a time, picked from tabs along the bottom.
   const isPhone = useIsPhone();
+  const [classicPhone, setClassicPhoneState] = useState(() => {
+    try {
+      return localStorage.getItem('setcraft-phone-layout') === 'classic';
+    } catch {
+      return false;
+    }
+  });
+  const setClassicPhone = (on: boolean) => {
+    setClassicPhoneState(on);
+    try {
+      localStorage.setItem('setcraft-phone-layout', on ? 'classic' : 'new');
+    } catch {
+      // private mode
+    }
+  };
   const install = useInstall();
   const [installHelp, setInstallHelp] = useState(false);
   // The Mac app's panels: music folders (also the first-launch welcome) and missing files.
@@ -150,7 +166,9 @@ export function App() {
   const toast = useCallback((text: string, kind: Toast['kind'] = 'info', action?: ToastAction) => {
     const id = uid('toast');
     setToasts((t) => [...t, { id, text, kind, action }]);
-    window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), kind === 'error' || action ? 9000 : 5000);
+    // Phones show one message at a time, so they go sooner.
+    const phone = document.documentElement.classList.contains('phone');
+    window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), kind === 'error' || action ? (phone ? 6000 : 9000) : phone ? 2600 : 5000);
   }, []);
   useEffect(() => onNotify(toast), [toast]);
 
@@ -323,9 +341,50 @@ export function App() {
   }, [handleFiles]);
 
   const set = activeSet(project);
+  const fileInputEl = (
+    <input
+      ref={fileInput}
+      type="file"
+      multiple
+      hidden
+      // No file-type filter: Safari and phones don't know types like .nml or .crate and grey
+      // them out. Setcraft recognises each file by what's inside.
+      onChange={(e) => {
+        void handleFiles(Array.from(e.target.files ?? []));
+        e.target.value = '';
+      }}
+    />
+  );
+  // Phones get their own layout (see mobile/); the classic one stays a tap away in its settings.
+  const mobile = isPhone && !classicPhone;
 
   return (
-    <div className={`app${isPhone ? ' phone' : ''}`}>
+    <div className={`app${isPhone ? ' phone' : ''}${mobile ? ' m-layout' : ''}`}>
+      {mobile ? (
+        <>
+          <MobileApp
+            onImport={() => fileInput.current?.click()}
+            onDemo={() => void demo.load()}
+            demoBusy={demo.busy}
+            settings={{
+              story: () => setStoryOpen(true),
+              exportNight: () => setExportOpen(true),
+              versions: () => setVersionsOpen(true),
+              controller: () => setControllerOpen(true),
+              founding: () => setFoundingOpen(true),
+              clearLibrary: () => void clearLibrary(),
+              importFiles: () => fileInput.current?.click(),
+              musicFolders: desktop.available ? () => setMusicSetup('manage') : undefined,
+              install: install.canPrompt || install.iosHint ? () => (install.canPrompt ? void install.install() : setInstallHelp(true)) : undefined,
+              classic: () => setClassicPhone(true),
+              foundingLabel: founding ? `founding DJ${founding.no ? ` #${founding.no}` : ''}` : 'founding DJ',
+              controllerHint: midi.status === 'on' && midi.devices.length ? midi.devices[0] : 'MIDI mapping',
+            }}
+          />
+          {fileInputEl}
+        </>
+      ) : (
+      <>
       <header className="topbar">
         <div className="brand">
           <span className="logo" aria-hidden>
@@ -466,6 +525,18 @@ export function App() {
                   Clear library…
                   <span className="menu-hint">start over; a version is saved first</span>
                 </button>
+                {isPhone && (
+                  <button
+                    className="menu-item"
+                    onClick={() => {
+                      close();
+                      setClassicPhone(false);
+                    }}
+                  >
+                    Phone layout
+                    <span className="menu-hint">the simple one: library, night, tools</span>
+                  </button>
+                )}
                 <button
                   className="menu-item"
                   onClick={() => {
@@ -495,18 +566,7 @@ export function App() {
           <button className="primary" onClick={() => fileInput.current?.click()}>
             Import
           </button>
-          <input
-            ref={fileInput}
-            type="file"
-            multiple
-            hidden
-            // No file-type filter: Safari and phones don't know types like .nml or .crate and grey
-            // them out. Setcraft recognises each file by what's inside.
-            onChange={(e) => {
-              void handleFiles(Array.from(e.target.files ?? []));
-              e.target.value = '';
-            }}
-          />
+          {fileInputEl}
         </div>
       </header>
 
@@ -554,6 +614,8 @@ export function App() {
         </section>
       </main>
       {isPhone && <PhoneTabs tab={tab} onTab={setTab} />}
+      </>
+      )}
 
       {installHelp && (
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Install Setcraft" onClick={() => setInstallHelp(false)}>
@@ -638,7 +700,7 @@ export function App() {
       )}
       {missingOpen && <MissingFiles onClose={() => setMissingOpen(false)} />}
       {/* The tour waits until the music is set up. */}
-      {musicSetup !== 'welcome' && (
+      {musicSetup !== 'welcome' && !mobile && (
         <Tour state={tour.state} setState={tour.setState} loadedTrackId={loadedTrackId} onTab={isPhone ? setTab : undefined} />
       )}
       <div className="toasts" aria-live="polite">
