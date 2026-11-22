@@ -16,9 +16,10 @@ import type { ImportResult } from '../core/formats';
 import { mergeIntoLibrary, type MergeChoices } from '../core/merge';
 import { mergeScan, type ScanEntry } from '../core/musiclib';
 import { trackMixCue } from '../core/trackfx';
+import { setMixPoint } from '../core/sheet';
 import { copySet } from '../core/versions';
 import { initHistory, record, redo, undo, type History } from '../core/history';
-import { blendLength, blendNight, keepTransitions, playLength, reorderEntries, setEnd, withTimes } from '../core/setplan';
+import { blendLength, blendNight, keepTransitions, tempoFactor, playLength, reorderEntries, setEnd, withTimes } from '../core/setplan';
 
 const STORAGE_KEY = 'setcraft-project-v1';
 /**
@@ -67,6 +68,7 @@ export type Action =
   | { type: 'removeEntry'; id: string }
   | { type: 'reorderEntries'; ids: string[] }
   | { type: 'blendNight'; bars: number }
+  | { type: 'trimEntry'; id: string; edge: 'start' | 'end'; to: number }
   | { type: 'addChapter' }
   | { type: 'updateChapter'; id: string; patch: Partial<Chapter> }
   | { type: 'removeChapter'; id: string }
@@ -109,6 +111,9 @@ function followsLengths(a: Action): boolean {
       return true;
     case 'updateEntry':
       return !('at' in a.patch);
+    case 'trimEntry':
+      // Trimming the end moves what follows; trimming the start keeps the end where it is.
+      return a.edge === 'end';
     default:
       return false;
   }
@@ -241,6 +246,23 @@ function apply(p: Project, a: Action): Project {
       return mapActive(p, (s) => ({ ...s, entries: reorderEntries(s, p.library, a.ids) }));
     case 'blendNight':
       return mapActive(p, (s) => ({ ...s, entries: blendNight(s, p.library, a.bars) }));
+    case 'trimEntry': {
+      // A card's edge dragged on the timeline: its start or end moves to song time `to`.
+      // Trimming the start also starts it later in the night, so the rest of it stays put.
+      const set = withTimes(activeSet(p), p.library);
+      const e = set.entries.find((x) => x.id === a.id);
+      const t = e && p.library.tracks[e.trackId];
+      if (!e || !t) return p;
+      const oldIn = t.cues.find((c) => c.id === e.mixInCueId)?.start ?? 0;
+      const to = Math.max(0, t.duration ? Math.min(t.duration, a.to) : a.to);
+      const { cues, patch } = setMixPoint(t, e, a.edge === 'start' ? 'in' : 'out', a.edge === 'start' && to < 0.01 ? undefined : to, set.entries);
+      const withCues = cues === t.cues ? p : apply(p, { type: 'updateTrack', id: t.id, patch: { cues: markEdits(t.cues, cues) } });
+      const shift = a.edge === 'start' ? (to - oldIn) / tempoFactor(e, t) : 0;
+      return mapActive(withCues, (s) => ({
+        ...s,
+        entries: s.entries.map((x) => (x.id === e.id ? { ...x, ...patch, ...(shift ? { at: Math.max(0, (e.at ?? 0) + shift) } : {}) } : x)),
+      }));
+    }
     case 'addChapter':
       return mapActive(p, (s) => ({
         ...s,
@@ -369,6 +391,8 @@ function actionLabel(a: Action): string {
       return 'Reorder the night';
     case 'blendNight':
       return 'Blend the night';
+    case 'trimEntry':
+      return a.edge === 'start' ? 'Trim the start' : 'Trim the end';
     case 'addChapter':
       return 'Add chapter';
     case 'updateChapter':

@@ -1,25 +1,30 @@
-import { memo, useMemo, useState, type ReactNode } from 'react';
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import type { SetEntry } from '../../core/model';
-import { nightSlots, slotKey, type TimelineItem } from '../../core/setplan';
+import { itemMixIn, itemStretch, nightSlots, slotKey, type TimelineItem } from '../../core/setplan';
 import { setMixPoint } from '../../core/sheet';
 import { shiftToKey, toCamelot, transposeKey } from '../../core/keys';
 import { harmonicOrder, keysMix, matchesFilter, sortTracks, tempoFits } from '../../core/listsort';
 import { notify } from '../toastBus';
-import { ListTools, useListPrefs } from './ListTools';
 import { useNight } from '../night';
 import { activeSet, useStore } from '../store';
 import { DotsIcon, HandleIcon } from './icons';
-import { clockLabel, itemIndexAt, useNightTime } from './nightModel';
+import { ListTools, useListPrefs } from './ListTools';
+import { clockLabel, mmss, useNightTime } from './nightModel';
 import { TrackCard } from './TrackCard';
 import { WaveStrip, type StripMode } from './WaveStrip';
 
-/** One row of the night: a card and its waveform. Rows are evenly spaced; the rulers give their real times. */
-const ROW = 124;
+/** Card heights at which it shows everything / a line and its waveform / just its title. */
+const FULL = 110;
+const MID = 58;
+/** A track is never trimmed shorter than this (seconds in the night). */
+const MIN_PLAY = 4;
+const ZOOM_KEY = 'setcraft-m-zoom';
 
 /**
- * The night: the tracks in order, each with its waveform, between two clock
- * rulers showing when each one starts. The track playing now is marked in red.
- * Drag a card by its handle to move it.
+ * The night as a true timeline: each card is as tall as its track plays, placed
+ * where it starts, so blends overlap and gaps show. A red line marks where the
+ * night is. Drag a card's top or bottom lever to trim its start or end; drag ☰
+ * to move it; zoom with − / +.
  */
 export function PlaylistScreen({
   items,
@@ -41,8 +46,35 @@ export function PlaylistScreen({
   const { project, dispatch } = useStore();
   const night = useNight();
   const set = activeSet(project);
-  const [drag, setDrag] = useState<{ idx: number; dy: number } | null>(null);
+  const scroller = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState<string | null>(null);
+  const [drag, setDrag] = useState<{ idx: number; dy: number } | null>(null);
+  // A lever being dragged: that card's edge follows the finger until it's let go.
+  const [trim, setTrim] = useState<{ i: number; edge: 'start' | 'end'; d: number } | null>(null);
+  // Pixels per second: by default the typical track is about 180 px tall.
+  const fit = useMemo(() => {
+    const lens = items.map((it) => it.playFor).sort((a, b) => a - b);
+    const median = lens[Math.floor(lens.length / 2)] || 240;
+    return clampZoom(180 / median);
+  }, [items]);
+  const [zoom, setZoomState] = useState<number | null>(() => {
+    try {
+      const v = Number(localStorage.getItem(ZOOM_KEY));
+      return v > 0 ? clampZoom(v) : null;
+    } catch {
+      return null;
+    }
+  });
+  const pps = zoom ?? fit;
+  const setZoom = (v: number | null) => {
+    setZoomState(v);
+    try {
+      if (v) localStorage.setItem(ZOOM_KEY, String(v));
+      else localStorage.removeItem(ZOOM_KEY);
+    } catch {
+      // private mode
+    }
+  };
   const playKeys = useMemo(() => {
     const m = new Map<string, string | undefined>();
     for (const s of nightSlots(items)) if ((s.semitones ?? 0) !== (s.keyShift ?? 0)) m.set(s.id, toCamelot(slotKey(s)));
@@ -50,7 +82,7 @@ export function PlaylistScreen({
   }, [items]);
   const end = items.reduce((e, it) => Math.max(e, it.startsAt + it.playFor), 0);
   const [prefs, setPrefs] = useListPrefs('night', { sort: 'added', desc: false, filter: {} });
-  // Filtering the night dims what doesn't match: the rows stay, so the clock stays true.
+  // Filtering the night dims what doesn't match: the cards stay, so the timeline stays true.
   const matches = useMemo(
     () =>
       items.map((it, i) => {
@@ -71,7 +103,6 @@ export function PlaylistScreen({
     dispatch({ type: 'reorderEntries', ids: order.map((x) => x.id) });
     notify('The night is in its new order; each place keeps its blend.', 'info', { label: 'Undo', run: () => dispatch({ type: 'undo' }) });
   };
-  const target = drag ? Math.max(0, Math.min(items.length - 1, drag.idx + Math.round(drag.dy / ROW))) : -1;
 
   /** Tonight's key: a transposition of the track (its own key stays). Without a key yet, it's the track's key. */
   const setKey = (it: TimelineItem, key: string | undefined) => {
@@ -93,7 +124,6 @@ export function PlaylistScreen({
     dispatch({ type: 'updateEntry', id: it.entry.id, patch: { playBpm: same ? undefined : bpm } });
     if (!same && !night.keyLock) notify('Key lock is off, so this track will also sound higher or lower, like a record sped up. Switch key lock on in settings to keep its key.', 'info');
   };
-
   const mixPoint = (it: TimelineItem, which: 'in' | 'out', at: number | undefined) => {
     if (!it.track) return;
     const { cues, patch } = setMixPoint(it.track, it.entry, which, at, set.entries);
@@ -101,12 +131,28 @@ export function PlaylistScreen({
     if (Object.keys(patch).length) dispatch({ type: 'updateEntry', id: it.entry.id, patch });
   };
 
-  const shift = (i: number) => {
-    if (!drag || i === drag.idx) return 0;
-    if (drag.idx < target && i > drag.idx && i <= target) return -ROW;
-    if (drag.idx > target && i < drag.idx && i >= target) return ROW;
-    return 0;
-  };
+  // Each card's place: as tall as it plays; what the next card covers is its blend.
+  const geo = useMemo(() => {
+    const g = items.map((it, i) => {
+      const lim = trimLimits(it);
+      const topD = trim?.i === i && trim.edge === 'start' ? snapD(it, 'start', clamp(trim.d, lim.minTop, lim.maxTop)) : 0;
+      const endD = trim?.i === i && trim.edge === 'end' ? snapD(it, 'end', clamp(trim.d, lim.minEnd, lim.maxEnd)) : 0;
+      return { top: (it.startsAt + topD) * pps, height: Math.max(2, (it.playFor - topD + endD) * pps), topD, endD, visible: 0 };
+    });
+    g.forEach((x, i) => {
+      const next = g[i + 1];
+      x.visible = next && next.top < x.top + x.height ? Math.max(0, next.top - x.top) : x.height;
+    });
+    return g;
+  }, [items, pps, trim]);
+
+  // Where a card dragged by ☰ would land: after every card whose middle is above its own.
+  const target = useMemo(() => {
+    if (!drag) return -1;
+    const it = items[drag.idx];
+    const mid = (it.startsAt + it.playFor / 2) * pps + drag.dy;
+    return items.filter((x, i) => i !== drag.idx && (x.startsAt + x.playFor / 2) * pps < mid).length;
+  }, [drag, items, pps]);
 
   return (
     <div className="m-screen m-playlist">
@@ -121,187 +167,452 @@ export function PlaylistScreen({
         </div>
       ) : (
         <>
-        <ListTools
-          label="night"
-          prefs={prefs}
-          onPrefs={setPrefs}
-          sortLabel="arrange"
-          sortOptions={[
-            { id: 'harmonic', label: 'mix by key' },
-            { id: 'bpm', label: 'bpm ↑' },
-            { id: 'bpmDesc', label: 'bpm ↓' },
-            { id: 'key', label: 'key wheel' },
-            { id: 'title', label: 'title' },
-            { id: 'reverse', label: 'reverse' },
-          ]}
-          onSort={arrange}
-          shown={matches.filter(Boolean).length}
-          total={items.length}
-          extra={
-            <div className="m-tools-row">
-              <button
-                className={`m-chip${prefs.filter.rough ? ' on' : ''}`}
-                aria-pressed={!!prefs.filter.rough}
-                onClick={() => setPrefs({ ...prefs, filter: { ...prefs.filter, rough: !prefs.filter.rough || undefined } })}
-                title="keys that don't mix, or more than 6% tempo, from the track before"
-              >
-                rough transitions
-              </button>
-            </div>
-          }
-        />
-        <div className="m-scroll m-night" style={{ ['--row' as string]: `${ROW}px` }}>
-          {items.map((it, i) => (
-            <div
-              key={it.entry.id}
-              className={`m-row${drag?.idx === i ? ' dragging' : ''}${matches[i] ? '' : ' dimmed'}`}
-              style={drag ? { transform: `translateY(${drag.idx === i ? drag.dy : shift(i)}px)` } : undefined}
-            >
-              <Ruler side="left" i={i} items={items} label={clockLabel(it.startsAt, set.startClock)} />
-              <div className="m-row-body">
-                <TrackCard
-                  title={it.track?.title ?? 'Missing track'}
-                  artist={it.track?.artist ?? ''}
-                  keyName={it.entry.keyShift ? transposeKey(it.track?.key, it.entry.keyShift) : it.track?.key}
-                  keyWas={it.entry.keyShift ? toCamelot(it.track?.key) : undefined}
-                  keyHint={playKeys.get(it.entry.id)}
-                  bpm={it.entry.playBpm ?? it.track?.bpm}
-                  bpmWas={it.entry.playBpm ? it.track?.bpm : undefined}
-                  start={it.track?.cues.find((c) => c.id === it.entry.mixInCueId)?.start ?? 0}
-                  end={endOf(it)}
-                  endFx={it.entry.endFx ?? it.track?.endFx ?? []}
-                  onKey={(key) => setKey(it, key)}
-                  onBpm={(bpm) => setBpm(it, bpm)}
-                  onStart={(s) => mixPoint(it, 'in', s || undefined)}
-                  onEnd={(s) => mixPoint(it, 'out', s !== undefined && it.track?.duration && s >= it.track.duration - 0.5 ? undefined : s)}
-                  onEndFx={(endFx) => dispatch({ type: 'updateEntry', id: it.entry.id, patch: { endFx } })}
-                  left={
-                    <span
-                      className="m-handle"
-                      role="button"
-                      aria-label={`move ${it.track?.title ?? 'track'}`}
-                      title="drag to move"
-                      onPointerDown={(e) => {
-                        e.currentTarget.setPointerCapture(e.pointerId);
-                        const y0 = e.clientY;
-                        setDrag({ idx: i, dy: 0 });
-                        const el = e.currentTarget;
-                        const move = (ev: PointerEvent) => setDrag({ idx: i, dy: ev.clientY - y0 });
-                        const up = (ev: PointerEvent) => {
-                          el.removeEventListener('pointermove', move);
-                          el.removeEventListener('pointerup', up);
-                          el.removeEventListener('pointercancel', up);
-                          const to = Math.max(0, Math.min(items.length - 1, i + Math.round((ev.clientY - y0) / ROW)));
-                          setDrag(null);
-                          if (to !== i && ev.type === 'pointerup') {
-                            const ids = items.map((x) => x.entry.id);
-                            ids.splice(to, 0, ...ids.splice(i, 1));
-                            dispatch({ type: 'reorderEntries', ids });
-                          }
-                        };
-                        el.addEventListener('pointermove', move);
-                        el.addEventListener('pointerup', up);
-                        el.addEventListener('pointercancel', up);
-                      }}
-                    >
-                      <HandleIcon />
-                    </span>
-                  }
-                  right={
-                    <div className="m-menu-wrap">
-                      <button type="button" className="m-round" aria-label={`more for ${it.track?.title ?? 'track'}`} onClick={() => setMenu(menu === it.entry.id ? null : it.entry.id)}>
-                        <DotsIcon />
-                      </button>
-                      {menu === it.entry.id && (
-                        <EntryMenu
-                          entry={it.entry}
-                          onPlay={() => {
-                            setMenu(null);
-                            night.play(it.startsAt);
-                          }}
-                          onRemove={() => {
-                            setMenu(null);
-                            dispatch({ type: 'removeEntry', id: it.entry.id });
-                          }}
-                          onClose={() => setMenu(null)}
-                        />
-                      )}
-                    </div>
-                  }
-                />
-                <WaveStrip
-                  it={it}
-                  mode={mode}
-                  activeRegionId={activeRegionId}
-                  loopIn={loopIn?.entryId === it.entry.id ? loopIn.s : undefined}
-                />
+          <ListTools
+            label="night"
+            prefs={prefs}
+            onPrefs={setPrefs}
+            sortLabel="arrange"
+            sortOptions={[
+              { id: 'harmonic', label: 'mix by key' },
+              { id: 'bpm', label: 'bpm ↑' },
+              { id: 'bpmDesc', label: 'bpm ↓' },
+              { id: 'key', label: 'key wheel' },
+              { id: 'title', label: 'title' },
+              { id: 'reverse', label: 'reverse' },
+            ]}
+            onSort={arrange}
+            shown={matches.filter(Boolean).length}
+            total={items.length}
+            before={
+              <span className="m-zoom" aria-label="zoom the timeline">
+                <button className="m-edge-btn" aria-label="zoom out" onClick={() => setZoom(clampZoom(pps / 1.4))}>
+                  −
+                </button>
+                <button className="m-edge-btn" aria-label="fit the tracks" title="fit the tracks" onClick={() => setZoom(null)}>
+                  {mmss(end).replace(/^00:/, '0:')}
+                </button>
+                <button className="m-edge-btn" aria-label="zoom in" onClick={() => setZoom(clampZoom(pps * 1.4))}>
+                  +
+                </button>
+              </span>
+            }
+            extra={
+              <div className="m-tools-row">
+                <button
+                  className={`m-chip${prefs.filter.rough ? ' on' : ''}`}
+                  aria-pressed={!!prefs.filter.rough}
+                  onClick={() => setPrefs({ ...prefs, filter: { ...prefs.filter, rough: !prefs.filter.rough || undefined } })}
+                  title="keys that don't mix, or more than 6% tempo, from the track before"
+                >
+                  rough transitions
+                </button>
               </div>
-              <Ruler side="right" i={i} items={items} label={clockLabel(it.startsAt, set.startClock)} />
+            }
+          />
+          <div className="m-scroll m-night" ref={scroller}>
+            <div className="m-timeline" style={{ height: end * pps + 40 }}>
+              <Ruler side="left" items={items} pps={pps} end={end} startClock={set.startClock} />
+              <Ruler side="right" items={items} pps={pps} end={end} startClock={set.startClock} />
+              <div className="m-lanes">
+                {items.map((it, i) => {
+                  const moveBy = drag ? (drag.idx === i ? drag.dy : shiftFor(i, drag.idx, target, items, pps)) : 0;
+                  return (
+                    <NightCard
+                      key={it.entry.id}
+                      it={it}
+                      i={i}
+                      geo={geo[i]}
+                      lane={i % 2}
+                      trimming={trim?.i === i}
+                      dimmed={!matches[i]}
+                      dragging={drag?.idx === i}
+                      moveBy={moveBy}
+                      mode={mode}
+                      activeRegionId={activeRegionId}
+                      loopIn={loopIn?.entryId === it.entry.id ? loopIn.s : undefined}
+                      keyHint={playKeys.get(it.entry.id)}
+                      menuOpen={menu === it.entry.id}
+                      onMenu={(open) => setMenu(open ? it.entry.id : null)}
+                      onPlay={() => {
+                        setMenu(null);
+                        night.play(it.startsAt);
+                      }}
+                      onRemove={() => {
+                        setMenu(null);
+                        dispatch({ type: 'removeEntry', id: it.entry.id });
+                      }}
+                      onKey={(k) => setKey(it, k)}
+                      onBpm={(b) => setBpm(it, b)}
+                      onMixPoint={(w, at) => mixPoint(it, w, at)}
+                      onEndFx={(endFx) => dispatch({ type: 'updateEntry', id: it.entry.id, patch: { endFx } })}
+                      onDrag={(dy) => setDrag(dy === null ? null : { idx: i, dy })}
+                      onDrop={(dy) => {
+                        const it0 = items[i];
+                        const mid = (it0.startsAt + it0.playFor / 2) * pps + dy;
+                        const to = items.filter((x, k) => k !== i && (x.startsAt + x.playFor / 2) * pps < mid).length;
+                        setDrag(null);
+                        if (to === i) return;
+                        const ids = items.map((x) => x.entry.id);
+                        ids.splice(to, 0, ...ids.splice(i, 1));
+                        dispatch({ type: 'reorderEntries', ids });
+                      }}
+                    />
+                  );
+                })}
+              </div>
+              <div className="m-levers">
+                {items.map((it, i) => (
+                  <Levers
+                    key={it.entry.id}
+                    it={it}
+                    geo={geo[i]}
+                    lane={i % 2}
+                    covered={geo[i].visible < geo[i].height - 1}
+                    pps={pps}
+                    hidden={!!drag}
+                    trim={trim?.i === i ? trim : null}
+                    onTrim={(edge, d) => setTrim(d === null ? null : { i, edge, d })}
+                    onCommit={(edge, d) => {
+                      setTrim(null);
+                      const lim = trimLimits(it);
+                      const mixIn = itemMixIn(it);
+                      const r = itemStretch(it);
+                      if (edge === 'start') dispatch({ type: 'trimEntry', id: it.entry.id, edge, to: mixIn + snapD(it, 'start', clamp(d, lim.minTop, lim.maxTop)) * r });
+                      else dispatch({ type: 'trimEntry', id: it.entry.id, edge, to: mixIn + (it.playFor + snapD(it, 'end', clamp(d, lim.minEnd, lim.maxEnd))) * r });
+                    }}
+                  />
+                ))}
+              </div>
+              <NowLine pps={pps} scroller={scroller} startClock={set.startClock} />
             </div>
-          ))}
-          <div className="m-row-end">
-            <span className="m-ruler-label">{clockLabel(end, set.startClock)}</span>
-            <span className="grow" />
-            <span className="m-ruler-label">{clockLabel(end, set.startClock)}</span>
+            {footer}
           </div>
-          {footer}
-        </div>
         </>
       )}
     </div>
   );
 }
 
-const NO_STRETCH =
-  'Changing the key needs key lock, which this page can’t do: it needs the Mac app, or Setcraft from an https address. Over Wi-Fi from your Mac, the phone plays it in its own key.';
+const clampZoom = (v: number) => Math.max(0.05, Math.min(4, v));
 
-function endOf(it: TimelineItem): number | undefined {
-  const t = it.track;
-  if (!t) return undefined;
-  return t.cues.find((c) => c.id === it.entry.mixOutCueId)?.start ?? t.duration;
+/** How far (night seconds) a card's start and end can be dragged: not before the top of the file, not past its end, never shorter than MIN_PLAY. */
+function trimLimits(it: TimelineItem) {
+  const r = itemStretch(it);
+  const mixIn = itemMixIn(it);
+  const maxPlay = it.track?.duration ? (it.track.duration - mixIn) / r : it.playFor + 600;
+  return { minTop: -mixIn / r, maxTop: it.playFor - MIN_PLAY, minEnd: MIN_PLAY - it.playFor, maxEnd: Math.max(0, maxPlay - it.playFor) };
 }
 
-function EntryMenu({ entry, onPlay, onRemove, onClose }: { entry: SetEntry; onPlay: () => void; onRemove: () => void; onClose: () => void }) {
+type Geo = { top: number; height: number; topD: number; endD: number; visible: number };
+
+/** A lever's offset (night seconds) moved so the edge lands on a beat. */
+function snapD(it: TimelineItem, edge: 'start' | 'end', d: number): number {
+  const r = itemStretch(it);
+  const mixIn = itemMixIn(it);
+  const edgeAt = edge === 'start' ? mixIn + d * r : mixIn + (it.playFor + d) * r;
+  const snapped = onBeat(it, edgeAt);
+  const max = it.track?.duration;
+  if (snapped < 0 || (max && snapped > max)) return d;
+  return d + (snapped - edgeAt) / r;
+}
+
+/** A song time on the nearest beat of the track's grid (when it has a BPM), so a trim always lands on the beat. */
+function onBeat(it: TimelineItem, s: number): number {
+  const bpm = it.track?.bpm;
+  if (!bpm) return s;
+  const beat = 60 / bpm;
+  const g = it.track?.gridStart ?? 0;
+  return Math.max(0, g + Math.round((s - g) / beat) * beat);
+}
+
+/** A card's two levers: grab the top to trim where it starts, the bottom to trim where it ends. Above every card, so a blend never hides them. */
+function Levers({
+  it,
+  geo,
+  lane,
+  covered,
+  pps,
+  hidden,
+  trim,
+  onTrim,
+  onCommit,
+}: {
+  it: TimelineItem;
+  geo: Geo;
+  lane: number;
+  covered: boolean;
+  pps: number;
+  hidden: boolean;
+  trim: { edge: 'start' | 'end'; d: number } | null;
+  onTrim: (edge: 'start' | 'end', d: number | null) => void;
+  onCommit: (edge: 'start' | 'end', d: number) => void;
+}) {
+  if (hidden) return null;
+  const title = it.track?.title ?? 'track';
+  const mixIn = itemMixIn(it);
+  const r = itemStretch(it);
+  const grab = (edge: 'start' | 'end') => (e: React.PointerEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const y0 = e.clientY;
+    const el = e.currentTarget;
+    onTrim(edge, 0);
+    const move = (ev: PointerEvent) => onTrim(edge, (ev.clientY - y0) / pps);
+    const up = (ev: PointerEvent) => {
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+      el.removeEventListener('pointercancel', up);
+      const d = (ev.clientY - y0) / pps;
+      if (ev.type !== 'pointerup' || Math.abs(d * pps) < 3) return onTrim(edge, null);
+      onCommit(edge, d);
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+  };
+  const side = lane === 0 ? 'lane-0' : 'lane-1';
   return (
     <>
-      <div className="m-scrim" onClick={onClose} />
-      <div className="m-popover m-entry-menu" role="menu" data-entry={entry.id}>
-        <button role="menuitem" onClick={onPlay}>
-          play from here
-        </button>
-        <button role="menuitem" className="danger" onClick={onRemove}>
-          remove from night
-        </button>
+      <div
+        className={`m-lever top ${side}`}
+        style={{ top: geo.top }}
+        role="slider"
+        aria-label={`trim the start of ${title}`}
+        aria-valuetext={mmss(mixIn + geo.topD * r)}
+        onPointerDown={grab('start')}
+      >
+        <i />
+        {trim?.edge === 'start' && <b className="m-lever-tip">start {mmss(mixIn + geo.topD * r)}</b>}
+      </div>
+      <div
+        className={`m-lever bottom ${side}${covered ? ' covered' : ''}`}
+        style={{ top: geo.top + geo.height }}
+        role="slider"
+        aria-label={`trim the end of ${title}`}
+        aria-valuetext={mmss(mixIn + (it.playFor + geo.endD) * r)}
+        onPointerDown={grab('end')}
+      >
+        <i />
+        {trim?.edge === 'end' && <b className="m-lever-tip">end {mmss(mixIn + (it.playFor + geo.endD) * r)}</b>}
       </div>
     </>
   );
 }
 
-/** A row's stretch of the clock ruler: its start time and ticks; red while it plays, with a marker where the night is. */
-const Ruler = memo(function Ruler({ side, i, items, label }: { side: 'left' | 'right'; i: number; items: TimelineItem[]; label: string }) {
+/** While a card is dragged by ☰, the cards it passes make room for it. */
+function shiftFor(i: number, from: number, to: number, items: TimelineItem[], pps: number): number {
+  const h = items[from].playFor * pps;
+  if (from < to && i > from && i <= to) return -h;
+  if (from > to && i < from && i >= to) return h;
+  return 0;
+}
+
+const NO_STRETCH =
+  'Changing the key needs key lock, which this page can’t do: it needs the Mac app, or Setcraft from an https address. Over Wi-Fi from your Mac, the phone plays it in its own key.';
+
+type NightCardProps = {
+  it: TimelineItem;
+  i: number;
+  geo: Geo;
+  lane: number;
+  trimming: boolean;
+  dimmed: boolean;
+  dragging: boolean;
+  moveBy: number;
+  mode: StripMode;
+  activeRegionId?: string;
+  loopIn?: number;
+  keyHint?: string;
+  menuOpen: boolean;
+  onMenu: (open: boolean) => void;
+  onPlay: () => void;
+  onRemove: () => void;
+  onKey: (k: string | undefined) => void;
+  onBpm: (b: number | undefined) => void;
+  onMixPoint: (which: 'in' | 'out', at: number | undefined) => void;
+  onEndFx: (fx: NonNullable<SetEntry['endFx']>) => void;
+  onDrag: (dy: number | null) => void;
+  onDrop: (dy: number) => void;
+};
+
+/**
+ * One track on the timeline, as tall as it plays. Its details sit in the part
+ * the next track doesn't cover; the covered tail is its blend. Thin cards show
+ * less: a line and the waveform, then just the title.
+ */
+function NightCard(p: NightCardProps) {
+  const { it, geo } = p;
+  const t = it.track;
+  const size = geo.visible >= FULL ? 'full' : geo.visible >= MID ? 'mid' : 'thin';
+  const title = t?.title ?? 'Missing track';
+  const start = t?.cues.find((c) => c.id === it.entry.mixInCueId)?.start ?? 0;
+  const blendH = geo.height - geo.visible;
+
+  const handle = (
+    <span
+      className="m-handle"
+      role="button"
+      aria-label={`move ${title}`}
+      title="drag to move"
+      onPointerDown={(e) => {
+        e.currentTarget.setPointerCapture(e.pointerId);
+        const y0 = e.clientY;
+        const el = e.currentTarget;
+        p.onDrag(0);
+        const move = (ev: PointerEvent) => p.onDrag(ev.clientY - y0);
+        const up = (ev: PointerEvent) => {
+          el.removeEventListener('pointermove', move);
+          el.removeEventListener('pointerup', up);
+          el.removeEventListener('pointercancel', up);
+          if (ev.type === 'pointerup') p.onDrop(ev.clientY - y0);
+          else p.onDrag(null);
+        };
+        el.addEventListener('pointermove', move);
+        el.addEventListener('pointerup', up);
+        el.addEventListener('pointercancel', up);
+      }}
+    >
+      <HandleIcon />
+    </span>
+  );
+  const more = (
+    <div className="m-menu-wrap">
+      <button type="button" className="m-round" aria-label={`more for ${title}`} onClick={() => p.onMenu(!p.menuOpen)}>
+        <DotsIcon />
+      </button>
+      {p.menuOpen && (
+        <>
+          <div className="m-scrim" onClick={() => p.onMenu(false)} />
+          <div className="m-popover m-entry-menu" role="menu">
+            <button role="menuitem" onClick={p.onPlay}>
+              play from here
+            </button>
+            <button role="menuitem" className="danger" onClick={p.onRemove}>
+              remove from night
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+  const keyName = it.entry.keyShift ? transposeKey(t?.key, it.entry.keyShift) : t?.key;
+  const bpm = it.entry.playBpm ?? t?.bpm;
+
+  return (
+    <div
+      className={`m-row m-tcard size-${size} lane-${p.lane}${p.dimmed ? ' dimmed' : ''}${p.dragging ? ' dragging' : ''}${p.trimming ? ' trimming' : ''}`}
+      style={{ top: geo.top, height: geo.height, zIndex: p.dragging || p.trimming ? 50 : p.i + 1, transform: p.moveBy ? `translateY(${p.moveBy}px)` : undefined }}
+      data-entry={it.entry.id}
+    >
+      <PlayingEdge it={it} />
+      <div className="m-card-face" style={{ height: geo.visible }}>
+        {size === 'full' ? (
+          <div className="m-row-body">
+            <TrackCard
+              title={title}
+              artist={t?.artist ?? ''}
+              keyName={keyName}
+              keyWas={it.entry.keyShift ? toCamelot(t?.key) : undefined}
+              keyHint={p.keyHint}
+              bpm={bpm}
+              bpmWas={it.entry.playBpm ? t?.bpm : undefined}
+              start={start}
+              end={t ? (t.cues.find((c) => c.id === it.entry.mixOutCueId)?.start ?? t.duration) : undefined}
+              endFx={it.entry.endFx ?? t?.endFx ?? []}
+              onKey={p.onKey}
+              onBpm={p.onBpm}
+              onStart={(s) => p.onMixPoint('in', s || undefined)}
+              onEnd={(s) => p.onMixPoint('out', s !== undefined && t?.duration && s >= t.duration - 0.5 ? undefined : s)}
+              onEndFx={p.onEndFx}
+              left={handle}
+              right={more}
+            />
+            <WaveStrip it={it} mode={p.mode} activeRegionId={p.activeRegionId} loopIn={p.loopIn} />
+          </div>
+        ) : (
+          <div className="m-compact">
+            {handle}
+            <span className="m-c-title" title={title}>
+              {title}
+            </span>
+            <span className="m-c-key">{toCamelot(keyName) ?? '--'}</span>
+            <span className="m-c-bpm">{bpm ? Math.round(bpm * 10) / 10 : '---'}</span>
+            {more}
+            {size === 'mid' && (
+              <div className="m-c-wave">
+                <WaveStrip it={it} mode={p.mode} activeRegionId={p.activeRegionId} loopIn={p.loopIn} />
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+      {blendH > 1 && (
+        <div className="m-blend-tail" style={{ top: geo.visible, height: blendH }} title={`blends into the next track over ${mmss(blendH / (geo.height / it.playFor))}`}>
+          {blendH > 24 && <i>{mmss(blendH / (geo.height / Math.max(1, it.playFor - geo.topD + geo.endD))).replace(/^00:/, '0:')}</i>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+
+/** A red edge on the card playing now. */
+function PlayingEdge({ it }: { it: TimelineItem }) {
+  const t = useNightTime();
+  return t >= it.startsAt && t < it.startsAt + it.playFor ? <div className="m-playing-edge" data-playing="true" /> : null;
+}
+
+/**
+ * The clock down one side: when each track starts (left) or ends (right), in
+ * real time once the night has a start time, with a tick every minute.
+ */
+const Ruler = memo(function Ruler({ side, items, pps, end, startClock }: { side: 'left' | 'right'; items: TimelineItem[]; pps: number; end: number; startClock?: string }) {
+  const minute = 60 * pps;
+  const every = minute >= 8 ? 1 : minute * 5 >= 8 ? 5 : 15;
+  const ticks: number[] = [];
+  for (let m = 0; m * 60 <= end + 1; m += every) ticks.push(m * 60);
+  const marks = items.map((it) => (side === 'left' ? it.startsAt : it.startsAt + it.playFor));
   return (
     <div className={`m-ruler ${side}`} aria-hidden="true">
-      <span className="m-ruler-label">{label}</span>
-      <i className="major" />
-      <i className="minor" style={{ top: '25%' }} />
-      <i className="minor" style={{ top: '50%' }} />
-      <i className="minor" style={{ top: '75%' }} />
-      <Live i={i} items={items} side={side} />
+      {ticks.map((s) => (
+        <i key={s} className={s % 300 === 0 ? 'major' : 'minor'} style={{ top: s * pps }} />
+      ))}
+      {marks.map((s, k) => (
+        <span key={k} className="m-ruler-label" style={{ top: s * pps }}>
+          {clockLabel(s, startClock)}
+        </span>
+      ))}
     </div>
   );
 });
 
-function Live({ i, items, side }: { i: number; items: TimelineItem[]; side: 'left' | 'right' }) {
+/** Where the night is: a red line across the timeline, followed while it plays (unless you've just scrolled). */
+function NowLine({ pps, scroller, startClock }: { pps: number; scroller: RefObject<HTMLDivElement | null>; startClock?: string }) {
   const t = useNightTime();
-  if (itemIndexAt(items, t) !== i) return null;
-  const it = items[i];
-  const f = Math.max(0, Math.min(1, (t - it.startsAt) / Math.max(1, it.playFor)));
+  const night = useNight();
+  const touched = useRef(0);
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const mark = () => (touched.current = Date.now());
+    el.addEventListener('touchstart', mark, { passive: true });
+    el.addEventListener('wheel', mark, { passive: true });
+    return () => {
+      el.removeEventListener('touchstart', mark);
+      el.removeEventListener('wheel', mark);
+    };
+  }, [scroller]);
+  const y = t * pps;
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el || !night.playing || Date.now() - touched.current < 4000) return;
+    if (y < el.scrollTop + 20 || y > el.scrollTop + el.clientHeight - 60) el.scrollTo({ top: Math.max(0, y - el.clientHeight / 3) });
+  }, [y, night.playing, scroller]);
   return (
-    <>
-      <div className="m-ruler-band" data-playing={side === 'left' ? 'true' : undefined} />
-      <span className={`m-ruler-mark ${side}`} style={{ top: `${f * 100}%` }}>
-        {side === 'left' ? '▸' : '◂'}
-      </span>
-    </>
+    <div className="m-now-line" style={{ top: y }} aria-label={`now: ${clockLabel(t, startClock)}`}>
+      <span>{clockLabel(t, startClock)}</span>
+    </div>
   );
 }

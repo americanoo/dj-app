@@ -230,3 +230,35 @@ describe("tonight's tempo and key for a track", () => {
     expect(keysMixFor(slotKey(slots[1]), 'Bm')).toBe(true);
   });
 });
+
+describe('trimming a track on the timeline', () => {
+  const mk = (id: string, duration: number): Track => ({ id, title: id, artist: '', cues: [], source: 'manual', duration, bpm: 120 });
+  const start = (): Project => ({ ...emptyProject(), library: { tracks: { a: mk('a', 300), b: mk('b', 240), c: mk('c', 200) }, playlists: [] } });
+  const times = (p: Project) => activeSet(p).entries.map((e) => [e.trackId, Math.round((e.at ?? 0) * 10) / 10]);
+
+  it('the end: the track plays less and the rest follows, keeping its blends', () => {
+    let p = reducer(start(), { type: 'addEntries', trackIds: ['a', 'b', 'c'], blend: true }); // a 0, b 268, c 476
+    p = reducer(p, { type: 'trimEntry', id: activeSet(p).entries[0].id, edge: 'end', to: 250 });
+    expect(times(p)).toEqual([
+      ['a', 0],
+      ['b', 218],
+      ['c', 426],
+    ]);
+  });
+
+  it('the start: it starts later in the song and in the night; its end and the rest stay', () => {
+    let p = reducer(start(), { type: 'addEntries', trackIds: ['a', 'b', 'c'], blend: true });
+    p = reducer(p, { type: 'trimEntry', id: activeSet(p).entries[1].id, edge: 'start', to: 40 });
+    expect(times(p)).toEqual([
+      ['a', 0],
+      ['b', 308],
+      ['c', 476],
+    ]);
+    const [, b] = buildTimeline(activeSet(p), p.library);
+    expect(b.playFor).toBe(200);
+    // Dragged back to the top of the file: no start cue at all.
+    p = reducer(p, { type: 'trimEntry', id: activeSet(p).entries[1].id, edge: 'start', to: 0 });
+    expect(activeSet(p).entries[1].mixInCueId).toBeUndefined();
+    expect(times(p)[1]).toEqual(['b', 268]);
+  });
+});
