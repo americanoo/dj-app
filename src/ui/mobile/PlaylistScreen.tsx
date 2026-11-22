@@ -20,11 +20,23 @@ const MID = 58;
 const MIN_PLAY = 4;
 const ZOOM_KEY = 'setcraft-m-zoom';
 
+/** Where everything sits on the timeline, in night seconds (with a lever's drag applied while it's dragged). */
+interface Layout {
+  starts: number[];
+  ends: number[];
+}
+
+/** A lever being dragged: a track's end with everything after it (`end`), or its end alone (`blend`). */
+type Trim = { i: number; kind: 'end' | 'blend'; d: number };
+
 /**
- * The night as a true timeline: each card is as tall as its track plays, placed
- * where it starts, so blends overlap and gaps show. A red line marks where the
- * night is. Drag a card's top or bottom lever to trim its start or end; drag ☰
- * to move it; zoom with − / +.
+ * The night as a timeline to scale, one card after another (they never
+ * overlap): each card runs from when its track comes in to when the next one
+ * does. A blend shows as a striped band at the top of the next card, a gap as
+ * silence. A red line marks where the night is: drag it, or tap a ruler, to
+ * move there. Levers: a card's bottom bar makes its track shorter or longer
+ * (everything after follows); the pink bar at the bottom of a blend changes how
+ * long the blend lasts.
  */
 export function PlaylistScreen({
   items,
@@ -49,12 +61,11 @@ export function PlaylistScreen({
   const scroller = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState<string | null>(null);
   const [drag, setDrag] = useState<{ idx: number; dy: number } | null>(null);
-  // A lever being dragged: that card's edge follows the finger until it's let go.
-  const [trim, setTrim] = useState<{ i: number; edge: 'start' | 'end'; d: number } | null>(null);
-  // Pixels per second: by default the typical track is about 180 px tall.
+  const [trim, setTrim] = useState<Trim | null>(null);
+  // Pixels per second: by default the typical card is about 180 px tall.
   const fit = useMemo(() => {
-    const lens = items.map((it) => it.playFor).sort((a, b) => a - b);
-    const median = lens[Math.floor(lens.length / 2)] || 240;
+    const spans = items.map((it, i) => (items[i + 1] ? items[i + 1].startsAt - it.startsAt : it.playFor)).sort((a, b) => a - b);
+    const median = spans[Math.floor(spans.length / 2)] || 240;
     return clampZoom(180 / median);
   }, [items]);
   const [zoom, setZoomState] = useState<number | null>(() => {
@@ -80,7 +91,6 @@ export function PlaylistScreen({
     for (const s of nightSlots(items)) if ((s.semitones ?? 0) !== (s.keyShift ?? 0)) m.set(s.id, toCamelot(slotKey(s)));
     return m;
   }, [items]);
-  const end = items.reduce((e, it) => Math.max(e, it.startsAt + it.playFor), 0);
   const [prefs, setPrefs] = useListPrefs('night', { sort: 'added', desc: false, filter: {} });
   // Filtering the night dims what doesn't match: the cards stay, so the timeline stays true.
   const matches = useMemo(
@@ -96,6 +106,21 @@ export function PlaylistScreen({
       }),
     [items, prefs.filter],
   );
+
+  // The timeline, with a lever's drag previewed: an end drag moves everything after it too.
+  const layout = useMemo<Layout>(() => {
+    const starts = items.map((it) => it.startsAt);
+    const ends = items.map((it) => it.startsAt + it.playFor);
+    if (trim) {
+      const it = items[trim.i];
+      const d = snapEnd(it, clamp(trim.d, MIN_PLAY - it.playFor, maxEnd(it)));
+      ends[trim.i] += d;
+      if (trim.kind === 'end') for (let k = trim.i + 1; k < items.length; k++) (starts[k] += d), (ends[k] += d);
+    }
+    return { starts, ends };
+  }, [items, trim]);
+  const end = Math.max(0, ...layout.ends);
+
   const arrange = (how: string) => {
     const withTrack = items.map((it) => ({ id: it.entry.id, title: it.track?.title ?? '', artist: it.track?.artist ?? '', bpm: it.track?.bpm, key: it.track?.key, duration: it.playFor }));
     const order =
@@ -103,7 +128,6 @@ export function PlaylistScreen({
     dispatch({ type: 'reorderEntries', ids: order.map((x) => x.id) });
     notify('The night is in its new order; each place keeps its blend.', 'info', { label: 'Undo', run: () => dispatch({ type: 'undo' }) });
   };
-
   /** Tonight's key: a transposition of the track (its own key stays). Without a key yet, it's the track's key. */
   const setKey = (it: TimelineItem, key: string | undefined) => {
     const t = it.track;
@@ -130,46 +154,28 @@ export function PlaylistScreen({
     if (cues !== it.track.cues) dispatch({ type: 'setCues', trackId: it.track.id, cues });
     if (Object.keys(patch).length) dispatch({ type: 'updateEntry', id: it.entry.id, patch });
   };
-
-  /** A time typed on a ruler: when a track comes in (left) or when it ends (right), in night time. */
+  /** A track's end, in night time: with `keepNext`, only the blend changes. */
+  const setEnd = (i: number, nightEnd: number, keepNext: boolean) => {
+    const it = items[i];
+    const playFor = nightEnd - it.startsAt;
+    if (playFor < MIN_PLAY) return notify('The end has to come after the start.', 'error');
+    dispatch({ type: 'trimEntry', id: it.entry.id, edge: 'end', to: itemMixIn(it) + playFor * itemStretch(it), keepNext });
+  };
+  /** A time typed on a ruler: when a track comes in (left), or when it ends (right; the next track stays put). */
   const onRulerTime = (side: 'left' | 'right', i: number, v: number | undefined) => {
     const it = items[i];
     if (v === undefined || !it) return;
-    if (side === 'left') {
-      if (i === 0) return;
-      dispatch({ type: 'setEntrance', id: it.entry.id, at: v });
-      const prev = items[i - 1];
-      const overlap = prev.startsAt + prev.playFor - v;
-      notify(overlap > 0 ? `Comes in at ${nightTime(v)}, ${mmss(overlap)} before “${prev.track?.title}” ends.` : `Comes in at ${nightTime(v)}, ${mmss(-overlap)} after “${prev.track?.title}” ends.`);
-    } else {
-      const playFor = v - it.startsAt;
-      if (playFor < MIN_PLAY) return notify('The end has to come after the start.', 'error');
-      dispatch({ type: 'trimEntry', id: it.entry.id, edge: 'end', to: itemMixIn(it) + playFor * itemStretch(it) });
-    }
+    if (side === 'right') return setEnd(i, v, true);
+    if (i === 0) return;
+    dispatch({ type: 'setEntrance', id: it.entry.id, at: v });
+    const prev = items[i - 1];
+    const overlap = prev.startsAt + prev.playFor - v;
+    notify(overlap > 0 ? `Comes in at ${nightTime(v)}, ${mmss(overlap)} before “${prev.track?.title}” ends.` : `Comes in at ${nightTime(v)}, ${mmss(-overlap)} after “${prev.track?.title}” ends.`);
   };
 
-  // Each card's place: as tall as it plays; what the next card covers is its blend.
-  const geo = useMemo(() => {
-    const g = items.map((it, i) => {
-      const lim = trimLimits(it);
-      const topD = trim?.i === i && trim.edge === 'start' ? snapD(it, 'start', clamp(trim.d, lim.minTop, lim.maxTop)) : 0;
-      const endD = trim?.i === i && trim.edge === 'end' ? snapD(it, 'end', clamp(trim.d, lim.minEnd, lim.maxEnd)) : 0;
-      return { top: (it.startsAt + topD) * pps, height: Math.max(2, (it.playFor - topD + endD) * pps), topD, endD, visible: 0 };
-    });
-    g.forEach((x, i) => {
-      const next = g[i + 1];
-      x.visible = next && next.top < x.top + x.height ? Math.max(0, next.top - x.top) : x.height;
-    });
-    return g;
-  }, [items, pps, trim]);
-
   // Where a card dragged by ☰ would land: after every card whose middle is above its own.
-  const target = useMemo(() => {
-    if (!drag) return -1;
-    const it = items[drag.idx];
-    const mid = (it.startsAt + it.playFor / 2) * pps + drag.dy;
-    return items.filter((x, i) => i !== drag.idx && (x.startsAt + x.playFor / 2) * pps < mid).length;
-  }, [drag, items, pps]);
+  const cardMid = (k: number) => ((layout.starts[k] + cardBottom(layout, k)) / 2) * pps;
+  const target = drag ? items.filter((_, k) => k !== drag.idx && cardMid(k) < cardMid(drag.idx) + drag.dy).length : -1;
 
   return (
     <div className="m-screen m-playlist">
@@ -228,21 +234,31 @@ export function PlaylistScreen({
           />
           <div className="m-scroll m-night" ref={scroller}>
             <div className="m-timeline" style={{ height: end * pps + 40 }}>
-              <Ruler side="left" items={items} pps={pps} end={end} startClock={set.startClock} onTime={onRulerTime} />
-              <Ruler side="right" items={items} pps={pps} end={end} startClock={set.startClock} onTime={onRulerTime} />
+              <Ruler side="left" items={items} layout={layout} pps={pps} end={end} startClock={set.startClock} onTime={onRulerTime} />
+              <Ruler side="right" items={items} layout={layout} pps={pps} end={end} startClock={set.startClock} onTime={onRulerTime} />
               <div className="m-lanes">
                 {items.map((it, i) => {
-                  const moveBy = drag ? (drag.idx === i ? drag.dy : shiftFor(i, drag.idx, target, items, pps)) : 0;
+                  const top = layout.starts[i] * pps;
+                  const bottom = cardBottom(layout, i) * pps;
+                  const blend = i > 0 ? Math.max(0, layout.ends[i - 1] - layout.starts[i]) : 0;
+                  const gap = i < items.length - 1 ? Math.max(0, layout.starts[i + 1] - layout.ends[i]) : 0;
+                  const moveBy = drag ? (drag.idx === i ? drag.dy : shiftFor(i, drag.idx, target, layout, pps)) : 0;
                   return (
                     <NightCard
                       key={it.entry.id}
                       it={it}
                       i={i}
-                      geo={geo[i]}
-                      lane={i % 2}
-                      trimming={trim?.i === i}
+                      top={top}
+                      height={Math.max(2, bottom - top)}
+                      blendH={blend * pps}
+                      blendSec={blend}
+                      prevTitle={items[i - 1]?.track?.title}
+                      prevEnd={i > 0 ? layout.ends[i - 1] : 0}
+                      gapH={gap * pps}
+                      gapSec={gap}
                       dimmed={!matches[i]}
                       dragging={drag?.idx === i}
+                      trimming={trim?.i === i}
                       moveBy={moveBy}
                       mode={mode}
                       activeRegionId={activeRegionId}
@@ -264,9 +280,7 @@ export function PlaylistScreen({
                       onEndFx={(endFx) => dispatch({ type: 'updateEntry', id: it.entry.id, patch: { endFx } })}
                       onDrag={(dy) => setDrag(dy === null ? null : { idx: i, dy })}
                       onDrop={(dy) => {
-                        const it0 = items[i];
-                        const mid = (it0.startsAt + it0.playFor / 2) * pps + dy;
-                        const to = items.filter((x, k) => k !== i && (x.startsAt + x.playFor / 2) * pps < mid).length;
+                        const to = items.filter((_, k) => k !== i && cardMid(k) < cardMid(i) + dy).length;
                         setDrag(null);
                         if (to === i) return;
                         const ids = items.map((x) => x.entry.id);
@@ -277,30 +291,47 @@ export function PlaylistScreen({
                   );
                 })}
               </div>
-              <div className="m-levers">
-                {items.map((it, i) => (
-                  <Levers
-                    key={it.entry.id}
-                    it={it}
-                    geo={geo[i]}
-                    lane={i % 2}
-                    covered={geo[i].visible < geo[i].height - 1}
-                    pps={pps}
-                    hidden={!!drag}
-                    trim={trim?.i === i ? trim : null}
-                    onTrim={(edge, d) => setTrim(d === null ? null : { i, edge, d })}
-                    onCommit={(edge, d) => {
+              {!drag && (
+                <div className="m-levers">
+                  {items.map((it, i) => {
+                    const overlapsNext = i < items.length - 1 && layout.ends[i] > layout.starts[i + 1] + 0.05;
+                    const title = it.track?.title ?? 'track';
+                    const endAt = layout.ends[i];
+                    const commit = (kind: 'end' | 'blend', d: number) => {
                       setTrim(null);
-                      const lim = trimLimits(it);
-                      const mixIn = itemMixIn(it);
-                      const r = itemStretch(it);
-                      if (edge === 'start') dispatch({ type: 'trimEntry', id: it.entry.id, edge, to: mixIn + snapD(it, 'start', clamp(d, lim.minTop, lim.maxTop)) * r });
-                      else dispatch({ type: 'trimEntry', id: it.entry.id, edge, to: mixIn + (it.playFor + snapD(it, 'end', clamp(d, lim.minEnd, lim.maxEnd))) * r });
-                    }}
-                  />
-                ))}
-              </div>
-              <NowLine pps={pps} scroller={scroller} startClock={set.startClock} />
+                      setEnd(i, it.startsAt + it.playFor + snapEnd(it, clamp(d, MIN_PLAY - it.playFor, maxEnd(it))), kind === 'blend');
+                    };
+                    const tip = trim?.i === i ? <b className="m-lever-tip">ends {nightTime(endAt)}</b> : null;
+                    return (
+                      <span key={it.entry.id}>
+                        <Lever
+                          className="m-lever bottom"
+                          top={cardBottom(layout, i) * pps}
+                          label={`make ${title} shorter or longer`}
+                          value={nightTime(endAt)}
+                          pps={pps}
+                          onMove={(d) => setTrim(d === null ? null : { i, kind: 'end', d })}
+                          onCommit={(d) => commit('end', d)}
+                          tip={trim?.kind === 'end' ? tip : null}
+                        />
+                        {overlapsNext && (
+                          <Lever
+                            className="m-lever blend"
+                            top={endAt * pps}
+                            label={`change how long ${title} blends into the next track`}
+                            value={nightTime(endAt)}
+                            pps={pps}
+                            onMove={(d) => setTrim(d === null ? null : { i, kind: 'blend', d })}
+                            onCommit={(d) => commit('blend', d)}
+                            tip={trim?.kind === 'blend' ? tip : null}
+                          />
+                        )}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+              <NowLine pps={pps} scroller={scroller} startClock={set.startClock} end={end} />
             </div>
             {footer}
           </div>
@@ -311,115 +342,36 @@ export function PlaylistScreen({
 }
 
 const clampZoom = (v: number) => Math.max(0.05, Math.min(4, v));
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
-/** How far (night seconds) a card's start and end can be dragged: not before the top of the file, not past its end, never shorter than MIN_PLAY. */
-function trimLimits(it: TimelineItem) {
-  const r = itemStretch(it);
-  const mixIn = itemMixIn(it);
-  const maxPlay = it.track?.duration ? (it.track.duration - mixIn) / r : it.playFor + 600;
-  return { minTop: -mixIn / r, maxTop: it.playFor - MIN_PLAY, minEnd: MIN_PLAY - it.playFor, maxEnd: Math.max(0, maxPlay - it.playFor) };
+/** Where a card ends: when the next track comes in, or its own end when there's a gap (or it's the last). */
+function cardBottom(l: Layout, k: number): number {
+  return k < l.starts.length - 1 ? Math.min(l.starts[k + 1], l.ends[k]) : l.ends[k];
 }
 
-type Geo = { top: number; height: number; topD: number; endD: number; visible: number };
-
-/** A lever's offset (night seconds) moved so the edge lands on a beat. */
-function snapD(it: TimelineItem, edge: 'start' | 'end', d: number): number {
+/** How much longer a track can play (night seconds): up to the end of its file. */
+function maxEnd(it: TimelineItem): number {
   const r = itemStretch(it);
-  const mixIn = itemMixIn(it);
-  const edgeAt = edge === 'start' ? mixIn + d * r : mixIn + (it.playFor + d) * r;
-  const snapped = onBeat(it, edgeAt);
-  const max = it.track?.duration;
-  if (snapped < 0 || (max && snapped > max)) return d;
-  return d + (snapped - edgeAt) / r;
+  const max = it.track?.duration ? (it.track.duration - itemMixIn(it)) / r : it.playFor + 600;
+  return Math.max(0, max - it.playFor);
 }
 
-/** A song time on the nearest beat of the track's grid (when it has a BPM), so a trim always lands on the beat. */
-function onBeat(it: TimelineItem, s: number): number {
+/** A lever's offset (night seconds) moved so the track's end lands on a beat of its grid. */
+function snapEnd(it: TimelineItem, d: number): number {
   const bpm = it.track?.bpm;
-  if (!bpm) return s;
+  if (!bpm) return d;
+  const r = itemStretch(it);
+  const at = itemMixIn(it) + (it.playFor + d) * r;
   const beat = 60 / bpm;
   const g = it.track?.gridStart ?? 0;
-  return Math.max(0, g + Math.round((s - g) / beat) * beat);
-}
-
-/** A card's two levers: grab the top to trim where it starts, the bottom to trim where it ends. Above every card, so a blend never hides them. */
-function Levers({
-  it,
-  geo,
-  lane,
-  covered,
-  pps,
-  hidden,
-  trim,
-  onTrim,
-  onCommit,
-}: {
-  it: TimelineItem;
-  geo: Geo;
-  lane: number;
-  covered: boolean;
-  pps: number;
-  hidden: boolean;
-  trim: { edge: 'start' | 'end'; d: number } | null;
-  onTrim: (edge: 'start' | 'end', d: number | null) => void;
-  onCommit: (edge: 'start' | 'end', d: number) => void;
-}) {
-  if (hidden) return null;
-  const title = it.track?.title ?? 'track';
-  const mixIn = itemMixIn(it);
-  const r = itemStretch(it);
-  const grab = (edge: 'start' | 'end') => (e: React.PointerEvent<HTMLDivElement>) => {
-    e.stopPropagation();
-    e.preventDefault();
-    e.currentTarget.setPointerCapture(e.pointerId);
-    const y0 = e.clientY;
-    const el = e.currentTarget;
-    onTrim(edge, 0);
-    const move = (ev: PointerEvent) => onTrim(edge, (ev.clientY - y0) / pps);
-    const up = (ev: PointerEvent) => {
-      el.removeEventListener('pointermove', move);
-      el.removeEventListener('pointerup', up);
-      el.removeEventListener('pointercancel', up);
-      const d = (ev.clientY - y0) / pps;
-      if (ev.type !== 'pointerup' || Math.abs(d * pps) < 3) return onTrim(edge, null);
-      onCommit(edge, d);
-    };
-    el.addEventListener('pointermove', move);
-    el.addEventListener('pointerup', up);
-    el.addEventListener('pointercancel', up);
-  };
-  const side = lane === 0 ? 'lane-0' : 'lane-1';
-  return (
-    <>
-      <div
-        className={`m-lever top ${side}`}
-        style={{ top: geo.top }}
-        role="slider"
-        aria-label={`trim the start of ${title}`}
-        aria-valuetext={mmss(mixIn + geo.topD * r)}
-        onPointerDown={grab('start')}
-      >
-        <i />
-        {trim?.edge === 'start' && <b className="m-lever-tip">start {mmss(mixIn + geo.topD * r)}</b>}
-      </div>
-      <div
-        className={`m-lever bottom ${side}${covered ? ' covered' : ''}`}
-        style={{ top: geo.top + geo.height }}
-        role="slider"
-        aria-label={`trim the end of ${title}`}
-        aria-valuetext={mmss(mixIn + (it.playFor + geo.endD) * r)}
-        onPointerDown={grab('end')}
-      >
-        <i />
-        {trim?.edge === 'end' && <b className="m-lever-tip">end {mmss(mixIn + (it.playFor + geo.endD) * r)}</b>}
-      </div>
-    </>
-  );
+  const snapped = g + Math.round((at - g) / beat) * beat;
+  if (snapped < 0 || (it.track?.duration && snapped > it.track.duration)) return d;
+  return d + (snapped - at) / r;
 }
 
 /** While a card is dragged by ☰, the cards it passes make room for it. */
-function shiftFor(i: number, from: number, to: number, items: TimelineItem[], pps: number): number {
-  const h = items[from].playFor * pps;
+function shiftFor(i: number, from: number, to: number, l: Layout, pps: number): number {
+  const h = (cardBottom(l, from) - l.starts[from]) * pps;
   if (from < to && i > from && i <= to) return -h;
   if (from > to && i < from && i >= to) return h;
   return 0;
@@ -428,14 +380,74 @@ function shiftFor(i: number, from: number, to: number, items: TimelineItem[], pp
 const NO_STRETCH =
   'Changing the key needs key lock, which this page can’t do: it needs the Mac app, or Setcraft from an https address. Over Wi-Fi from your Mac, the phone plays it in its own key.';
 
+/** A bar to drag up or down; it reports the drag in night seconds and commits on release. */
+function Lever({
+  className,
+  top,
+  label,
+  value,
+  pps,
+  onMove,
+  onCommit,
+  tip,
+}: {
+  className: string;
+  top: number;
+  label: string;
+  value: string;
+  pps: number;
+  onMove: (d: number | null) => void;
+  onCommit: (d: number) => void;
+  tip: ReactNode;
+}) {
+  return (
+    <div
+      className={className}
+      style={{ top }}
+      role="slider"
+      aria-label={label}
+      aria-valuetext={value}
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        e.currentTarget.setPointerCapture(e.pointerId);
+        const y0 = e.clientY;
+        const el = e.currentTarget;
+        onMove(0);
+        const move = (ev: PointerEvent) => onMove((ev.clientY - y0) / pps);
+        const up = (ev: PointerEvent) => {
+          el.removeEventListener('pointermove', move);
+          el.removeEventListener('pointerup', up);
+          el.removeEventListener('pointercancel', up);
+          const d = (ev.clientY - y0) / pps;
+          if (ev.type !== 'pointerup' || Math.abs(d * pps) < 3) return onMove(null);
+          onCommit(d);
+        };
+        el.addEventListener('pointermove', move);
+        el.addEventListener('pointerup', up);
+        el.addEventListener('pointercancel', up);
+      }}
+    >
+      <i />
+      {tip}
+    </div>
+  );
+}
+
 type NightCardProps = {
   it: TimelineItem;
   i: number;
-  geo: Geo;
-  lane: number;
-  trimming: boolean;
+  top: number;
+  height: number;
+  blendH: number;
+  blendSec: number;
+  prevTitle?: string;
+  prevEnd: number;
+  gapH: number;
+  gapSec: number;
   dimmed: boolean;
   dragging: boolean;
+  trimming: boolean;
   moveBy: number;
   mode: StripMode;
   activeRegionId?: string;
@@ -454,17 +466,20 @@ type NightCardProps = {
 };
 
 /**
- * One track on the timeline, as tall as it plays. Its details sit in the part
- * the next track doesn't cover; the covered tail is its blend. Thin cards show
- * less: a line and the waveform, then just the title.
+ * One track on the timeline, from when it comes in to when the next one does.
+ * The blend with the track before is a striped band at its top; a gap after it
+ * is silence. Thin cards show less: a line and its waveform, then its title.
  */
 function NightCard(p: NightCardProps) {
-  const { it, geo } = p;
+  const { it } = p;
   const t = it.track;
-  const size = geo.visible >= FULL ? 'full' : geo.visible >= MID ? 'mid' : 'thin';
+  const bandH = Math.min(p.height, p.blendH);
+  const room = p.height - (bandH > 16 ? bandH : 0);
+  const size = room >= FULL ? 'full' : room >= MID ? 'mid' : 'thin';
   const title = t?.title ?? 'Missing track';
   const start = t?.cues.find((c) => c.id === it.entry.mixInCueId)?.start ?? 0;
-  const blendH = geo.height - geo.visible;
+  const keyName = it.entry.keyShift ? transposeKey(t?.key, it.entry.keyShift) : t?.key;
+  const bpm = it.entry.playBpm ?? t?.bpm;
 
   const handle = (
     <span
@@ -513,67 +528,75 @@ function NightCard(p: NightCardProps) {
       )}
     </div>
   );
-  const keyName = it.entry.keyShift ? transposeKey(t?.key, it.entry.keyShift) : t?.key;
-  const bpm = it.entry.playBpm ?? t?.bpm;
 
   return (
-    <div
-      className={`m-row m-tcard size-${size} lane-${p.lane}${p.dimmed ? ' dimmed' : ''}${p.dragging ? ' dragging' : ''}${p.trimming ? ' trimming' : ''}`}
-      style={{ top: geo.top, height: geo.height, zIndex: p.dragging || p.trimming ? 50 : p.i + 1, transform: p.moveBy ? `translateY(${p.moveBy}px)` : undefined }}
-      data-entry={it.entry.id}
-    >
-      <PlayingEdge it={it} />
-      <div className="m-card-face" style={{ height: geo.visible }}>
-        {size === 'full' ? (
-          <div className="m-row-body">
-            <TrackCard
-              title={title}
-              artist={t?.artist ?? ''}
-              keyName={keyName}
-              keyWas={it.entry.keyShift ? toCamelot(t?.key) : undefined}
-              keyHint={p.keyHint}
-              bpm={bpm}
-              bpmWas={it.entry.playBpm ? t?.bpm : undefined}
-              start={start}
-              end={t ? (t.cues.find((c) => c.id === it.entry.mixOutCueId)?.start ?? t.duration) : undefined}
-              endFx={it.entry.endFx ?? t?.endFx ?? []}
-              onKey={p.onKey}
-              onBpm={p.onBpm}
-              onStart={(s) => p.onMixPoint('in', s || undefined)}
-              onEnd={(s) => p.onMixPoint('out', s !== undefined && t?.duration && s >= t.duration - 0.5 ? undefined : s)}
-              onEndFx={p.onEndFx}
-              left={handle}
-              right={more}
-            />
-            <WaveStrip it={it} mode={p.mode} activeRegionId={p.activeRegionId} loopIn={p.loopIn} />
-          </div>
-        ) : (
-          <div className="m-compact">
-            {handle}
-            <span className="m-c-title" title={title}>
-              {title}
-            </span>
-            <span className="m-c-key">{toCamelot(keyName) ?? '--'}</span>
-            <span className="m-c-bpm">{bpm ? Math.round(bpm * 10) / 10 : '---'}</span>
-            {more}
-            {size === 'mid' && (
-              <div className="m-c-wave">
-                <WaveStrip it={it} mode={p.mode} activeRegionId={p.activeRegionId} loopIn={p.loopIn} />
-              </div>
+    <>
+      <div
+        className={`m-row m-tcard size-${size}${p.dimmed ? ' dimmed' : ''}${p.dragging ? ' dragging' : ''}${p.trimming ? ' trimming' : ''}`}
+        style={{ top: p.top, height: p.height, transform: p.moveBy ? `translateY(${p.moveBy}px)` : undefined }}
+        data-entry={it.entry.id}
+      >
+        <PlayingEdge it={it} />
+        {bandH > 1 && (
+          <div className="m-blend-band" style={{ height: bandH }} aria-label={`blends with ${p.prevTitle ?? 'the track before'} for ${mmss(p.blendSec)}`}>
+            {bandH > 12 && (
+              <span>
+                blend {mmss(p.blendSec).replace(/^00:/, '0:')}
+                {bandH > 26 && p.prevTitle ? ` · ${p.prevTitle} ends ${nightTime(p.prevEnd)}` : ''}
+              </span>
             )}
           </div>
         )}
+        <div className="m-card-face" style={{ top: bandH > 16 ? bandH : 0 }}>
+          {size === 'full' ? (
+            <div className="m-row-body">
+              <TrackCard
+                title={title}
+                artist={t?.artist ?? ''}
+                keyName={keyName}
+                keyWas={it.entry.keyShift ? toCamelot(t?.key) : undefined}
+                keyHint={p.keyHint}
+                bpm={bpm}
+                bpmWas={it.entry.playBpm ? t?.bpm : undefined}
+                start={start}
+                end={t ? (t.cues.find((c) => c.id === it.entry.mixOutCueId)?.start ?? t.duration) : undefined}
+                endFx={it.entry.endFx ?? t?.endFx ?? []}
+                onKey={p.onKey}
+                onBpm={p.onBpm}
+                onStart={(s) => p.onMixPoint('in', s || undefined)}
+                onEnd={(s) => p.onMixPoint('out', s !== undefined && t?.duration && s >= t.duration - 0.5 ? undefined : s)}
+                onEndFx={p.onEndFx}
+                left={handle}
+                right={more}
+              />
+              <WaveStrip it={it} mode={p.mode} activeRegionId={p.activeRegionId} loopIn={p.loopIn} />
+            </div>
+          ) : (
+            <div className="m-compact">
+              {handle}
+              <span className="m-c-title" title={title}>
+                {title}
+              </span>
+              <span className="m-c-key">{toCamelot(keyName) ?? '--'}</span>
+              <span className="m-c-bpm">{bpm ? Math.round(bpm * 10) / 10 : '---'}</span>
+              {more}
+              {size === 'mid' && (
+                <div className="m-c-wave">
+                  <WaveStrip it={it} mode={p.mode} activeRegionId={p.activeRegionId} loopIn={p.loopIn} />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
-      {blendH > 1 && (
-        <div className="m-blend-tail" style={{ top: geo.visible, height: blendH }} title={`blends into the next track over ${mmss(blendH / (geo.height / it.playFor))}`}>
-          {blendH > 24 && <i>{mmss(blendH / (geo.height / Math.max(1, it.playFor - geo.topD + geo.endD))).replace(/^00:/, '0:')}</i>}
+      {p.gapH > 1 && (
+        <div className="m-gap" style={{ top: p.top + p.height, height: p.gapH }} aria-label={`${mmss(p.gapSec)} of silence`}>
+          {p.gapH > 12 && <span>silence {mmss(p.gapSec).replace(/^00:/, '0:')}</span>}
         </div>
       )}
-    </div>
+    </>
   );
 }
-
-const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
 /** A red edge on the card playing now. */
 function PlayingEdge({ it }: { it: TimelineItem }) {
@@ -584,12 +607,13 @@ function PlayingEdge({ it }: { it: TimelineItem }) {
 /**
  * The timeline down one side, counting from 00:00: when each track comes in
  * (left) and ends (right), to a tenth of a second, with a tick every minute.
- * Tap a time to type it: a track's entrance, or its end. With a start time set,
- * the clock time shows underneath.
+ * Tap a time to type it; tap anywhere else on a ruler to move the night there.
+ * With a start time set, the clock time shows underneath.
  */
 const Ruler = memo(function Ruler({
   side,
   items,
+  layout,
   pps,
   end,
   startClock,
@@ -597,22 +621,31 @@ const Ruler = memo(function Ruler({
 }: {
   side: 'left' | 'right';
   items: TimelineItem[];
+  layout: Layout;
   pps: number;
   end: number;
   startClock?: string;
   onTime: (side: 'left' | 'right', i: number, v: number | undefined) => void;
 }) {
+  const night = useNight();
   const minute = 60 * pps;
   const every = minute >= 8 ? 1 : minute * 5 >= 8 ? 5 : 15;
   const ticks: number[] = [];
   for (let m = 0; m * 60 <= end + 1; m += every) ticks.push(m * 60);
   return (
-    <div className={`m-ruler ${side}`}>
+    <div
+      className={`m-ruler ${side}`}
+      onClick={(e) => {
+        if ((e.target as HTMLElement).closest('input')) return;
+        const y = e.clientY - e.currentTarget.getBoundingClientRect().top;
+        night.seek(Math.max(0, Math.min(end, y / pps)));
+      }}
+    >
       {ticks.map((s) => (
         <i key={s} className={s % 300 === 0 ? 'major' : 'minor'} style={{ top: s * pps }} aria-hidden="true" />
       ))}
       {items.map((it, k) => {
-        const s = side === 'left' ? it.startsAt : it.startsAt + it.playFor;
+        const s = side === 'left' ? layout.starts[k] : layout.ends[k];
         const title = it.track?.title ?? 'track';
         return (
           <span key={it.entry.id} className="m-ruler-label" style={{ top: s * pps }}>
@@ -621,7 +654,7 @@ const Ruler = memo(function Ruler({
               label={side === 'left' ? `when ${title} comes in` : `when ${title} ends`}
               value={s}
               format={(v) => (v === undefined ? '' : nightTime(v))}
-              width={side === 'left' && s >= 3600 ? 9 : 7}
+              width={s >= 3600 ? 9 : 7}
               disabled={side === 'left' && k === 0}
               onCommit={(v) => onTime(side, k, v)}
             />
@@ -633,34 +666,104 @@ const Ruler = memo(function Ruler({
   );
 });
 
-/** Where the night is: a red line across the timeline, followed while it plays (unless you've just scrolled). */
-function NowLine({ pps, scroller, startClock }: { pps: number; scroller: RefObject<HTMLDivElement | null>; startClock?: string }) {
+/**
+ * Where the night is: a red line across the timeline. Drag its time label to
+ * move through the night. While it plays, the view follows it, until you scroll
+ * away; "now" brings you back.
+ */
+function NowLine({ pps, scroller, startClock, end }: { pps: number; scroller: RefObject<HTMLDivElement | null>; startClock?: string; end: number }) {
   const t = useNightTime();
   const night = useNight();
-  const touched = useRef(0);
-  useEffect(() => {
-    const el = scroller.current;
-    if (!el) return;
-    const mark = () => (touched.current = Date.now());
-    el.addEventListener('touchstart', mark, { passive: true });
-    el.addEventListener('wheel', mark, { passive: true });
-    return () => {
-      el.removeEventListener('touchstart', mark);
-      el.removeEventListener('wheel', mark);
-    };
-  }, [scroller]);
+  const [following, setFollowing] = useState(true);
+  // Where this code last put the scroll: anything else moving it is the DJ scrolling, which stops following.
+  const ourTop = useRef<number | null>(null);
   const y = t * pps;
   useEffect(() => {
     const el = scroller.current;
-    if (!el || !night.playing || Date.now() - touched.current < 4000) return;
-    if (y < el.scrollTop + 20 || y > el.scrollTop + el.clientHeight - 60) el.scrollTo({ top: Math.max(0, y - el.clientHeight / 3) });
-  }, [y, night.playing, scroller]);
+    if (!el) return;
+    const mine = () => ourTop.current !== null && Math.abs(el.scrollTop - ourTop.current) < 2;
+    const onScroll = () => {
+      if (!mine()) setFollowing(false);
+    };
+    const onTouch = () => setFollowing(false);
+    el.addEventListener('scroll', onScroll, { passive: true });
+    el.addEventListener('touchmove', onTouch, { passive: true });
+    el.addEventListener('wheel', onTouch, { passive: true });
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      el.removeEventListener('touchmove', onTouch);
+      el.removeEventListener('wheel', onTouch);
+    };
+  }, [scroller]);
+  // Pressing play, or jumping somewhere (a seek, a hot cue), follows again.
+  const last = useRef({ t, playing: night.playing });
+  useEffect(() => {
+    const was = last.current;
+    if ((night.playing && !was.playing) || (Math.abs(t - was.t) > 2 && !night.isScrubbing)) setFollowing(true);
+    last.current = { t, playing: night.playing };
+  }, [t, night.playing, night.isScrubbing]);
+  const goTo = (top: number) => {
+    const el = scroller.current;
+    if (!el) return;
+    const max = Math.max(0, el.scrollHeight - el.clientHeight);
+    ourTop.current = Math.max(0, Math.min(max, top));
+    el.scrollTo({ top: ourTop.current });
+  };
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el || !following || !night.playing) return;
+    // Scrolled by hand since the last time it followed: stop.
+    if (ourTop.current !== null && Math.abs(el.scrollTop - ourTop.current) >= 2) return setFollowing(false);
+    if (y < el.scrollTop + 20 || y > el.scrollTop + el.clientHeight - 60) goTo(y - el.clientHeight / 3);
+    else ourTop.current = el.scrollTop;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [y, following, night.playing, scroller]);
+
+  const scrub = (e: React.PointerEvent<HTMLSpanElement>) => {
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const el = e.currentTarget;
+    const box = scroller.current;
+    const at = (ev: PointerEvent | React.PointerEvent) => {
+      const top = (box?.querySelector('.m-timeline') as HTMLElement | null)?.getBoundingClientRect().top ?? 0;
+      return Math.max(0, Math.min(end, (ev.clientY - top) / pps));
+    };
+    night.scrubStart();
+    night.scrubTo(at(e));
+    const move = (ev: PointerEvent) => night.scrubTo(at(ev));
+    const up = () => {
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+      el.removeEventListener('pointercancel', up);
+      night.scrubEnd();
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+  };
+
+  const off = scroller.current && (y < scroller.current.scrollTop || y > scroller.current.scrollTop + scroller.current.clientHeight);
   return (
-    <div className="m-now-line" style={{ top: y }} aria-label={`now: ${nightTime(t)}`}>
-      <span>
-        {nightTime(t)}
-        {startClock ? ` · ${clockLabel(t, startClock)}` : ''}
-      </span>
-    </div>
+    <>
+      <div className="m-now-line" style={{ top: y }} aria-hidden="true">
+        <span className="m-now-grab" role="slider" aria-label="move the playhead" aria-valuetext={nightTime(t)} onPointerDown={scrub}>
+          {nightTime(t)}
+          {startClock ? ` · ${clockLabel(t, startClock)}` : ''}
+        </span>
+      </div>
+      {!following && off && scroller.current && (
+        <button
+          className="m-follow"
+          style={{ top: scroller.current.scrollTop + scroller.current.clientHeight - 44 }}
+          onClick={() => {
+            setFollowing(true);
+            const el = scroller.current;
+            if (el) goTo(y - el.clientHeight / 3);
+          }}
+        >
+          ⤓ now {nightTime(t)}
+        </button>
+      )}
+    </>
   );
 }

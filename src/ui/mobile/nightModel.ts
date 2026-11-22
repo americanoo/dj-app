@@ -60,22 +60,20 @@ export function mmss(sec: number | undefined): string {
   return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 }
 
-/** The row playing now; re-renders only when it changes. */
+/** The row playing now; re-renders only when it changes (not on every play, pause or seek). */
 export function useNightIndex(items: TimelineItem[]): number {
   const night = useNight();
-  const version = useSyncExternalStore(
-    (fn) => night.subscribe(fn),
-    () => night.version,
-  );
   const [idx, setIdx] = useState(() => itemIndexAt(items, night.position()));
-  const playing = night.playing;
   useEffect(() => {
     const check = () => setIdx(itemIndexAt(items, night.position()));
     check();
-    if (!playing) return;
-    const id = window.setInterval(check, 250);
-    return () => window.clearInterval(id);
-  }, [items, night, playing, version]);
+    const off = night.subscribe(check);
+    const id = window.setInterval(() => night.playing && check(), 250);
+    return () => {
+      off();
+      window.clearInterval(id);
+    };
+  }, [items, night]);
   return idx;
 }
 

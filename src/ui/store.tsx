@@ -68,7 +68,8 @@ export type Action =
   | { type: 'removeEntry'; id: string }
   | { type: 'reorderEntries'; ids: string[] }
   | { type: 'blendNight'; bars: number }
-  | { type: 'trimEntry'; id: string; edge: 'start' | 'end'; to: number }
+  /** `keepNext`: the end moves but the next track doesn't (a longer or shorter blend). */
+  | { type: 'trimEntry'; id: string; edge: 'start' | 'end'; to: number; keepNext?: boolean }
   | { type: 'setEntrance'; id: string; at: number }
   /** Tracks' real lengths, measured from their audio (not an edit: it isn't undone). */
   | { type: 'measured'; durations: Record<string, number> }
@@ -134,8 +135,8 @@ function followsLengths(a: Action): boolean {
     case 'updateEntry':
       return !('at' in a.patch);
     case 'trimEntry':
-      // Trimming the end moves what follows; trimming the start keeps the end where it is.
-      return a.edge === 'end';
+      // Trimming the end moves what follows (unless only the blend changes); trimming the start keeps the end where it is.
+      return a.edge === 'end' && !a.keepNext;
     case 'measured':
       return true;
     default:

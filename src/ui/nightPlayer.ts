@@ -497,14 +497,10 @@ export class NightPlayer {
     gain.connect(echoSend).connect(delay).connect(eHp).connect(eLp);
     eLp.connect(fb).connect(delay);
     eLp.connect(this.out);
-    // Reverb: a big hall.
+    // Reverb: a big hall, shared by every track (preparing a reverb is slow, so it's done once).
     const reverbSend = ctx.createGain();
     reverbSend.gain.value = 0;
-    const verb = ctx.createConvolver();
-    verb.buffer = impulse(ctx);
-    const wet = ctx.createGain();
-    wet.gain.value = 1.6;
-    gain.connect(reverbSend).connect(verb).connect(wet).connect(this.out);
+    gain.connect(reverbSend).connect(this.reverbBus());
     const targets: Target[] = [
       { param: level.gain, curve: (c) => c.level, dflt: 1 },
       { param: low.gain, curve: (c) => c.bass, dflt: 0 },
@@ -519,10 +515,24 @@ export class NightPlayer {
       for (const n of [low, mid, high, lp, hp, level]) n.disconnect();
       // The sends ring on for a while before they're let go.
       window.setTimeout(() => {
-        for (const n of [gain, echoSend, delay, fb, eHp, eLp, reverbSend, verb, wet]) n.disconnect();
+        for (const n of [gain, echoSend, delay, fb, eHp, eLp, reverbSend]) n.disconnect();
       }, TAIL * 1000);
     };
     return { gain, targets, dispose };
+  }
+
+  private reverbIn: GainNode | null = null;
+  /** The reverb every track's send goes into, made the first time it's needed. */
+  private reverbBus(): GainNode {
+    if (!this.reverbIn) {
+      this.reverbIn = this.ctx.createGain();
+      const verb = this.ctx.createConvolver();
+      verb.buffer = impulse(this.ctx);
+      const wet = this.ctx.createGain();
+      wet.gain.value = 1.6;
+      this.reverbIn.connect(verb).connect(wet).connect(this.out);
+    }
+    return this.reverbIn;
   }
 
   /** Audio-clock time of a moment in the night (while playing). */
