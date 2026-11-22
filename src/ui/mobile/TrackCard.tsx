@@ -130,13 +130,30 @@ export function TrackCard({
 }
 
 /** A time typed as minutes:seconds ("2:08", or "208" on the number pad). Empty clears it. */
-export function TimeField({ label, value, onCommit }: { label: string; value: number | undefined; onCommit: (v: number | undefined) => void }) {
+export function TimeField({
+  label,
+  value,
+  onCommit,
+  format = mmss,
+  className = 'm-time-val',
+  width = 5,
+  disabled = false,
+}: {
+  label: string;
+  value: number | undefined;
+  onCommit: (v: number | undefined) => void;
+  format?: (v: number | undefined) => string;
+  className?: string;
+  width?: number;
+  disabled?: boolean;
+}) {
   return (
     <TextField
-      className="m-time-val"
+      className={className}
       label={label}
-      value={mmss(value)}
-      width={5}
+      value={format(value)}
+      width={width}
+      disabled={disabled}
       numeric
       onCommit={(text) => {
         if (!text.trim()) return onCommit(undefined);
@@ -157,6 +174,7 @@ function TextField({
   width,
   placeholder,
   numeric = false,
+  disabled = false,
 }: {
   value: string;
   label: string;
@@ -165,6 +183,7 @@ function TextField({
   width: number;
   placeholder?: string;
   numeric?: boolean;
+  disabled?: boolean;
 }) {
   const [text, setText] = useState(value);
   const [editing, setEditing] = useState(false);
@@ -176,6 +195,7 @@ function TextField({
     <input
       className={`m-field ${className}${bad ? ' bad' : ''}`}
       aria-label={label}
+      disabled={disabled}
       value={text}
       placeholder={placeholder}
       style={{ width: `calc(${width}ch + 3px)` }}

@@ -331,8 +331,8 @@ html.phone body:has(.m-app) {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 46px;
-  right: 46px;
+  left: 50px;
+  right: 50px;
 }
 .m-tcard {
   position: absolute;
@@ -465,8 +465,8 @@ html.phone body:has(.m-app) {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 46px;
-  right: 46px;
+  left: 50px;
+  right: 50px;
   pointer-events: none;
   z-index: 60;
 }
@@ -540,7 +540,7 @@ html.phone body:has(.m-app) {
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 40px;
+  width: 46px;
 }
 .m-ruler.left {
   left: 0;
@@ -568,17 +568,48 @@ html.phone body:has(.m-app) {
 }
 .m-ruler-label {
   position: absolute;
-  margin-top: -5px;
+  margin-top: -6px;
   font-size: 8px;
   line-height: 10px;
   color: var(--m-muted);
   white-space: nowrap;
+  display: flex;
+  flex-direction: column;
+  z-index: 2;
 }
 .m-ruler.left .m-ruler-label {
-  right: 9px;
+  align-items: flex-end;
+}
+.m-ruler-label small {
+  font-size: 7px;
+  color: var(--m-faint);
+}
+.m-app input.m-ruler-time {
+  font: 8px/12px var(--m-mono);
+  color: var(--m-soft);
+  border-bottom: 1px dashed #2f2f35 !important;
+  text-align: inherit;
+}
+.m-ruler.left input.m-ruler-time {
+  text-align: right;
+}
+.m-app input.m-ruler-time:disabled {
+  color: var(--m-muted);
+  border-bottom-color: transparent !important;
+  opacity: 1;
+}
+.m-app input.m-ruler-time:focus {
+  position: relative;
+  z-index: 5;
+  background: #000 !important;
+  font-size: 12px;
+  width: 8ch !important;
+}
+.m-ruler.left .m-ruler-label {
+  right: 6px;
 }
 .m-ruler.right .m-ruler-label {
-  left: 9px;
+  left: 6px;
 }
 /* Where the night is */
 .m-now-line {

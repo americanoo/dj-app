@@ -262,3 +262,41 @@ describe('trimming a track on the timeline', () => {
     expect(times(p)[1]).toEqual(['b', 268]);
   });
 });
+
+describe('the night counts from 00:00, with exact entrances and real lengths', () => {
+  const mk = (id: string, duration: number): Track => ({ id, title: id, artist: '', cues: [], source: 'manual', duration, bpm: 120 });
+  const start = (): Project => ({ ...emptyProject(), library: { tracks: { a: mk('a', 300), b: mk('b', 240), c: mk('c', 200) }, playlists: [] } });
+  const times = (p: Project) => activeSet(p).entries.map((e) => [e.trackId, Math.round((e.at ?? 0) * 10) / 10]);
+
+  it('removing or trimming the first track: the night starts at 00:00 again', () => {
+    let p = reducer(start(), { type: 'addEntries', trackIds: ['a', 'b', 'c'], blend: true }); // 0, 268, 476
+    p = reducer(p, { type: 'trimEntry', id: activeSet(p).entries[0].id, edge: 'start', to: 100 });
+    expect(times(p)).toEqual([
+      ['a', 0],
+      ['b', 168],
+      ['c', 376],
+    ]);
+    p = reducer(p, { type: 'removeEntry', id: activeSet(p).entries[0].id });
+    expect(times(p)).toEqual([
+      ['b', 0],
+      ['c', 208],
+    ]);
+  });
+
+  it('an entrance typed for a track moves it and everything after it', () => {
+    let p = reducer(start(), { type: 'addEntries', trackIds: ['a', 'b', 'c'], blend: true });
+    p = reducer(p, { type: 'setEntrance', id: activeSet(p).entries[1].id, at: 280.5 });
+    expect(times(p)).toEqual([
+      ['a', 0],
+      ['b', 280.5],
+      ['c', 488.5],
+    ]);
+  });
+
+  it("a track's measured length replaces the collection's, and the night follows", () => {
+    let p = reducer(start(), { type: 'addEntries', trackIds: ['a', 'b', 'c'], blend: true });
+    p = reducer(p, { type: 'measured', durations: { a: 300.6 } });
+    expect(p.library.tracks.a.duration).toBe(300.6);
+    expect(times(p)[1]).toEqual(['b', 268.6]);
+  });
+});

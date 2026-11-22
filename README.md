@@ -32,8 +32,15 @@ On a phone, Setcraft has its own layout: black, big type, and a bottom bar with 
 - **Playlist (the night)**: a timeline drawn to scale. Each card is as tall as its track plays and sits where
   it starts, so a 7-minute track is twice the height of a 3½-minute one, and blends really overlap. Later tracks
   sit on top. The part of a card the next one covers is its blend, shown striped with its length; the cards
-  alternate sides so both edges of a blend show. The left ruler gives each track's start time, the right one its
-  end, with a tick every minute; set the night's start time at the top for real times. A red line marks where
+  alternate sides so both edges of a blend show. The night always starts at 00:00 (remove or trim the first
+  track and everything moves up). The left ruler gives the time each track comes in, the right one the time it
+  ends, to a tenth of a second, with a tick every minute; set the night's start time at the top and the clock
+  time shows under each.
+  - **Exact times**: tap a time on the left ruler and type when that track should come in (e.g. `2:00.5`); the
+    tracks after it move with it, keeping their blends, and a message says how long before the previous track
+    ends it comes in. Tap a time on the right ruler and type when that track should end.
+  - **Real lengths**: once a track's audio has been opened (played, or prefetched as the night plays), its
+    length is measured from the audio itself, replacing the collection's, and the night is planned with it. A red line marks where
   the night is and moves at its real speed; the playing card has a red edge, and the view follows it while it
   plays. Zoom with **−** / **+** on the strip above; the middle button fits the tracks again.
   - **Levers**: drag the bar on a card's bottom edge up to end the track sooner (the card gets thinner and the

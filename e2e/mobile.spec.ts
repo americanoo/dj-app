@@ -80,9 +80,10 @@ test('the phone layout: library and night as cards, nothing wider than the scree
   await expect(page.locator('.m-ruler.left .m-ruler-label')).toHaveCount(3);
   await expect(page.locator('.m-now-line')).toBeVisible();
   await expect(page.locator('[data-playing=true]')).toHaveCount(1); // the first track is where the night is
-  // Real times once the night has a start time.
+  // The timeline counts from 00:00; with a start time, the clock shows underneath.
+  await expect(page.locator('.m-ruler.left .m-ruler-label input').first()).toHaveValue('00:00.0');
   await page.locator('.m-head input[aria-label="start time"]').fill('23:00');
-  await expect(page.locator('.m-ruler.left .m-ruler-label').first()).toHaveText('11:00');
+  await expect(page.locator('.m-ruler.left .m-ruler-label small').first()).toHaveText('11:00');
   await page.tap('nav[aria-label=main] button[aria-label=library]');
   await expect(page.locator('.m-card')).toHaveCount(3);
   await expect(page.locator('.m-title').first()).toHaveCSS('font-family', /Anton/);
@@ -362,4 +363,31 @@ test("a night card's key and BPM are how the track plays tonight: faster or slow
   await row(1).locator('input[aria-label=key]').fill('');
   await row(1).locator('input[aria-label=key]').press('Enter');
   await expect.poll(async () => (await plan())[1].semitones).toBeUndefined();
+});
+
+test('exact times on the rulers: type when the next track comes in, or when one ends; the night always starts at 00:00', async ({ page }) => {
+  await demoNight(page);
+  type Slot = { trackId: string; startsAt: number; playFor: number };
+  const plan = () => page.evaluate(() => (window as unknown as { __night: { plan: Slot[] } }).__night.plan.map((s) => ({ trackId: s.trackId, startsAt: s.startsAt, playFor: s.playFor })));
+  const p0 = await plan();
+  // The second track comes in at 2:00.5; the third follows with its blend unchanged.
+  const entrance = page.locator('.m-ruler.left input[aria-label^="when Warehouse Lights comes in"]');
+  await entrance.fill('2:00.5');
+  await entrance.press('Enter');
+  await expect.poll(async () => (await plan())[1].startsAt).toBeCloseTo(120.5, 3);
+  const p1 = await plan();
+  expect(p1[2].startsAt - p1[1].startsAt).toBeCloseTo(p0[2].startsAt - p0[1].startsAt, 3);
+  await expect(entrance).toHaveValue('02:00.5');
+  // The first track can't come in later than 00:00.
+  await expect(page.locator('.m-ruler.left .m-ruler-label input').first()).toBeDisabled();
+  // The first track ends at 1:50: typed on the right ruler, it plays exactly that long.
+  const end = page.locator('.m-ruler.right input[aria-label^="when Night Drive ends"]');
+  await end.fill('1:50');
+  await end.press('Enter');
+  await expect.poll(async () => (await plan())[0].playFor).toBeCloseTo(110, 3);
+  // Removing the first track: the night starts at 00:00 again.
+  await page.locator('button[aria-label="more for Night Drive"]').tap();
+  await page.tap('text=remove from night');
+  await expect.poll(async () => (await plan())[0].startsAt).toBe(0);
+  await expect(page.locator('.m-ruler.left .m-ruler-label input').first()).toHaveValue('00:00.0');
 });

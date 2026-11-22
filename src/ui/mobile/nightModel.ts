@@ -78,3 +78,12 @@ export function useNightIndex(items: TimelineItem[]): number {
   }, [items, night, playing, version]);
   return idx;
 }
+
+/** Time into the night to a tenth of a second: "03:42.5", "1:02:05.0" past an hour. */
+export function nightTime(sec: number): string {
+  const t = Math.max(0, Math.round(sec * 10) / 10);
+  const h = Math.floor(t / 3600);
+  const m = Math.floor((t % 3600) / 60);
+  const s = (t % 60).toFixed(1).padStart(4, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${s}` : `${String(m).padStart(2, '0')}:${s}`;
+}

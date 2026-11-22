@@ -9,8 +9,8 @@ import { useNight } from '../night';
 import { activeSet, useStore } from '../store';
 import { DotsIcon, HandleIcon } from './icons';
 import { ListTools, useListPrefs } from './ListTools';
-import { clockLabel, mmss, useNightTime } from './nightModel';
-import { TrackCard } from './TrackCard';
+import { clockLabel, mmss, nightTime, useNightTime } from './nightModel';
+import { TimeField, TrackCard } from './TrackCard';
 import { WaveStrip, type StripMode } from './WaveStrip';
 
 /** Card heights at which it shows everything / a line and its waveform / just its title. */
@@ -131,6 +131,23 @@ export function PlaylistScreen({
     if (Object.keys(patch).length) dispatch({ type: 'updateEntry', id: it.entry.id, patch });
   };
 
+  /** A time typed on a ruler: when a track comes in (left) or when it ends (right), in night time. */
+  const onRulerTime = (side: 'left' | 'right', i: number, v: number | undefined) => {
+    const it = items[i];
+    if (v === undefined || !it) return;
+    if (side === 'left') {
+      if (i === 0) return;
+      dispatch({ type: 'setEntrance', id: it.entry.id, at: v });
+      const prev = items[i - 1];
+      const overlap = prev.startsAt + prev.playFor - v;
+      notify(overlap > 0 ? `Comes in at ${nightTime(v)}, ${mmss(overlap)} before “${prev.track?.title}” ends.` : `Comes in at ${nightTime(v)}, ${mmss(-overlap)} after “${prev.track?.title}” ends.`);
+    } else {
+      const playFor = v - it.startsAt;
+      if (playFor < MIN_PLAY) return notify('The end has to come after the start.', 'error');
+      dispatch({ type: 'trimEntry', id: it.entry.id, edge: 'end', to: itemMixIn(it) + playFor * itemStretch(it) });
+    }
+  };
+
   // Each card's place: as tall as it plays; what the next card covers is its blend.
   const geo = useMemo(() => {
     const g = items.map((it, i) => {
@@ -211,8 +228,8 @@ export function PlaylistScreen({
           />
           <div className="m-scroll m-night" ref={scroller}>
             <div className="m-timeline" style={{ height: end * pps + 40 }}>
-              <Ruler side="left" items={items} pps={pps} end={end} startClock={set.startClock} />
-              <Ruler side="right" items={items} pps={pps} end={end} startClock={set.startClock} />
+              <Ruler side="left" items={items} pps={pps} end={end} startClock={set.startClock} onTime={onRulerTime} />
+              <Ruler side="right" items={items} pps={pps} end={end} startClock={set.startClock} onTime={onRulerTime} />
               <div className="m-lanes">
                 {items.map((it, i) => {
                   const moveBy = drag ? (drag.idx === i ? drag.dy : shiftFor(i, drag.idx, target, items, pps)) : 0;
@@ -565,25 +582,53 @@ function PlayingEdge({ it }: { it: TimelineItem }) {
 }
 
 /**
- * The clock down one side: when each track starts (left) or ends (right), in
- * real time once the night has a start time, with a tick every minute.
+ * The timeline down one side, counting from 00:00: when each track comes in
+ * (left) and ends (right), to a tenth of a second, with a tick every minute.
+ * Tap a time to type it: a track's entrance, or its end. With a start time set,
+ * the clock time shows underneath.
  */
-const Ruler = memo(function Ruler({ side, items, pps, end, startClock }: { side: 'left' | 'right'; items: TimelineItem[]; pps: number; end: number; startClock?: string }) {
+const Ruler = memo(function Ruler({
+  side,
+  items,
+  pps,
+  end,
+  startClock,
+  onTime,
+}: {
+  side: 'left' | 'right';
+  items: TimelineItem[];
+  pps: number;
+  end: number;
+  startClock?: string;
+  onTime: (side: 'left' | 'right', i: number, v: number | undefined) => void;
+}) {
   const minute = 60 * pps;
   const every = minute >= 8 ? 1 : minute * 5 >= 8 ? 5 : 15;
   const ticks: number[] = [];
   for (let m = 0; m * 60 <= end + 1; m += every) ticks.push(m * 60);
-  const marks = items.map((it) => (side === 'left' ? it.startsAt : it.startsAt + it.playFor));
   return (
-    <div className={`m-ruler ${side}`} aria-hidden="true">
+    <div className={`m-ruler ${side}`}>
       {ticks.map((s) => (
-        <i key={s} className={s % 300 === 0 ? 'major' : 'minor'} style={{ top: s * pps }} />
+        <i key={s} className={s % 300 === 0 ? 'major' : 'minor'} style={{ top: s * pps }} aria-hidden="true" />
       ))}
-      {marks.map((s, k) => (
-        <span key={k} className="m-ruler-label" style={{ top: s * pps }}>
-          {clockLabel(s, startClock)}
-        </span>
-      ))}
+      {items.map((it, k) => {
+        const s = side === 'left' ? it.startsAt : it.startsAt + it.playFor;
+        const title = it.track?.title ?? 'track';
+        return (
+          <span key={it.entry.id} className="m-ruler-label" style={{ top: s * pps }}>
+            <TimeField
+              className="m-ruler-time"
+              label={side === 'left' ? `when ${title} comes in` : `when ${title} ends`}
+              value={s}
+              format={(v) => (v === undefined ? '' : nightTime(v))}
+              width={side === 'left' && s >= 3600 ? 9 : 7}
+              disabled={side === 'left' && k === 0}
+              onCommit={(v) => onTime(side, k, v)}
+            />
+            {startClock && <small>{clockLabel(s, startClock)}</small>}
+          </span>
+        );
+      })}
     </div>
   );
 });
@@ -611,8 +656,11 @@ function NowLine({ pps, scroller, startClock }: { pps: number; scroller: RefObje
     if (y < el.scrollTop + 20 || y > el.scrollTop + el.clientHeight - 60) el.scrollTo({ top: Math.max(0, y - el.clientHeight / 3) });
   }, [y, night.playing, scroller]);
   return (
-    <div className="m-now-line" style={{ top: y }} aria-label={`now: ${clockLabel(t, startClock)}`}>
-      <span>{clockLabel(t, startClock)}</span>
+    <div className="m-now-line" style={{ top: y }} aria-label={`now: ${nightTime(t)}`}>
+      <span>
+        {nightTime(t)}
+        {startClock ? ` · ${clockLabel(t, startClock)}` : ''}
+      </span>
     </div>
   );
 }

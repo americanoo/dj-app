@@ -254,6 +254,13 @@ export class NightPlayer {
     return Math.max(0, this.startNight + (this.audioNow() - this.startCtx));
   }
 
+  /** Real lengths (seconds) of the tracks whose audio has been decoded. */
+  measuredDurations(): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const [id, buf] of this.ready) if (buf) out[id] = buf.duration;
+    return out;
+  }
+
   /** Track audio decoded and ready ('missing' when there's no file to play). */
   status(trackId: string): 'ready' | 'loading' | 'missing' | 'idle' {
     const r = this.ready.get(trackId);
