@@ -1,0 +1,47 @@
+name: Mac app
+
+# Builds Setcraft for Mac on a Mac and publishes it as the "mac-latest" pre-release,
+# so the newest build is always at the same download link.
+on:
+  push:
+    branches: [main, claude/dj-app-tracklist-cues-drr0z9]
+  workflow_dispatch:
+
+concurrency:
+  group: mac-app
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build
+        run: npm run desktop:build
+      - name: Package the .dmg (Apple silicon and Intel)
+        run: npx electron-builder --mac --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: setcraft-mac
+          path: release/*.dmg
+          retention-days: 14
+      - name: Publish as the latest Mac build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete mac-latest --yes --cleanup-tag || true
+          gh release create mac-latest release/*.dmg \
+            --prerelease \
+            --target "$GITHUB_SHA" \
+            --title "Setcraft for Mac (latest build)" \
+            --notes "Built from ${GITHUB_SHA::7} on ${GITHUB_REF_NAME}. Download Setcraft-…-arm64.dmg for Apple silicon (M1 and later), Setcraft-…-x64.dmg for Intel Macs. First open: see the README (Open Anyway)."

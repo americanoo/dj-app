@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<DJ_PLAYLISTS Version="1.0.0"><PRODUCT Name="rekordbox" Version="6.8.5" Company="AlphaTheta"/>
+<COLLECTION Entries="2">
+<TRACK TrackID="801" Name="A440" Artist="Tone" TotalTime="64" AverageBpm="120.00" Tonality="Am" Location="file://localhost/Users/dj/Music/Tones/Tone%20-%20A440.wav"><TEMPO Inizio="0.000" Bpm="120.00" Metro="4/4" Battito="1"/></TRACK>
+<TRACK TrackID="802" Name="B700" Artist="Tone" TotalTime="64" AverageBpm="132.00" Tonality="Bbm" Location="file://localhost/Users/dj/Music/Tones/Tone%20-%20B700.wav"><TEMPO Inizio="0.000" Bpm="132.00" Metro="4/4" Battito="1"/></TRACK>
+</COLLECTION><PLAYLISTS><NODE Type="0" Name="ROOT" Count="0"></NODE></PLAYLISTS></DJ_PLAYLISTS>

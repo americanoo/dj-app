@@ -1,0 +1,274 @@
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { del, delMany, get, keys, set as idbSet } from 'idb-keyval';
+import { analyseBands, type BandPeaks } from '../core/analysis';
+import { decodeWaveform, encodeWaveform, type StoredWaveform, type WaveformData } from '../core/waveform';
+
+/**
+ * Audio files the DJ has attached this session. They are only used for
+ * waveform display and preview playback and never leave the browser. Each
+ * waveform's shape (not the audio) is remembered in IndexedDB, so it can be
+ * shown on later visits before the file is attached again.
+ */
+export interface AttachedAudio extends WaveformData {
+  url: string;
+}
+
+export const PEAKS_PER_SECOND = 150;
+
+// Colour (three-band) waveforms. Single-colour ones saved by earlier versions
+// stay under the old prefix until the track is analysed again.
+const WAVEFORM_PREFIX = 'setcraft-waveform-v2:';
+const LEGACY_PREFIX = 'setcraft-waveform-v1:';
+const waveformKey = (trackId: string) => WAVEFORM_PREFIX + trackId;
+const legacyKey = (trackId: string) => LEGACY_PREFIX + trackId;
+const isWaveformKey = (k: IDBValidKey): k is string =>
+  typeof k === 'string' && (k.startsWith(WAVEFORM_PREFIX) || k.startsWith(LEGACY_PREFIX));
+
+interface AudioStore {
+  /** Attached this session: waveform plus playable audio. */
+  audio: Record<string, AttachedAudio>;
+  /** Remembered from an earlier session: waveform only. */
+  remembered: Record<string, WaveformData>;
+  /** Tracks that have a remembered waveform (loaded or not). */
+  rememberedIds: ReadonlySet<string>;
+  /** Of those, the single-colour ones from an earlier version, worth analysing again. */
+  outdatedIds: ReadonlySet<string>;
+  loading: Record<string, boolean>;
+  attach: (trackId: string, file: File) => Promise<AttachedAudio>;
+  /** Load a remembered waveform into `remembered`, if there is one. */
+  loadRemembered: (trackId: string) => Promise<void>;
+  /** A track's waveform from memory or storage, without loading it into view. */
+  getWaveform: (trackId: string) => Promise<WaveformData | undefined>;
+  forget: (trackId: string) => void;
+  forgetAll: () => void;
+  /** Decoded audio for playback, from the shared cache (decoded again only if it was let go). */
+  getBuffer: (trackId: string) => Promise<AudioBuffer | undefined>;
+}
+
+const Ctx = createContext<AudioStore | null>(null);
+
+let sharedContext: AudioContext | null = null;
+
+/** One AudioContext for decoding and playback, so decoded audio plays without resampling. */
+export function audioContext(): AudioContext {
+  sharedContext ??= new AudioContext({ latencyHint: 'interactive' });
+  return sharedContext;
+}
+
+// Browsers (Safari especially) keep audio switched off until the page is
+// clicked or a key is pressed, and can suspend it again later (after sleep, or
+// when another app takes the output). Switch it back on at every interaction.
+function unlockAudio() {
+  const c = sharedContext;
+  if (c && c.state !== 'running' && c.state !== 'closed') void c.resume().catch(() => undefined);
+}
+if (typeof window !== 'undefined') {
+  for (const type of ['pointerdown', 'keydown', 'touchend', 'click']) {
+    window.addEventListener(type, unlockAudio, { capture: true, passive: true });
+  }
+}
+
+let worker: Worker | null | undefined;
+let nextJob = 0;
+const jobs = new Map<number, (r: BandPeaks) => void>();
+
+function analysisWorker(): Worker | null {
+  if (worker !== undefined) return worker;
+  try {
+    worker = new Worker(new URL('./analysisWorker.ts', import.meta.url), { type: 'module' });
+    worker.onmessage = (e: MessageEvent<{ id: number; result: BandPeaks }>) => {
+      jobs.get(e.data.id)?.(e.data.result);
+      jobs.delete(e.data.id);
+    };
+  } catch {
+    worker = null;
+  }
+  return worker;
+}
+
+/** Three-band analysis, in a worker when available (the main thread otherwise). */
+function runAnalysis(buf: AudioBuffer): Promise<BandPeaks> {
+  const w = analysisWorker();
+  if (!w) {
+    const channels = Array.from({ length: buf.numberOfChannels }, (_, i) => buf.getChannelData(i));
+    return Promise.resolve(analyseBands(channels, buf.sampleRate, PEAKS_PER_SECOND));
+  }
+  // Copies, so the AudioBuffer stays playable after the data is transferred.
+  const channels = Array.from({ length: buf.numberOfChannels }, (_, i) => buf.getChannelData(i).slice());
+  const id = nextJob++;
+  return new Promise((resolve) => {
+    jobs.set(id, resolve);
+    w.postMessage(
+      { id, channels, sampleRate: buf.sampleRate, peaksPerSecond: PEAKS_PER_SECOND },
+      channels.map((c) => c.buffer),
+    );
+  });
+}
+
+/**
+ * Decoded audio, shared by everything that plays: the deck and the night
+ * player ask for a track here and get the same AudioBuffer, so a track is
+ * never held twice. Decoded audio is large (about 130 MB for six minutes of
+ * stereo), so only the few most recently used tracks are kept.
+ */
+const DECODED_MAX = 4;
+const decodedCache = new Map<string, Promise<AudioBuffer | undefined>>();
+
+/** A track's decoded audio: from the cache, or decoded from `load`'s bytes (and kept). */
+export function decodedAudio(trackId: string, load: () => Promise<ArrayBuffer | undefined>): Promise<AudioBuffer | undefined> {
+  const hit = decodedCache.get(trackId);
+  if (hit) {
+    // Most recently used goes to the back of the queue.
+    decodedCache.delete(trackId);
+    decodedCache.set(trackId, hit);
+    return hit;
+  }
+  const p = load()
+    .then((data) => (data ? audioContext().decodeAudioData(data) : undefined))
+    .catch(() => undefined);
+  decodedCache.set(trackId, p);
+  // Nothing to decode (no file yet): don't remember that, so it's tried again later.
+  void p.then((buf) => !buf && decodedCache.get(trackId) === p && decodedCache.delete(trackId));
+  while (decodedCache.size > DECODED_MAX) decodedCache.delete(decodedCache.keys().next().value!);
+  return p;
+}
+
+function keepDecoded(trackId: string, buf: AudioBuffer) {
+  decodedCache.delete(trackId);
+  decodedCache.set(trackId, Promise.resolve(buf));
+  while (decodedCache.size > DECODED_MAX) decodedCache.delete(decodedCache.keys().next().value!);
+}
+
+async function analyse(trackId: string, file: File): Promise<WaveformData> {
+  const buf = await audioContext().decodeAudioData(await file.arrayBuffer());
+  // A newly attached file replaces whatever was decoded for the track before.
+  keepDecoded(trackId, buf);
+  const r = await runAnalysis(buf);
+  return {
+    duration: buf.duration,
+    peaks: r.peaks,
+    bands: { low: r.low, mid: r.mid, high: r.high },
+    peaksPerSecond: r.peaksPerSecond,
+    fileName: file.name,
+  };
+}
+
+export function AudioProvider({ children }: { children: ReactNode }) {
+  const [audio, setAudio] = useState<Record<string, AttachedAudio>>({});
+  const [remembered, setRemembered] = useState<Record<string, WaveformData>>({});
+  const [rememberedIds, setRememberedIds] = useState<ReadonlySet<string>>(new Set());
+  const [outdatedIds, setOutdatedIds] = useState<ReadonlySet<string>>(new Set());
+  const [loading, setLoading] = useState<Record<string, boolean>>({});
+
+  // Only the keys are read up front; waveforms load when a track is opened.
+  useEffect(() => {
+    keys()
+      .then((all) => {
+        const strings = all.filter((k): k is string => typeof k === 'string');
+        const colour = new Set(strings.filter((k) => k.startsWith(WAVEFORM_PREFIX)).map((k) => k.slice(WAVEFORM_PREFIX.length)));
+        const legacy = strings
+          .filter((k) => k.startsWith(LEGACY_PREFIX))
+          .map((k) => k.slice(LEGACY_PREFIX.length))
+          .filter((id) => !colour.has(id));
+        setRememberedIds(new Set([...colour, ...legacy]));
+        setOutdatedIds(new Set(legacy));
+      })
+      .catch(() => undefined);
+  }, []);
+
+  const attach = useCallback(async (trackId: string, file: File) => {
+    setLoading((l) => ({ ...l, [trackId]: true }));
+    try {
+      const info = await analyse(trackId, file);
+      const entry: AttachedAudio = { ...info, url: URL.createObjectURL(file) };
+      setAudio((a) => {
+        if (a[trackId]) URL.revokeObjectURL(a[trackId].url);
+        return { ...a, [trackId]: entry };
+      });
+      setRemembered(({ [trackId]: _, ...rest }) => rest); // the fresh analysis replaces any old one
+      idbSet(waveformKey(trackId), encodeWaveform(info))
+        .then(() => {
+          del(legacyKey(trackId)).catch(() => undefined);
+          setRememberedIds((s) => new Set(s).add(trackId));
+          setOutdatedIds((s) => {
+            const n = new Set(s);
+            n.delete(trackId);
+            return n;
+          });
+        })
+        .catch(() => undefined); // storage full or unavailable: still works this session
+      return entry;
+    } finally {
+      setLoading((l) => ({ ...l, [trackId]: false }));
+    }
+  }, []);
+
+  const loadRemembered = useCallback(async (trackId: string) => {
+    const stored =
+      (await get<StoredWaveform>(waveformKey(trackId)).catch(() => undefined)) ??
+      (await get<StoredWaveform>(legacyKey(trackId)).catch(() => undefined));
+    const w = decodeWaveform(stored);
+    if (w) setRemembered((r) => ({ ...r, [trackId]: w }));
+  }, []);
+
+  const audioRef = useRef(audio);
+  audioRef.current = audio;
+  const rememberedRef = useRef(remembered);
+  rememberedRef.current = remembered;
+  const getWaveform = useCallback(async (trackId: string) => {
+    const live = audioRef.current[trackId] ?? rememberedRef.current[trackId];
+    if (live) return live;
+    const stored =
+      (await get<StoredWaveform>(waveformKey(trackId)).catch(() => undefined)) ??
+      (await get<StoredWaveform>(legacyKey(trackId)).catch(() => undefined));
+    return decodeWaveform(stored);
+  }, []);
+
+  const forget = useCallback((trackId: string) => {
+    del(waveformKey(trackId)).catch(() => undefined);
+    del(legacyKey(trackId)).catch(() => undefined);
+    setRemembered(({ [trackId]: _, ...rest }) => rest);
+    setOutdatedIds((s) => {
+      const n = new Set(s);
+      n.delete(trackId);
+      return n;
+    });
+    setRememberedIds((s) => {
+      const n = new Set(s);
+      n.delete(trackId);
+      return n;
+    });
+  }, []);
+
+  const forgetAll = useCallback(() => {
+    keys()
+      .then((all) => delMany(all.filter(isWaveformKey)))
+      .catch(() => undefined);
+    setRemembered({});
+    setRememberedIds(new Set());
+    setOutdatedIds(new Set());
+  }, []);
+
+  const getBuffer = useCallback(
+    async (trackId: string) => {
+      const a = audio[trackId];
+      if (!a) return undefined;
+      return decodedAudio(trackId, async () => (await fetch(a.url)).arrayBuffer());
+    },
+    [audio],
+  );
+
+  return (
+    <Ctx.Provider value={{ audio, remembered, rememberedIds, outdatedIds, loading, attach, loadRemembered, getWaveform, forget, forgetAll, getBuffer }}>
+      {children}
+    </Ctx.Provider>
+  );
+}
+
+export function useAudio(): AudioStore {
+  const s = useContext(Ctx);
+  if (!s) throw new Error('useAudio outside provider');
+  return s;
+}
+
+export const AUDIO_EXTENSIONS = /\.(mp3|wav|aiff?|flac|m4a|mp4|aac|ogg|opus)$/i;

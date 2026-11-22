@@ -1,0 +1,27 @@
+# Setcraft for Mac: npm run desktop:dist (on a Mac), or the "Mac app" GitHub workflow.
+appId: app.setcraft.desktop
+productName: Setcraft
+copyright: Setcraft
+directories:
+  output: release
+  buildResources: desktop
+files:
+  - dist/**
+  - desktop/build/**
+  - desktop/preload.cjs
+  - package.json
+  - "!**/*.map"
+mac:
+  category: public.app-category.music
+  icon: desktop/icon.png
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+  # No Apple Developer certificate yet: signed ad hoc, so it runs on Apple silicon;
+  # the first open needs "Open Anyway" (see the README).
+  identity: "-"
+  hardenedRuntime: false
+  gatekeeperAssess: false
+dmg:
+  title: Setcraft
+artifactName: Setcraft-${version}-${arch}.${ext}
